@@ -2685,6 +2685,22 @@ const HexGridWithToolbar = () => {
       // Close atom input if open
       setShowAtomInput(false);
       
+      // First check if we're erasing an arrow (straight or equilibrium)
+      const { index: arrowIndex } = isPointInArrowCircle(x, y, true);
+      if (arrowIndex !== -1) {
+        // Remove this arrow
+        setArrows(arrows => arrows.filter((_, i) => i !== arrowIndex));
+        return;
+      }
+      
+      // Check if we're erasing a curved arrow
+      const curvedArrowIndex = isPointOnCurvedArrow(x, y);
+      if (curvedArrowIndex !== -1) {
+        // Remove this curved arrow
+        setArrows(arrows => arrows.filter((_, i) => i !== curvedArrowIndex));
+        return;
+      }
+      
       // Erase any bond or atom under cursor
       let bondRemoved = false;
       let removedSegment = null;
@@ -3128,6 +3144,79 @@ const HexGridWithToolbar = () => {
     
     return { index: -1, part: null }; // No arrow circle or triangle was clicked
   }, [arrows, mode, offset]);
+
+  // Helper function to check if a point is near a curved arrow path
+  const isPointOnCurvedArrow = useCallback((x, y) => {
+    // Check distance to each curved arrow
+    for (let i = 0; i < arrows.length; i++) {
+      const arrow = arrows[i];
+      
+      // Only process curved arrows
+      if (!arrow.type || !arrow.type.startsWith('curve')) continue;
+      
+      // Add screen offset to arrow coordinates
+      const ox1 = arrow.x1 + offset.x;
+      const oy1 = arrow.y1 + offset.y;
+      const ox2 = arrow.x2 + offset.x;
+      const oy2 = arrow.y2 + offset.y;
+      
+      // Calculate distance and midpoint between the two points
+      const deltaX = ox2 - ox1;
+      const deltaY = oy2 - oy1;
+      const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+      const midX = (ox1 + ox2) / 2;
+      const midY = (oy1 + oy2) / 2;
+      
+      // Perpendicular vector to the line from start to end
+      const perpX = -deltaY / (distance || 1);
+      const perpY = deltaX / (distance || 1);
+      
+      // Determine direction and curvature level
+      const isTopRow = ['curve0', 'curve1', 'curve2'].includes(arrow.type);
+      const curvatureMap = {
+        'curve0': 0.25, 'curve1': 0.6, 'curve2': 1.0,
+        'curve3': 0.25, 'curve4': 0.6, 'curve5': 1.0
+      };
+      
+      // Get curvature factor for this arrow type
+      const curveFactor = curvatureMap[arrow.type] || 0.5;
+      
+      // Calculate arc parameters
+      const arcHeight = distance * curveFactor;
+      const radius = (arcHeight / 2) + (distance * distance / (8 * arcHeight));
+      
+      // Calculate the center point of the circle
+      let centerX, centerY;
+      if (isTopRow) {
+        // Clockwise arrows (top row) - center below the line
+        centerX = midX - perpX * (radius - arcHeight);
+        centerY = midY - perpY * (radius - arcHeight);
+      } else {
+        // Counterclockwise arrows (bottom row) - center above the line
+        centerX = midX + perpX * (radius - arcHeight);
+        centerY = midY + perpY * (radius - arcHeight);
+      }
+      
+      // Calculate distance from point to center of the arc
+      const dx = x - centerX;
+      const dy = y - centerY;
+      const distanceToCenter = Math.sqrt(dx * dx + dy * dy);
+      
+      // Simplified approach: check if point is near the arc by checking distance to the center
+      const distanceToArc = Math.abs(distanceToCenter - radius);
+      
+      // Also check if point is near start or end points
+      const distanceToStart = Math.sqrt((x - ox1) * (x - ox1) + (y - oy1) * (y - oy1));
+      const distanceToEnd = Math.sqrt((x - ox2) * (x - ox2) + (y - oy2) * (y - oy2));
+      
+      // If point is close to the arc or either endpoint, consider it a hit
+      if (distanceToArc <= 15 || distanceToStart <= 15 || distanceToEnd <= 15) {
+        return i; // Return the index of the arrow
+      }
+    }
+    
+    return -1; // No curved arrow was clicked
+  }, [arrows, offset]);
 
   // Dragging handlers...
   const handleMouseDown = event => {
@@ -4056,45 +4145,51 @@ const HexGridWithToolbar = () => {
     }}>
       {/* Toolbar */}
       <div style={{
-        width: 'clamp(120px, 16.66vw, 320px)',
-        minWidth: 0,
+        width: 'min(240px, 25vw)',
+        minWidth: '160px',
         maxWidth: '100vw',
+        height: 'auto',
+        minHeight: '92vh',
         background: 'linear-gradient(to bottom, rgb(19,26,38), rgb(15,40,30))',
         backgroundImage: `
           linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
           linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
           linear-gradient(to bottom, rgb(21,28,40), rgb(15,40,32))`,
-        backgroundSize: '90px 90px, 90px 90px, 100% 100%',
-        backgroundPosition: '0 0, 45px 45px, 0 0',
-        padding: '10px 12px 20px 12px',
+        backgroundSize: 'calc(min(280px, 25vw) * 0.28) calc(min(280px, 25vw) * 0.28), calc(min(280px, 25vw) * 0.28) calc(min(280px, 25vw) * 0.28), 100% 100%',
+        backgroundPosition: '0 0, calc(min(280px, 25vw) * 0.14) calc(min(280px, 25vw) * 0.14), 0 0',
+        padding: 'calc(min(280px, 25vw) * 0.031) calc(min(280px, 25vw) * 0.0375) calc(min(280px, 25vw) * 0.0625) calc(min(280px, 25vw) * 0.0375)',
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
-        gap: '10px',
+        gap: 'max(4px, min(calc(min(280px, 25vw) * 0.031), 2vh))',
         position: 'absolute',
         top: '2vh',
-        left: 'calc(4vw - 28px)',
+        left: 'max(calc(4vw - 28px), 8px)',
         bottom: '4vh',
-        borderRadius: '10px',
+        borderRadius: 'calc(min(280px, 25vw) * 0.031)',
         boxShadow: '0 8px 32px rgba(0,0,0,0.28)',
-        border: '3px solid rgba(0, 208, 24, 0.53)',
+        border: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)',
         zIndex: 2,
-        justifyContent: 'flex-start',
+        justifyContent: 'space-between',
         alignItems: 'stretch',
-        touchAction: 'none'
+        touchAction: 'none',
+        overflowY: 'auto',
+        overflowX: 'hidden',
+        scrollbarWidth: 'thin',
+        scrollbarColor: 'rgba(255,255,255,0.2) transparent'
       }}>
         {/* Toolbar Title */}
         <div style={{
-          color: '#888', // darker gray
+          color: '#888',
           fontWeight: 600,
-          fontSize: '1.05rem', // slightly smaller
+          fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
-          marginBottom: '2px', // even less margin
-          textAlign: 'left', // align left
+          marginBottom: 'calc(min(280px, 25vw) * 0.006)',
+          textAlign: 'left',
           userSelect: 'none',
         }}>Create</div>
         {/* Draw/Erase Buttons as icon buttons side by side */}
-        <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', marginBottom: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0 }}>
           <button
             onClick={() => setMode('draw')}
             style={{
@@ -4105,19 +4200,18 @@ const HexGridWithToolbar = () => {
               justifyContent: 'center',
               backgroundColor: mode === 'draw' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
               outline: 'none',
               padding: 0,
-              width: '44px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
             }}
             title="Draw Mode"
           >
             {/* Pencil SVG */}
-            <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 20h9" />
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
             </svg>
@@ -4132,19 +4226,18 @@ const HexGridWithToolbar = () => {
               justifyContent: 'center',
               backgroundColor: mode === 'erase' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
               outline: 'none',
               padding: 0,
-              width: '44px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
             }}
             title="Erase Mode"
           >
             {/* Minimalist Eraser: Rotated rectangle, bifurcated */}
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none">
               <g transform="rotate(45 13 13)">
                 <rect x="6" y="10" width="14" height="6" rx="1.5" fill="#fff" stroke="#fff" strokeWidth="1.5"/>
                 <line x1="13" y1="10" x2="13" y2="16" stroke="#23395d" strokeWidth="1.5"/>
@@ -4153,7 +4246,7 @@ const HexGridWithToolbar = () => {
           </button>
         </div>
         {/* Buttons for charges/lone pairs */}
-        <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', marginBottom: 0, marginTop: '2px' }}>
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0, marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))' }}>
           <button
             onClick={() => setMode(mode === 'plus' ? 'draw' : 'plus')}
             style={{
@@ -4164,19 +4257,18 @@ const HexGridWithToolbar = () => {
               justifyContent: 'center',
               backgroundColor: mode === 'plus' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
               outline: 'none',
               padding: 0,
-              width: '44px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
             }}
             title="Add Positive Charge"
           >
             {/* Plus sign in circle SVG */}
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none">
               <circle cx="13" cy="13" r="9" stroke="#fff" strokeWidth="2.2" fill="none" />
               <g stroke="#fff" strokeWidth="2.2" strokeLinecap="round">
                 <line x1="13" y1="8.5" x2="13" y2="17.5" />
@@ -4194,19 +4286,18 @@ const HexGridWithToolbar = () => {
               justifyContent: 'center',
               backgroundColor: mode === 'minus' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
               outline: 'none',
               padding: 0,
-              width: '44px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
             }}
             title="Add Negative Charge"
           >
             {/* Minus sign in circle SVG */}
-            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none">
               <circle cx="13" cy="13" r="9" stroke="#fff" strokeWidth="2.2" fill="none" />
               <line x1="8.5" y1="13" x2="17.5" y2="13" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
             </svg>
@@ -4221,19 +4312,18 @@ const HexGridWithToolbar = () => {
               justifyContent: 'center',
               backgroundColor: mode === 'lone' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(320px, 33.33vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
               outline: 'none',
               padding: 0,
-              width: '44px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
             }}
             title="Add Lone Pair"
           >
             {/* Two dots SVG */}
-            <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <svg width="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" height="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" viewBox="0 0 22 22" fill="none">
               <circle cx="8" cy="11" r="2.1" fill="#fff" />
               <circle cx="14" cy="11" r="2.1" fill="#fff" />
             </svg>
@@ -4241,7 +4331,7 @@ const HexGridWithToolbar = () => {
         </div>
 
         {/* Mouse and Text mode buttons */}
-        <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', marginTop: '2px' }}>
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))' }}>
           <button
             onClick={() => setMode(mode === 'mouse' ? 'draw' : 'mouse')}
             style={{
@@ -4252,19 +4342,18 @@ const HexGridWithToolbar = () => {
               justifyContent: 'center',
               backgroundColor: mode === 'mouse' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
               outline: 'none',
               padding: 0,
-              width: '44px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
             }}
             title="Mouse Mode"
           >
             {/* Mouse cursor SVG - bigger with handle */}
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none">
               <path d="M6 3L12 17L14.5 12.5L19 10.5L6 3Z" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round"/>
               <rect x="16.3" y="16" width="3.5" height="7" rx="1.5" fill="#fff" stroke="#fff" strokeWidth="0.5" transform="rotate(316 12.75 18.5)"/>
             </svg>
@@ -4279,19 +4368,18 @@ const HexGridWithToolbar = () => {
               justifyContent: 'center',
               backgroundColor: mode === 'text' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
               outline: 'none',
               padding: 0,
-              width: '44px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
             }}
             title="Text Mode"
           >
             {/* Text "T" SVG - bigger and Times New Roman font */}
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none">
               <text x="5" y="18" fill="#fff" style={{ font: 'bold 20px "Times New Roman", serif' }}>T</text>
             </svg>
           </button>
@@ -4299,28 +4387,27 @@ const HexGridWithToolbar = () => {
         
         {/* Reactions Section Title */}
         <div style={{
-          color: '#888', // darker gray
+          color: '#888',
           fontWeight: 600,
-          fontSize: '1.05rem', // slightly smaller
+          fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
-          marginTop: '10px', // same spacing as 'Reactions'
+          marginTop: 'max(8px, min(calc(min(280px, 25vw) * 0.031), 2vh))',
           textAlign: 'left',
           userSelect: 'none',
         }}>Reactions</div>
         {/* Arrow and Equilibrium Arrow Buttons side by side */}
-        <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(6px, calc(min(280px, 25vw) * 0.025))' }}>
           <button
             onClick={() => setMode('arrow')}
             style={{
               flex: 1,
-              width: '64px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: mode === 'arrow' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4329,7 +4416,7 @@ const HexGridWithToolbar = () => {
             }}
             title="Arrow"
           >
-            <svg width="46" height="26" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
               <line x1="6" y1="13" x2="32" y2="13" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
               <polygon points="32,7 44,13 32,19" fill="white" />
             </svg>
@@ -4338,14 +4425,13 @@ const HexGridWithToolbar = () => {
             onClick={() => setMode('equil')}
             style={{
               flex: 1,
-              width: '64px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: mode === 'equil' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4354,7 +4440,7 @@ const HexGridWithToolbar = () => {
             }}
             title="Equilibrium Arrow"
           >
-            <svg width="46" height="26" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
               {/* Top arrow: left to right */}
               <line x1="8" y1="10" x2="34" y2="10" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
               <polygon points="34,5 44,10 34,15" fill="white" />
@@ -4368,18 +4454,17 @@ const HexGridWithToolbar = () => {
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '8px',
+          gap: 'max(4px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))',
           marginTop: '0px',
         }}>
           {/* Arrow 1: CCW Shallow (Top Left) */}
           <button
             onClick={() => setMode('curve0')}
             style={{
-              width: '70px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve0' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4395,11 +4480,10 @@ const HexGridWithToolbar = () => {
           <button
             onClick={() => setMode('curve1')}
             style={{
-              width: '70px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve1' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4415,11 +4499,10 @@ const HexGridWithToolbar = () => {
           <button
             onClick={() => setMode('curve2')}
             style={{
-              width: '70px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve2' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4435,11 +4518,10 @@ const HexGridWithToolbar = () => {
           <button
             onClick={() => setMode('curve3')}
             style={{
-              width: '70px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve3' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4455,11 +4537,10 @@ const HexGridWithToolbar = () => {
           <button
             onClick={() => setMode('curve4')}
             style={{
-              width: '70px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve4' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4475,11 +4556,10 @@ const HexGridWithToolbar = () => {
           <button
             onClick={() => setMode('curve5')}
             style={{
-              width: '70px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve5' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4494,28 +4574,27 @@ const HexGridWithToolbar = () => {
         </div>
         {/* Stereochemistry Section Title */}
         <div style={{
-          color: '#888', // darker gray
+          color: '#888',
           fontWeight: 600,
-          fontSize: '1.05rem', // same size as 'Create' and 'Reactions'
+          fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
-          marginTop: '10px', // same spacing as 'Reactions'
+          marginTop: 'max(8px, min(calc(min(280px, 25vw) * 0.031), 2vh))',
           textAlign: 'left',
           userSelect: 'none',
         }}>Stereochemistry</div>
         {/* Stereochemistry buttons - wedge, dash, ambiguous */}
-        <div style={{ display: 'flex', flexDirection: 'row', gap: '8px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(6px, calc(min(280px, 25vw) * 0.025))' }}>
           <button
             onClick={() => setMode('wedge')}
             style={{
               flex: 1,
-              width: '64px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: mode === 'wedge' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4524,7 +4603,7 @@ const HexGridWithToolbar = () => {
             }}
             title="Wedge Bond"
           >
-            <svg width="46" height="26" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
               <polygon points="6,13 38,6 38,20" fill="white" />
             </svg>
           </button>
@@ -4532,14 +4611,13 @@ const HexGridWithToolbar = () => {
             onClick={() => setMode('dash')}
             style={{
               flex: 1,
-              width: '64px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: mode === 'dash' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4548,7 +4626,7 @@ const HexGridWithToolbar = () => {
             }}
             title="Dash Bond"
           >
-            <svg width="46" height="26" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
               {/* Updated dash bond icon to better reflect actual appearance with perpendicular lines that get progressively wider */}
               <g transform="translate(6, 13)">
                 <line x1="0" y1="0" x2="32" y2="0" stroke="#fff" strokeWidth="1" strokeOpacity="0.0" />
@@ -4565,14 +4643,13 @@ const HexGridWithToolbar = () => {
             onClick={() => setMode('ambiguous')}
             style={{
               flex: 1,
-              width: '64px',
-              height: '44px',
+              height: 'min(44px, 7vh)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: mode === 'ambiguous' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: '6px',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
               transition: 'background 0.2s',
@@ -4581,7 +4658,7 @@ const HexGridWithToolbar = () => {
             }}
             title="Ambiguous Bond"
           >
-            <svg width="46" height="26" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
               <path
                 d= " M 4 13 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0"
                 stroke="white"
@@ -4592,31 +4669,32 @@ const HexGridWithToolbar = () => {
             </svg>
           </button>
         </div>
-        <div style={{ flex: 1 }} />
+        <div style={{ flex: 1, minHeight: '10px' }} />
         <button
           onClick={handleEraseAll}
           style={{
             width: '100%',
-            padding: '6px 0', // reduced vertical padding for a shorter button
-            backgroundColor: '#23395d', // same as other buttons
+            padding: 'calc(min(280px, 25vw) * 0.019) 0',
+            backgroundColor: '#23395d',
             color: '#fff',
             border: 'none',
-            borderRadius: '8px', // less dramatic curve for erase all button
+            borderRadius: 'calc(min(280px, 25vw) * 0.025)',
             cursor: 'pointer',
             boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            fontSize: '1.1rem',
+            fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
             fontWeight: 700,
             marginTop: 0,
+            marginBottom: 'max(6px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))',
             outline: 'none',
             transition: 'background 0.2s',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '8px',
+            gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
           }}
         >
           {/* Taller Trash Can SVG */}
-          <svg width="26" height="30" viewBox="0 0 26 30" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(24px, calc(min(280px, 25vw) * 0.094))" viewBox="0 0 26 30" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
             <rect x="4" y="8" width="18" height="18" rx="2.5"/>
             <path d="M9 8V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/>
             <line x1="11" y1="13" x2="11" y2="22"/>
