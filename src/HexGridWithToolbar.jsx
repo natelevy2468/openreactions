@@ -2313,31 +2313,20 @@ const HexGridWithToolbar = () => {
     // Get curvature factor for this arrow type
     const curveFactor = curvatureMap[type] || 0.5;
     
-    // Calculate arc parameters - this must match the drawing function exactly
-    const arcHeight = distance * curveFactor;
-    const radius = (arcHeight / 2) + (distance * distance / (8 * arcHeight));
+    // Calculate peak position directly - simpler and more predictable
+    const peakHeight = distance * curveFactor;
     
-    // Calculate the center point of the circle - matching the drawing function
-    let centerX, centerY;
+    // Calculate peak position by moving perpendicular to the line
+    let peakX, peakY;
     if (isTopRow) {
-      // Clockwise arrows (top row) - center below the line
-      centerX = midX - perpX * (radius - arcHeight);
-      centerY = midY - perpY * (radius - arcHeight);
+      // Clockwise arrows (top row) - peak below the line
+      peakX = midX - perpX * peakHeight;
+      peakY = midY - perpY * peakHeight;
     } else {
-      // Counterclockwise arrows (bottom row) - center above the line
-      centerX = midX + perpX * (radius - arcHeight);
-      centerY = midY + perpY * (radius - arcHeight);
+      // Counterclockwise arrows (bottom row) - peak above the line
+      peakX = midX + perpX * peakHeight;
+      peakY = midY + perpY * peakHeight;
     }
-    
-    // The peak is the point on the circle in the direction from center to midpoint
-    // Calculate the direction from center to midpoint
-    const dirX = midX - centerX;
-    const dirY = midY - centerY;
-    const dirLength = Math.sqrt(dirX * dirX + dirY * dirY);
-    
-    // Normalize the direction and scale by radius
-    const peakX = centerX + (dirX / dirLength) * radius;
-    const peakY = centerY + (dirY / dirLength) * radius;
     
     return { x: peakX, y: peakY };
   };
@@ -2378,15 +2367,21 @@ const HexGridWithToolbar = () => {
     const normalizedTangentX = tangentX / tangentLength;
     const normalizedTangentY = tangentY / tangentLength;
     
-    // Draw arrowhead
+    // Draw arrowhead - move triangle forward so its center is at the curve end
     const headlen = 14;
-    const arrowX = endX - headlen * normalizedTangentX;
-    const arrowY = endY - headlen * normalizedTangentY;
+    const triangleOffset = 7; // Move triangle forward by half its width
+    
+    // Move the tip forward along the tangent
+    const arrowTipX = endX + triangleOffset * normalizedTangentX;
+    const arrowTipY = endY + triangleOffset * normalizedTangentY;
+    
+    const arrowX = arrowTipX - headlen * normalizedTangentX;
+    const arrowY = arrowTipY - headlen * normalizedTangentY;
     
     const angle = Math.atan2(normalizedTangentY, normalizedTangentX);
     
     ctx.beginPath();
-    ctx.moveTo(endX, endY);
+    ctx.moveTo(arrowTipX, arrowTipY);
     ctx.lineTo(
       arrowX - 7 * Math.sin(angle),
       arrowY + 7 * Math.cos(angle)
@@ -2420,21 +2415,28 @@ const HexGridWithToolbar = () => {
       ctx.fill();
       
       // Blue circle at peak point
-      // Get the arrow data to retrieve stored peak position
-      const arrow = arrowsArray && arrowIndex >= 0 ? arrowsArray[arrowIndex] : null;
-      if (arrow && arrow.peakX !== undefined && arrow.peakY !== undefined) {
-        const peakX = arrow.peakX + offset.x;
-        const peakY = arrow.peakY + offset.y;
+      // For quadratic Bezier curves, the actual peak on the curve at t=0.5 is:
+      // P(0.5) = 0.25 * P0 + 0.5 * P1 + 0.25 * P2
+      // where P0=start, P1=control point (peakX,peakY), P2=end
+      if (peakX !== null && peakY !== null) {
+        // Calculate the actual point on the curve at t=0.5
+        const actualCurvePeakX = 0.25 * startX + 0.5 * peakX + 0.25 * endX;
+        const actualCurvePeakY = 0.25 * startY + 0.5 * peakY + 0.25 * endY;
+        
         ctx.beginPath();
-        ctx.arc(peakX, peakY, circleRadius, 0, 2 * Math.PI);
+        ctx.arc(actualCurvePeakX, actualCurvePeakY, circleRadius, 0, 2 * Math.PI);
         ctx.fillStyle = isHoveredPeak ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
         ctx.fill();
       } else {
-        // Fallback: calculate peak if not stored
+        // Fallback: calculate peak if not provided
         const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, type);
         if (peakPos) {
+          // Calculate actual curve peak from control point
+          const actualCurvePeakX = 0.25 * startX + 0.5 * peakPos.x + 0.25 * endX;
+          const actualCurvePeakY = 0.25 * startY + 0.5 * peakPos.y + 0.25 * endY;
+          
           ctx.beginPath();
-          ctx.arc(peakPos.x, peakPos.y, circleRadius, 0, 2 * Math.PI);
+          ctx.arc(actualCurvePeakX, actualCurvePeakY, circleRadius, 0, 2 * Math.PI);
           ctx.fillStyle = isHoveredPeak ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
           ctx.fill();
         }
@@ -3288,36 +3290,40 @@ const HexGridWithToolbar = () => {
       // Get curvature factor for this arrow type
       const curveFactor = curvatureMap[arrow.type] || 0.5;
       
-      // Calculate arc parameters
-      const arcHeight = distance * curveFactor;
-      const radius = (arcHeight / 2) + (distance * distance / (8 * arcHeight));
+      // Calculate control point position for hit detection
+      const peakHeight = distance * curveFactor;
       
-      // Calculate the center point of the circle
-      let centerX, centerY;
+      // Calculate control point position by moving perpendicular to the line
+      let controlX, controlY;
       if (isTopRow) {
-        // Clockwise arrows (top row) - center below the line
-        centerX = midX - perpX * (radius - arcHeight);
-        centerY = midY - perpY * (radius - arcHeight);
+        // Clockwise arrows (top row) - control point below the line
+        controlX = midX - perpX * peakHeight;
+        controlY = midY - perpY * peakHeight;
       } else {
-        // Counterclockwise arrows (bottom row) - center above the line
-        centerX = midX + perpX * (radius - arcHeight);
-        centerY = midY + perpY * (radius - arcHeight);
+        // Counterclockwise arrows (bottom row) - control point above the line
+        controlX = midX + perpX * peakHeight;
+        controlY = midY + perpY * peakHeight;
       }
       
-      // Calculate distance from point to center of the arc
-      const dx = x - centerX;
-      const dy = y - centerY;
-      const distanceToCenter = Math.sqrt(dx * dx + dy * dy);
+      // If arrow has stored peak position, use that instead
+      if (arrow.peakX !== undefined && arrow.peakY !== undefined) {
+        controlX = arrow.peakX + offset.x;
+        controlY = arrow.peakY + offset.y;
+      }
       
-      // Simplified approach: check if point is near the arc by checking distance to the center
-      const distanceToArc = Math.abs(distanceToCenter - radius);
+      // Calculate actual curve peak from control point
+      const actualPeakX = 0.25 * ox1 + 0.5 * controlX + 0.25 * ox2;
+      const actualPeakY = 0.25 * oy1 + 0.5 * controlY + 0.25 * oy2;
+      
+      // Check if point is near the curve by checking distance to the actual peak
+      const distanceToPeak = Math.sqrt((x - actualPeakX) * (x - actualPeakX) + (y - actualPeakY) * (y - actualPeakY));
       
       // Also check if point is near start or end points
       const distanceToStart = Math.sqrt((x - ox1) * (x - ox1) + (y - oy1) * (y - oy1));
       const distanceToEnd = Math.sqrt((x - ox2) * (x - ox2) + (y - oy2) * (y - oy2));
       
-      // If point is close to the arc or either endpoint, consider it a hit
-      if (distanceToArc <= 15 || distanceToStart <= 15 || distanceToEnd <= 15) {
+      // If point is close to the peak or either endpoint, consider it a hit
+      if (distanceToPeak <= 30 || distanceToStart <= 15 || distanceToEnd <= 15) {
         return i; // Return the index of the arrow
       }
     }
@@ -3358,23 +3364,27 @@ const HexGridWithToolbar = () => {
         return { index: i, part: 'end' }; // End of the curved arrow
       }
       
-      // Check if within the peak circle
-      let peakX, peakY;
+      // Check if within the peak circle (actual curve peak, not control point)
+      let controlX, controlY;
       if (arrow.peakX !== undefined && arrow.peakY !== undefined) {
-        // Use stored peak position
-        peakX = arrow.peakX + offset.x;
-        peakY = arrow.peakY + offset.y;
+        // Use stored control point position
+        controlX = arrow.peakX + offset.x;
+        controlY = arrow.peakY + offset.y;
       } else {
-        // Calculate peak position if not stored
+        // Calculate control point position if not stored
         const peakPos = calculateCurvedArrowPeak(ox1, oy1, ox2, oy2, arrow.type);
         if (peakPos) {
-          peakX = peakPos.x;
-          peakY = peakPos.y;
+          controlX = peakPos.x;
+          controlY = peakPos.y;
         }
       }
       
-      if (peakX !== undefined && peakY !== undefined) {
-        const peakDistance = Math.sqrt((x - peakX) * (x - peakX) + (y - peakY) * (y - peakY));
+      if (controlX !== undefined && controlY !== undefined) {
+        // Calculate actual curve peak from control point
+        const actualPeakX = 0.25 * ox1 + 0.5 * controlX + 0.25 * ox2;
+        const actualPeakY = 0.25 * oy1 + 0.5 * controlY + 0.25 * oy2;
+        
+        const peakDistance = Math.sqrt((x - actualPeakX) * (x - actualPeakX) + (y - actualPeakY) * (y - actualPeakY));
         if (peakDistance <= circleRadius) {
           return { index: i, part: 'peak' }; // Peak of the curved arrow
         }
@@ -3473,25 +3483,29 @@ const HexGridWithToolbar = () => {
           pointX = arrow.x2 + offset.x;
           pointY = arrow.y2 + offset.y;
         } else if (curvedArrowPart === 'peak') {
-          // Peak of curved arrow
+          // Peak of curved arrow - need to calculate actual curve peak position
+          const startX = arrow.x1 + offset.x;
+          const startY = arrow.y1 + offset.y;
+          const endX = arrow.x2 + offset.x;
+          const endY = arrow.y2 + offset.y;
+          
+          let controlX, controlY;
           if (arrow.peakX !== undefined && arrow.peakY !== undefined) {
-            // Use stored peak position
-            pointX = arrow.peakX + offset.x;
-            pointY = arrow.peakY + offset.y;
+            // Use stored control point position
+            controlX = arrow.peakX + offset.x;
+            controlY = arrow.peakY + offset.y;
           } else {
-            // Calculate peak position if not stored
-            const peakPos = calculateCurvedArrowPeak(
-              arrow.x1 + offset.x,
-              arrow.y1 + offset.y,
-              arrow.x2 + offset.x,
-              arrow.y2 + offset.y,
-              arrow.type
-            );
+            // Calculate control point position if not stored
+            const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, arrow.type);
             if (peakPos) {
-              pointX = peakPos.x;
-              pointY = peakPos.y;
+              controlX = peakPos.x;
+              controlY = peakPos.y;
             }
           }
+          
+          // Calculate actual curve peak from control point
+          pointX = 0.25 * startX + 0.5 * controlX + 0.25 * endX;
+          pointY = 0.25 * startY + 0.5 * controlY + 0.25 * endY;
         }
         
         setDraggingArrowIndex(curvedArrowIndex);
@@ -3744,14 +3758,29 @@ const HexGridWithToolbar = () => {
                       // Keep x1,y1 unchanged
                     };
                   } else if (part === 'peak') {
-                    // When dragging peak, update the peak coordinates
-                    const newPeakX = x - dragArrowOffset.x - offset.x;
-                    const newPeakY = y - dragArrowOffset.y - offset.y;
+                    // When dragging peak, we need to calculate the control point position
+                    // that would place the curve peak at the mouse position
+                    
+                    // Get the endpoints
+                    const startX = a.x1;
+                    const startY = a.y1;
+                    const endX = a.x2;
+                    const endY = a.y2;
+                    
+                    // Target position for the curve peak (where the mouse is)
+                    const targetPeakX = x - dragArrowOffset.x - offset.x;
+                    const targetPeakY = y - dragArrowOffset.y - offset.y;
+                    
+                    // Calculate control point that gives us this curve peak
+                    // From: curvePeak = 0.25 * start + 0.5 * control + 0.25 * end
+                    // Solving for control: control = 2 * curvePeak - 0.5 * start - 0.5 * end
+                    const newControlX = 2 * targetPeakX - 0.5 * startX - 0.5 * endX;
+                    const newControlY = 2 * targetPeakY - 0.5 * startY - 0.5 * endY;
                     
                     return {
                       ...a,
-                      peakX: newPeakX,
-                      peakY: newPeakY,
+                      peakX: newControlX,
+                      peakY: newControlY,
                       // Keep x1,y1,x2,y2 unchanged
                     };
                   }
@@ -4784,10 +4813,10 @@ const HexGridWithToolbar = () => {
         }}>
           {/* Arrow 1: CCW Shallow (Top Left) */}
           <button
-            onClick={() => setMode('curve0')}
+            onClick={() => setMode('curve2')}
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve0' ? 'rgb(54,98,227)' : '#23395d',
+              backgroundColor: mode === 'curve2' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
@@ -4822,10 +4851,10 @@ const HexGridWithToolbar = () => {
           ><ArrowCWSemicircleTopCenter /></button>
           {/* Arrow 3: CW Quarter-circle (Top Right) */}
           <button
-            onClick={() => setMode('curve2')}
+            onClick={() => setMode('curve0')}
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve2' ? 'rgb(54,98,227)' : '#23395d',
+              backgroundColor: mode === 'curve0' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
@@ -4841,10 +4870,10 @@ const HexGridWithToolbar = () => {
           ><ArrowCWQuarterTopRight /></button>
           {/* Arrow 4: CCW Semicircle (Bottom Left) */}
           <button
-            onClick={() => setMode('curve3')}
+            onClick={() => setMode('curve5')}
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve3' ? 'rgb(54,98,227)' : '#23395d',
+              backgroundColor: mode === 'curve5' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
@@ -4879,10 +4908,10 @@ const HexGridWithToolbar = () => {
           ><ArrowCWSemicircleBottomCenter /></button>
           {/* Arrow 6: CW Quarter-circle (Bottom Right) */}
           <button
-            onClick={() => setMode('curve5')}
+            onClick={() => setMode('curve3')}
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve5' ? 'rgb(54,98,227)' : '#23395d',
+              backgroundColor: mode === 'curve3' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
