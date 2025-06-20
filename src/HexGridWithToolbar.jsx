@@ -22,8 +22,13 @@ const HexGridWithToolbar = () => {
   const [hoverVertex, setHoverVertex] = useState(null);
   const [hoverSegmentIndex, setHoverSegmentIndex] = useState(null);
   const [hoverIndicator, setHoverIndicator] = useState(null); // Track which 4th bond indicator is being hovered
+  const [hoverCurvedArrow, setHoverCurvedArrow] = useState({ index: -1, part: null }); // Track curved arrow hover state
   const [chargeMode, setChargeMode] = useState(null); // null | 'plus' | 'minus' | 'lone'
   const [arrowPreview, setArrowPreview] = useState(null);
+  // Selection box state
+  const [isSelecting, setIsSelecting] = useState(false);
+  const [selectionStart, setSelectionStart] = useState({ x: 0, y: 0 });
+  const [selectionEnd, setSelectionEnd] = useState({ x: 0, y: 0 });
   // Track vertices that have exactly 3 bonds (will only show indicator for these)
   const [verticesWith3Bonds, setVerticesWith3Bonds] = useState([]);
   // Fourth bond feature states
@@ -1959,7 +1964,9 @@ const HexGridWithToolbar = () => {
           ctx.restore();
         }
       } else if (type.startsWith('curve')) {
-        drawCurvedArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, type, '#000');
+        const peakX = arrow.peakX !== undefined ? arrow.peakX + offset.x : null;
+        const peakY = arrow.peakY !== undefined ? arrow.peakY + offset.y : null;
+        drawCurvedArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, type, '#000', index, peakX, peakY, arrows);
       }
     });
     
@@ -1968,6 +1975,14 @@ const HexGridWithToolbar = () => {
       // For curved arrows with both start and end points
       if (arrowPreview.isCurved) {
         // Draw a curved arrow from start point to current mouse position
+        // Calculate peak position for preview
+        const peakPos = calculateCurvedArrowPeak(
+          arrowPreview.x1, 
+          arrowPreview.y1, 
+          arrowPreview.x2, 
+          arrowPreview.y2, 
+          mode
+        );
         drawCurvedArrowOnCanvas(
           ctx, 
           arrowPreview.x1, 
@@ -1975,7 +1990,11 @@ const HexGridWithToolbar = () => {
           arrowPreview.x2, 
           arrowPreview.y2, 
           mode, 
-          'rgba(0,0,0,0.5)'
+          'rgba(0,0,0,0.5)',
+          -1,
+          peakPos.x,
+          peakPos.y,
+          arrows
         );
         
         // Additionally, mark the start point more prominently to show it's fixed
@@ -2037,29 +2056,52 @@ const HexGridWithToolbar = () => {
       }
     }
     
-    // Draw the first point of a curved arrow if it exists
-    if (curvedArrowStartPoint && mode.startsWith('curve')) {
-      const startX = curvedArrowStartPoint.x + offset.x;
-      const startY = curvedArrowStartPoint.y + offset.y;
+          // Draw the first point of a curved arrow if it exists
+      if (curvedArrowStartPoint && mode.startsWith('curve')) {
+        const startX = curvedArrowStartPoint.x + offset.x;
+        const startY = curvedArrowStartPoint.y + offset.y;
+        
+        ctx.save();
+        // Draw a small circle with a diamond tip to indicate start point
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        // Main dot
+        ctx.beginPath();
+        ctx.arc(startX, startY, 5, 0, 2 * Math.PI);
+        ctx.fill();
+        // Diamond tip to show direction
+        ctx.beginPath();
+        ctx.moveTo(startX + 8, startY);
+        ctx.lineTo(startX + 12, startY + 4);
+        ctx.lineTo(startX + 16, startY);
+        ctx.lineTo(startX + 12, startY - 4);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
       
-      ctx.save();
-      // Draw a small circle with a diamond tip to indicate start point
-      ctx.fillStyle = 'rgba(0,0,0,0.6)';
-      // Main dot
-      ctx.beginPath();
-      ctx.arc(startX, startY, 5, 0, 2 * Math.PI);
-      ctx.fill();
-      // Diamond tip to show direction
-      ctx.beginPath();
-      ctx.moveTo(startX + 8, startY);
-      ctx.lineTo(startX + 12, startY + 4);
-      ctx.lineTo(startX + 16, startY);
-      ctx.lineTo(startX + 12, startY - 4);
-      ctx.closePath();
-      ctx.fill();
-      ctx.restore();
-    }
-  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview]);
+      // Draw selection box if selecting
+      if (isSelecting) {
+        ctx.save();
+        const x1 = Math.min(selectionStart.x, selectionEnd.x);
+        const y1 = Math.min(selectionStart.y, selectionEnd.y);
+        const x2 = Math.max(selectionStart.x, selectionEnd.x);
+        const y2 = Math.max(selectionStart.y, selectionEnd.y);
+        const width = x2 - x1;
+        const height = y2 - y1;
+        
+        // Draw selection rectangle
+        ctx.strokeStyle = 'rgba(54, 98, 227, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.strokeRect(x1, y1, width, height);
+        
+        // Draw semi-transparent fill
+        ctx.fillStyle = 'rgba(54, 98, 227, 0.1)';
+        ctx.fillRect(x1, y1, width, height);
+        
+        ctx.restore();
+      }
+  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd]);
 
   function drawArrowOnCanvas(ctx, x1, y1, x2, y2, color = "#000", width = 3) {
     ctx.save();
@@ -2248,8 +2290,60 @@ const HexGridWithToolbar = () => {
     ctx.restore();
   }
 
+  // Helper function to calculate the peak position of a curved arrow
+  const calculateCurvedArrowPeak = (x1, y1, x2, y2, type) => {
+    // Calculate distance and midpoint between the two points
+    const deltaX = x2 - x1;
+    const deltaY = y2 - y1;
+    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+    const midX = (x1 + x2) / 2;
+    const midY = (y1 + y2) / 2;
+    
+    // Perpendicular vector to the line from start to end
+    const perpX = -deltaY / (distance || 1);
+    const perpY = deltaX / (distance || 1);
+    
+    // Determine direction and curvature level
+    const isTopRow = ['curve0', 'curve1', 'curve2'].includes(type);
+    const curvatureMap = {
+      'curve0': 0.25, 'curve1': 0.6, 'curve2': 1.0,
+      'curve3': 0.25, 'curve4': 0.6, 'curve5': 1.0
+    };
+    
+    // Get curvature factor for this arrow type
+    const curveFactor = curvatureMap[type] || 0.5;
+    
+    // Calculate arc parameters - this must match the drawing function exactly
+    const arcHeight = distance * curveFactor;
+    const radius = (arcHeight / 2) + (distance * distance / (8 * arcHeight));
+    
+    // Calculate the center point of the circle - matching the drawing function
+    let centerX, centerY;
+    if (isTopRow) {
+      // Clockwise arrows (top row) - center below the line
+      centerX = midX - perpX * (radius - arcHeight);
+      centerY = midY - perpY * (radius - arcHeight);
+    } else {
+      // Counterclockwise arrows (bottom row) - center above the line
+      centerX = midX + perpX * (radius - arcHeight);
+      centerY = midY + perpY * (radius - arcHeight);
+    }
+    
+    // The peak is the point on the circle in the direction from center to midpoint
+    // Calculate the direction from center to midpoint
+    const dirX = midX - centerX;
+    const dirY = midY - centerY;
+    const dirLength = Math.sqrt(dirX * dirX + dirY * dirY);
+    
+    // Normalize the direction and scale by radius
+    const peakX = centerX + (dirX / dirLength) * radius;
+    const peakY = centerY + (dirY / dirLength) * radius;
+    
+    return { x: peakX, y: peakY };
+  };
+
   // Draw curved arrows based on type
-  function drawCurvedArrowOnCanvas(ctx, x1, y1, x2, y2, type, color = "#000") {
+  function drawCurvedArrowOnCanvas(ctx, x1, y1, x2, y2, type, color = "#000", arrowIndex = -1, peakX = null, peakY = null, arrowsArray = null) {
     ctx.save();
     ctx.strokeStyle = color;
     ctx.lineWidth = 3;
@@ -2261,103 +2355,35 @@ const HexGridWithToolbar = () => {
     let endX = x2;
     let endY = y2;
     
-    // Calculate distance and midpoint between the two points
-    const deltaX = endX - startX;
-    const deltaY = endY - startY;
-    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-    const midX = (startX + endX) / 2;
-    const midY = (startY + endY) / 2;
-    
-    // Perpendicular vector to the line from start to end
-    const perpX = -deltaY / (distance || 1);
-    const perpY = deltaX / (distance || 1);
-    
-    // Determine direction and curvature level
-    const isTopRow = ['curve0', 'curve1', 'curve2'].includes(type);
-    const curvatureMap = {
-      'curve0': 0.25, 'curve1': 0.6, 'curve2': 1.0, // Top row: very gentle to very aggressive curvature, clockwise
-      'curve3': 0.25, 'curve4': 0.6, 'curve5': 1.0  // Bottom row: very gentle to very aggressive curvature, counterclockwise
-    };
-    
-    // Get curvature factor for this arrow type
-    const curveFactor = curvatureMap[type] || 0.5;
-    
-    // Instead of using quadratic curves which can create ellipses,
-    // we'll draw a true circular arc.
-    
-    // Calculate center of the circle and angle values for the arc
-    let centerX, centerY, startAngle, endAngle, radius, clockwise;
-    
-    // The midpoint of the chord is at midX, midY
-    // The height of the arc is perpX*distance*curveFactor, perpY*distance*curveFactor
-    const arcHeight = distance * curveFactor;
-    
-    // Calculate the radius of the circle based on chord length and arc height
-    // Using formula: r = (h/2) + (c²/8h) where h=arcHeight and c=distance
-    radius = (arcHeight / 2) + (distance * distance / (8 * arcHeight));
-    
-    // Clockwise for top row buttons, Counterclockwise for bottom row
-    clockwise = isTopRow;
-    
-    // Calculate the center point of the circle
-    // We start at the midpoint and move perpendicular by the right distance
-    if (isTopRow) {
-      // Clockwise arrows (top row) - center below the line
-      centerX = midX - perpX * (radius - arcHeight);
-      centerY = midY - perpY * (radius - arcHeight);
-    } else {
-      // Counterclockwise arrows (bottom row) - center above the line
-      centerX = midX + perpX * (radius - arcHeight);
-      centerY = midY + perpY * (radius - arcHeight);
+    // If peak position is not provided, calculate it based on type
+    if (peakX === null || peakY === null) {
+      const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, type);
+      peakX = peakPos.x;
+      peakY = peakPos.y;
     }
     
-    // Calculate start and end angles
-    startAngle = Math.atan2(startY - centerY, startX - centerX);
-    endAngle = Math.atan2(endY - centerY, endX - centerX);
-    
-    // Ensure the arc goes the shortest way around the circle
-    if (clockwise) {
-      if (startAngle < endAngle) {
-        startAngle += Math.PI * 2;
-      }
-    } else {
-      if (startAngle > endAngle) {
-        endAngle += Math.PI * 2;
-      }
-    }
-    
-    // Draw the arc
+    // Draw using quadratic Bezier curve with the peak as the control point
     ctx.beginPath();
-    ctx.arc(centerX, centerY, radius, startAngle, endAngle, !clockwise);
+    ctx.moveTo(startX, startY);
+    ctx.quadraticCurveTo(peakX, peakY, endX, endY);
     ctx.stroke();
     
     // Calculate tangent at the end point for the arrowhead
-    // Tangent to a circle is perpendicular to the radius at that point
-    const radialX = endX - centerX;
-    const radialY = endY - centerY;
-    const radialLength = Math.sqrt(radialX * radialX + radialY * radialY);
+    // For a quadratic Bezier curve, the tangent at t=1 (end point) is the direction from the control point to the end point
+    const tangentX = endX - peakX;
+    const tangentY = endY - peakY;
+    const tangentLength = Math.sqrt(tangentX * tangentX + tangentY * tangentY);
     
-    // Normalize the radial vector
-    const normalizedRadialX = radialX / radialLength;
-    const normalizedRadialY = radialY / radialLength;
-    
-    // Tangent is perpendicular to the radius
-    // Rotate 90 degrees CCW for counterclockwise arrow or 90 degrees CW for clockwise arrow
-    let tangentX, tangentY;
-    if (clockwise) {
-      tangentX = -normalizedRadialY;
-      tangentY = normalizedRadialX;
-    } else {
-      tangentX = normalizedRadialY;
-      tangentY = -normalizedRadialX;
-    }
+    // Normalize the tangent vector
+    const normalizedTangentX = tangentX / tangentLength;
+    const normalizedTangentY = tangentY / tangentLength;
     
     // Draw arrowhead
     const headlen = 14;
-    const arrowX = endX - headlen * tangentX;
-    const arrowY = endY - headlen * tangentY;
+    const arrowX = endX - headlen * normalizedTangentX;
+    const arrowY = endY - headlen * normalizedTangentY;
     
-    const angle = Math.atan2(tangentY, tangentX);
+    const angle = Math.atan2(normalizedTangentY, normalizedTangentX);
     
     ctx.beginPath();
     ctx.moveTo(endX, endY);
@@ -2371,6 +2397,49 @@ const HexGridWithToolbar = () => {
     );
     ctx.closePath();
     ctx.fill();
+    
+    // Add blue circles at both endpoints when in mouse mode
+    if (mode === 'mouse') {
+      const circleRadius = 10;
+      
+      // Get hover information for special hover effects using the hover state
+      const isHoveredStart = hoverCurvedArrow.index === arrowIndex && hoverCurvedArrow.part === 'start';
+      const isHoveredEnd = hoverCurvedArrow.index === arrowIndex && hoverCurvedArrow.part === 'end';
+      const isHoveredPeak = hoverCurvedArrow.index === arrowIndex && hoverCurvedArrow.part === 'peak';
+      
+      // Blue circle at start point
+      ctx.beginPath();
+      ctx.arc(startX, startY, circleRadius, 0, 2 * Math.PI);
+      ctx.fillStyle = isHoveredStart ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
+      ctx.fill();
+      
+      // Blue circle at end point
+      ctx.beginPath();
+      ctx.arc(endX, endY, circleRadius, 0, 2 * Math.PI);
+      ctx.fillStyle = isHoveredEnd ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
+      ctx.fill();
+      
+      // Blue circle at peak point
+      // Get the arrow data to retrieve stored peak position
+      const arrow = arrowsArray && arrowIndex >= 0 ? arrowsArray[arrowIndex] : null;
+      if (arrow && arrow.peakX !== undefined && arrow.peakY !== undefined) {
+        const peakX = arrow.peakX + offset.x;
+        const peakY = arrow.peakY + offset.y;
+        ctx.beginPath();
+        ctx.arc(peakX, peakY, circleRadius, 0, 2 * Math.PI);
+        ctx.fillStyle = isHoveredPeak ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
+        ctx.fill();
+      } else {
+        // Fallback: calculate peak if not stored
+        const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, type);
+        if (peakPos) {
+          ctx.beginPath();
+          ctx.arc(peakPos.x, peakPos.y, circleRadius, 0, 2 * Math.PI);
+          ctx.fillStyle = isHoveredPeak ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
+          ctx.fill();
+        }
+      }
+    }
     
     ctx.restore();
   }
@@ -2468,6 +2537,39 @@ const HexGridWithToolbar = () => {
            y >= box.boxY && y <= box.boxY + box.boxHeight;
   };
 
+  // Helper function to check if a point is over any interactive element
+  const isPointOverInteractiveElement = (x, y) => {
+    // Check arrows (straight and equilibrium)
+    const { index: arrowIndex } = isPointInArrowCircle(x, y);
+    if (arrowIndex !== -1) return true;
+    
+    // Check curved arrows
+    const { index: curvedArrowIndex } = isPointInCurvedArrowCircle(x, y);
+    if (curvedArrowIndex !== -1) return true;
+    
+    // Check if over a curved arrow path (for deletion)
+    const curvedArrowPathIndex = isPointOnCurvedArrow(x, y);
+    if (curvedArrowPathIndex !== -1) return true;
+    
+    // Check vertices (for free-floating vertices in mouse mode)
+    for (let v of vertices) {
+      const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+      if (freeFloatingVertices.has(key)) {
+        if (isPointInVertexBox(x, y, v)) return true;
+        const dist = distanceToVertex(x, y, v.x, v.y);
+        if (dist <= vertexThreshold) return true;
+      }
+    }
+    
+    // Check fourth bond indicators
+    if (verticesWith3Bonds.length > 0) {
+      const indicatorVertex = isPointInIndicator(x, y);
+      if (indicatorVertex) return true;
+    }
+    
+    return false;
+  };
+
   // Set mode (draw/erase/arrow/text/etc.)
   const selectMode = (m) => {
     // Close any open menus and inputs
@@ -2477,6 +2579,11 @@ const HexGridWithToolbar = () => {
     // Clear any drawing-in-progress states
     setCurvedArrowStartPoint(null);
     setArrowPreview(null);
+    
+    // Clear selection state
+    setIsSelecting(false);
+    setSelectionStart({ x: 0, y: 0 });
+    setSelectionEnd({ x: 0, y: 0 });
     
     // Clear hover states when switching modes
     setHoverVertex(null);
@@ -3218,6 +3325,65 @@ const HexGridWithToolbar = () => {
     return -1; // No curved arrow was clicked
   }, [arrows, offset]);
 
+  // Helper function to check if a point is inside a curved arrow's endpoint circles
+  // Returns an object with arrow index and the part being clicked (start or end)
+  // skipDistance: if true, just return if current point is over the arrow, used for hover detection
+  const isPointInCurvedArrowCircle = useCallback((x, y, skipDistance = false) => {
+    if (mode !== 'mouse' && !skipDistance) return { index: -1, part: null };
+    
+    // Check only if we're in mouse mode or explicitly checking hover (skipDistance)
+    for (let i = 0; i < arrows.length; i++) {
+      const arrow = arrows[i];
+      
+      // Only process curved arrows
+      if (!arrow.type || !arrow.type.startsWith('curve')) continue;
+      
+      // Add screen offset to arrow coordinates
+      const ox1 = arrow.x1 + offset.x; // Always add offset for screen coordinates
+      const oy1 = arrow.y1 + offset.y;
+      const ox2 = arrow.x2 + offset.x;
+      const oy2 = arrow.y2 + offset.y;
+      
+      const circleRadius = 10;
+      
+      // Check if within the start circle
+      const startDistance = Math.sqrt((x - ox1) * (x - ox1) + (y - oy1) * (y - oy1));
+      if (startDistance <= circleRadius) {
+        return { index: i, part: 'start' }; // Start of the curved arrow
+      }
+      
+      // Check if within the end circle
+      const endDistance = Math.sqrt((x - ox2) * (x - ox2) + (y - oy2) * (y - oy2));
+      if (endDistance <= circleRadius) {
+        return { index: i, part: 'end' }; // End of the curved arrow
+      }
+      
+      // Check if within the peak circle
+      let peakX, peakY;
+      if (arrow.peakX !== undefined && arrow.peakY !== undefined) {
+        // Use stored peak position
+        peakX = arrow.peakX + offset.x;
+        peakY = arrow.peakY + offset.y;
+      } else {
+        // Calculate peak position if not stored
+        const peakPos = calculateCurvedArrowPeak(ox1, oy1, ox2, oy2, arrow.type);
+        if (peakPos) {
+          peakX = peakPos.x;
+          peakY = peakPos.y;
+        }
+      }
+      
+      if (peakX !== undefined && peakY !== undefined) {
+        const peakDistance = Math.sqrt((x - peakX) * (x - peakX) + (y - peakY) * (y - peakY));
+        if (peakDistance <= circleRadius) {
+          return { index: i, part: 'peak' }; // Peak of the curved arrow
+        }
+      }
+    }
+    
+    return { index: -1, part: null }; // No curved arrow circle was clicked
+  }, [arrows, mode, offset]);
+
   // Dragging handlers...
   const handleMouseDown = event => {
     const rect = canvasRef.current.getBoundingClientRect();
@@ -3232,6 +3398,7 @@ const HexGridWithToolbar = () => {
     
     // Check if clicking on an arrow control circle or end triangles in mouse mode
     if (mode === 'mouse') {
+      // First check straight/equilibrium arrows
       const { index: arrowIndex, part: arrowPart } = isPointInArrowCircle(x, y);
       if (arrowIndex !== -1) {
         // Store the arrow and its part that is being dragged
@@ -3290,6 +3457,56 @@ const HexGridWithToolbar = () => {
         return; // Exit early since we're handling an arrow drag
       }
       
+      // Then check curved arrows
+      const { index: curvedArrowIndex, part: curvedArrowPart } = isPointInCurvedArrowCircle(x, y);
+      if (curvedArrowIndex !== -1) {
+        // Store the curved arrow and its part that is being dragged
+        const arrow = arrows[curvedArrowIndex];
+        let pointX, pointY;
+        
+        if (curvedArrowPart === 'start') {
+          // Start of curved arrow
+          pointX = arrow.x1 + offset.x;
+          pointY = arrow.y1 + offset.y;
+        } else if (curvedArrowPart === 'end') {
+          // End of curved arrow
+          pointX = arrow.x2 + offset.x;
+          pointY = arrow.y2 + offset.y;
+        } else if (curvedArrowPart === 'peak') {
+          // Peak of curved arrow
+          if (arrow.peakX !== undefined && arrow.peakY !== undefined) {
+            // Use stored peak position
+            pointX = arrow.peakX + offset.x;
+            pointY = arrow.peakY + offset.y;
+          } else {
+            // Calculate peak position if not stored
+            const peakPos = calculateCurvedArrowPeak(
+              arrow.x1 + offset.x,
+              arrow.y1 + offset.y,
+              arrow.x2 + offset.x,
+              arrow.y2 + offset.y,
+              arrow.type
+            );
+            if (peakPos) {
+              pointX = peakPos.x;
+              pointY = peakPos.y;
+            }
+          }
+        }
+        
+        setDraggingArrowIndex(curvedArrowIndex);
+        // Store which part of the arrow is being dragged
+        setDragArrowOffset({
+          x: x - pointX,
+          y: y - pointY,
+          part: curvedArrowPart
+        });
+        setDragStart({ x, y });
+        setIsDragging(true);
+        setDidDrag(false);
+        return; // Exit early since we're handling a curved arrow drag
+      }
+      
       // Find if user clicked on a free-floating vertex or its box
       for (let v of vertices) {
         const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
@@ -3318,9 +3535,24 @@ const HexGridWithToolbar = () => {
       }
     }
     
-    setDragStart({ x, y });
-    setIsDragging(true);
-    setDidDrag(false);
+    // Handle selection box in mouse mode
+    if (mode === 'mouse' && !isPointOverInteractiveElement(x, y)) {
+      // Start selection box
+      setIsSelecting(true);
+      setSelectionStart({ x, y });
+      setSelectionEnd({ x, y });
+      setIsDragging(true);
+      setDidDrag(false);
+      setDragStart({ x, y });
+      return; // Exit early since we're starting a selection
+    }
+    
+    // Only allow canvas dragging if not in mouse mode
+    if (mode !== 'mouse') {
+      setDragStart({ x, y });
+      setIsDragging(true);
+      setDidDrag(false);
+    }
     
     // Clear the 3-bond indicators when mouse is pressed - unless we're in draw or stereochemistry mode
     const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
@@ -3332,6 +3564,10 @@ const HexGridWithToolbar = () => {
     const rect = canvasRef.current.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    
+    // Store mouse position globally for hover detection
+    window.lastMouseX = x;
+    window.lastMouseY = y;
 
     // Handle fourth bond preview mode
     if (fourthBondMode && fourthBondSource && !isDragging) {
@@ -3483,6 +3719,42 @@ const HexGridWithToolbar = () => {
                       x2: Math.max(newX2, a.topX2 !== undefined ? a.topX2 : a.x2)
                     };
                   }
+                } else if (a.type && a.type.startsWith('curve')) {
+                  // Handle curved arrows
+                  if (part === 'start') {
+                    // When dragging start, adjust only the start coordinates
+                    const newX1 = x - dragArrowOffset.x - offset.x;
+                    const newY1 = y - dragArrowOffset.y - offset.y;
+                    
+                    return {
+                      ...a,
+                      x1: newX1,
+                      y1: newY1,
+                      // Keep x2,y2 unchanged
+                    };
+                  } else if (part === 'end') {
+                    // When dragging end, adjust only the end coordinates
+                    const newX2 = x - dragArrowOffset.x - offset.x;
+                    const newY2 = y - dragArrowOffset.y - offset.y;
+                    
+                    return {
+                      ...a,
+                      x2: newX2,
+                      y2: newY2,
+                      // Keep x1,y1 unchanged
+                    };
+                  } else if (part === 'peak') {
+                    // When dragging peak, update the peak coordinates
+                    const newPeakX = x - dragArrowOffset.x - offset.x;
+                    const newPeakY = y - dragArrowOffset.y - offset.y;
+                    
+                    return {
+                      ...a,
+                      peakX: newPeakX,
+                      peakY: newPeakY,
+                      // Keep x1,y1,x2,y2 unchanged
+                    };
+                  }
                 } else {
                   // Handle regular arrows
                   if (part === 'center') {
@@ -3588,14 +3860,20 @@ const HexGridWithToolbar = () => {
         }));
         
         setDragStart({ x, y });
+      } else if (isSelecting) {
+        // Update selection box
+        setSelectionEnd({ x, y });
       } else {
-        // Regular canvas drag - move the entire view
-        setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
-        setDragStart({ x, y });
+        // Regular canvas drag - move the entire view (only if not in mouse mode)
+        if (mode !== 'mouse') {
+          setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
+          setDragStart({ x, y });
+        }
       }
       
       setHoverVertex(null);
       setHoverSegmentIndex(null);
+      setHoverCurvedArrow({ index: -1, part: null }); // Clear curved arrow hover when dragging
       return;
     }
       
@@ -3605,15 +3883,18 @@ const HexGridWithToolbar = () => {
       if (mode === 'mouse') {
         const { index: arrowIndex, part: arrowPart } = isPointInArrowCircle(x, y);
         if (arrowIndex !== -1) {
+          const arrow = arrows[arrowIndex];
           // Change cursor based on the part of the arrow being hovered
           if (arrowPart === 'center') {
-            // Center - standard move cursor
-            canvasRef.current.style.cursor = 'pointer';
-          } else if (arrowPart === 'start' || arrowPart === 'end' || 
-                    arrowPart === 'topStart' || arrowPart === 'topEnd' || 
-                    arrowPart === 'bottomStart' || arrowPart === 'bottomEnd') {
-            // Ends - resize cursor to indicate stretching
+            // Center - 4-way move cursor for moving the whole arrow
+            canvasRef.current.style.cursor = 'move';
+          } else if (arrow.type === 'equil' && (arrowPart === 'topStart' || arrowPart === 'topEnd' || 
+                    arrowPart === 'bottomStart' || arrowPart === 'bottomEnd')) {
+            // Equilibrium arrow ends - horizontal resize cursor (vertically locked)
             canvasRef.current.style.cursor = 'ew-resize';
+          } else if (arrowPart === 'start' || arrowPart === 'end') {
+            // Regular arrow ends - 4-way move cursor for free movement
+            canvasRef.current.style.cursor = 'move';
           }
           
           setHoverVertex(null);
@@ -3621,8 +3902,25 @@ const HexGridWithToolbar = () => {
           setHoverIndicator(null); // Clear indicator hover when over arrow
           return;
         } else {
-          // Reset cursor if not over an arrow part
-          canvasRef.current.style.cursor = 'default';
+          // Check curved arrows if no straight arrow was found
+          const { index: curvedArrowIndex, part: curvedArrowPart } = isPointInCurvedArrowCircle(x, y);
+          if (curvedArrowIndex !== -1) {
+            // Change cursor to indicate curved arrow endpoint manipulation - 4-way move cursor
+            canvasRef.current.style.cursor = 'move';
+            
+            // Update curved arrow hover state
+            setHoverCurvedArrow({ index: curvedArrowIndex, part: curvedArrowPart });
+            
+            setHoverVertex(null);
+            setHoverSegmentIndex(null);
+            setHoverIndicator(null); // Clear indicator hover when over curved arrow
+            return;
+          } else {
+            // Reset cursor if not over any arrow part
+            canvasRef.current.style.cursor = 'default';
+            // Clear curved arrow hover state
+            setHoverCurvedArrow({ index: -1, part: null });
+          }
         }
       }
       
@@ -3739,9 +4037,17 @@ const HexGridWithToolbar = () => {
       // For other modes, clear all hover indicators
       setHoverVertex(null);
       setHoverSegmentIndex(null);
+      setHoverCurvedArrow({ index: -1, part: null }); // Clear curved arrow hover when not in mouse mode
     }
   };
   const handleMouseUp = event => {
+    // Handle selection box completion
+    if (isSelecting) {
+      setIsSelecting(false);
+      // Here we would handle the selected elements, but for now just clear the selection
+      // TODO: Implement selection logic for copy/paste functionality
+    }
+    
     setIsDragging(false);
     
     // Reset cursor to default
@@ -3884,11 +4190,21 @@ const HexGridWithToolbar = () => {
           setCurvedArrowStartPoint({ x: x - offset.x, y: y - offset.y });
         } else {
           // This is the second click, create the curved arrow
+          const startX = curvedArrowStartPoint.x;
+          const startY = curvedArrowStartPoint.y;
+          const endX = x - offset.x;
+          const endY = y - offset.y;
+          
+          // Calculate initial peak position based on arrow type
+          const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, mode);
+          
           setArrows(arrows => [...arrows, {
-            x1: curvedArrowStartPoint.x,
-            y1: curvedArrowStartPoint.y,
-            x2: x - offset.x,
-            y2: y - offset.y,
+            x1: startX,
+            y1: startY,
+            x2: endX,
+            y2: endY,
+            peakX: peakPos.x,
+            peakY: peakPos.y,
             type: mode
           }]);
           // Clear the start point and preview
@@ -3930,7 +4246,7 @@ const HexGridWithToolbar = () => {
     setVertexTypes(newVertexTypes);
   }, [vertices, segments, vertexAtoms]);
 
-  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource]);
+  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow]);
 
   // Erase all handler
   const handleEraseAll = () => {
@@ -3947,30 +4263,39 @@ const HexGridWithToolbar = () => {
     setArrows([]); // Clear all arrows as well
   };
 
-  // Add keyboard handler for ESC key to cancel curved arrow
+  // Add keyboard handler for ESC key to cancel curved arrow and selection
   useEffect(() => {
     const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && curvedArrowStartPoint) {
-        // Clear the curved arrow start point and preview
-        setCurvedArrowStartPoint(null);
-        setArrowPreview(null);
+      if (e.key === 'Escape') {
+        if (curvedArrowStartPoint) {
+          // Clear the curved arrow start point and preview
+          setCurvedArrowStartPoint(null);
+          setArrowPreview(null);
+          
+          // Show brief visual feedback that drawing was canceled
+          const canvas = canvasRef.current;
+          if (canvas) {
+            const ctx = canvas.getContext('2d');
+            
+            ctx.save();
+            ctx.fillStyle = 'rgba(200,0,0,0.15)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.restore();
+            
+            // Redraw after a short delay - the effect of setting state above 
+            // will trigger a redraw via the useEffect for drawGrid
+            setTimeout(() => {
+              // Force redraw without using drawGrid directly
+              setOffset(prev => ({...prev}));
+            }, 150);
+          }
+        }
         
-        // Show brief visual feedback that drawing was canceled
-        const canvas = canvasRef.current;
-        if (canvas) {
-          const ctx = canvas.getContext('2d');
-          
-          ctx.save();
-          ctx.fillStyle = 'rgba(200,0,0,0.15)';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.restore();
-          
-          // Redraw after a short delay - the effect of setting state above 
-          // will trigger a redraw via the useEffect for drawGrid
-          setTimeout(() => {
-            // Force redraw without using drawGrid directly
-            setOffset(prev => ({...prev}));
-          }, 150);
+        if (isSelecting) {
+          // Clear selection
+          setIsSelecting(false);
+          setSelectionStart({ x: 0, y: 0 });
+          setSelectionEnd({ x: 0, y: 0 });
         }
       }
     };
@@ -3979,7 +4304,7 @@ const HexGridWithToolbar = () => {
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [curvedArrowStartPoint]);
+  }, [curvedArrowStartPoint, isSelecting]);
 
   // Add keyboard handler for ESC key to close atom input
   useEffect(() => {
