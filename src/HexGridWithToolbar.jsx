@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { detectSixMemberedRings, isRingAromatic, isSegmentInRing, getRingInteriorDirection, isSpecialRingBond, getRingInfo } from './ringDetection';
-import { determineVertexTypes, drawVertexTypeIndicator, isTopOfHex, getType, getIfTop } from './vertexDetection';
+import { detectSixMemberedRings, isSegmentInRing, getRingInteriorDirection, isSpecialRingBond, getRingInfo } from './ringDetection';
+import { determineVertexTypes, isTopOfHex, getType, getIfTop } from './vertexDetection';
 
 const HexGridWithToolbar = () => {
   const canvasRef = useRef(null);
@@ -23,7 +23,7 @@ const HexGridWithToolbar = () => {
   const [hoverSegmentIndex, setHoverSegmentIndex] = useState(null);
   const [hoverIndicator, setHoverIndicator] = useState(null); // Track which 4th bond indicator is being hovered
   const [hoverCurvedArrow, setHoverCurvedArrow] = useState({ index: -1, part: null }); // Track curved arrow hover state
-  const [chargeMode, setChargeMode] = useState(null); // null | 'plus' | 'minus' | 'lone'
+
   const [arrowPreview, setArrowPreview] = useState(null);
   // Selection box state
   const [isSelecting, setIsSelecting] = useState(false);
@@ -54,6 +54,9 @@ const HexGridWithToolbar = () => {
   const [atomInputValue, setAtomInputValue] = useState('');
   const [atomInputPosition, setAtomInputPosition] = useState({ x: 0, y: 0 });
   const [showAboutPopup, setShowAboutPopup] = useState(false);
+  // Preset menu state
+  const [isPresetMenuExpanded, setIsPresetMenuExpanded] = useState(false);
+  const [presetMenuVisualState, setPresetMenuVisualState] = useState(false); // Controls visual appearance (border radius, etc.)
   // Ring detection state (invisible to user)
   const [detectedRings, setDetectedRings] = useState([]);
   const lineThreshold = 15;
@@ -307,8 +310,7 @@ const HexGridWithToolbar = () => {
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Store the draw function on the component instance so we can call it from event handlers
-    window.lastDrawGrid = drawGrid;
+
 
     // Build a set of vertex positions where atoms exist
     const atomPositions = new Set(Object.keys(vertexAtoms));
@@ -1110,12 +1112,7 @@ const HexGridWithToolbar = () => {
       }
     });
 
-    // Draw vertex type indicators before drawing atom labels
-    vertices.forEach(v => {
-      const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
-      const vertexType = vertexTypes[key] || "A";
-      drawVertexTypeIndicator(ctx, v, vertexType, offset, segments);
-    });
+
 
 
 
@@ -1441,9 +1438,19 @@ const HexGridWithToolbar = () => {
           // Check if vertex is in a ring
           const vertexKey = `${vx.toFixed(2)},${vy.toFixed(2)}`;
           const rings = detectedRings || [];
-          const isInRing = rings.some(ring => ring.some(v => 
-            Math.abs(v.x - vx) < 0.01 && Math.abs(v.y - vy) < 0.01
-          ));
+          const isInRing = rings.some(ring => {
+            // Ensure ring is an array and has the expected structure
+            if (!Array.isArray(ring)) return false;
+            return ring.some(v => {
+              // Handle both vertex objects and string keys
+              if (typeof v === 'string') {
+                return v === vertexKey;
+              } else if (v && typeof v === 'object' && v.x !== undefined && v.y !== undefined) {
+                return Math.abs(v.x - vx) < 0.01 && Math.abs(v.y - vy) < 0.01;
+              }
+              return false;
+            });
+          });
           
           // Control lone pair orientation in rings
           const ringInteriorOverride = isInRing;
@@ -3473,7 +3480,7 @@ const HexGridWithToolbar = () => {
               // Calculate lone pair position order for this specific vertex
               const connectedBonds = getConnectedBonds(foundVertex, segments);
               const priorityOrder = getLonePairPositionOrder(connectedBonds, foundVertex);
-              console.log(`Vertex Type: ${vertexType} (isTop: ${isTopStatus}) - Lone pair order: ${priorityOrder.join(', ')}`);
+      
               
               // Increment lone pairs count and store the priority order
               const lonePairs = ((newVal.lonePairs || 0) + 1) % 9;
@@ -3824,7 +3831,7 @@ const HexGridWithToolbar = () => {
       // Do nothing - this is just to ensure we don't show menu or create bonds for other modes
       return;
     }
-  }, [isDragging, segments, vertices, vertexAtoms, offset, mode, chargeMode, distanceToVertex, lineThreshold, vertexThreshold, isPasteMode, pasteAtPosition]);
+  }, [isDragging, segments, vertices, vertexAtoms, offset, mode, distanceToVertex, lineThreshold, vertexThreshold, isPasteMode, pasteAtPosition]);
 
   // Arrow drawing function
   const drawArrow = () => {
@@ -4289,9 +4296,7 @@ const HexGridWithToolbar = () => {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    // Store mouse position globally for hover detection
-    window.lastMouseX = x;
-    window.lastMouseY = y;
+
     
     // Update paste preview position if in paste mode
     if (isPasteMode && !isDragging) {
@@ -4876,19 +4881,7 @@ const HexGridWithToolbar = () => {
     }
   };
 
-  const logVertexInfo = (vertex) => {
-    if (vertex && mode === 'lonepair') {
-      const key = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
-      const vertexType = getType(vertex, vertexTypes, segments);
-      const isTopStatus = getIfTop(vertex, segments);
-      console.log(`Vertex at ${key}:`);
-      console.log(`- Type: ${vertexType}`);
-      console.log(`- Is Top: ${isTopStatus}`);
-      
-      // Also log the raw vertex object to inspect stored state variables
-      console.log('Vertex object:', vertex);
-    }
-  };
+
 
   const handleArrowClick = (event) => {
     if (mode !== 'arrow' && mode !== 'equil' && !mode.startsWith('curve')) return;
@@ -4962,8 +4955,7 @@ const HexGridWithToolbar = () => {
   // Resize handler
   useEffect(() => {
     const canvas = canvasRef.current;
-    // Calculate available width (exclude toolbar margin)
-    const toolbarWidth = Math.max(window.innerWidth * 0.1666, 120) + window.innerWidth * 0.04; // 1/6 + 4vw margin
+
     const width = window.innerWidth;
     const height = window.innerHeight;
     canvas.width = width;
@@ -5270,7 +5262,9 @@ const HexGridWithToolbar = () => {
         top: '2vh',
         left: 'max(calc(4vw - 28px), 8px)',
         bottom: '4vh',
-        borderRadius: 'calc(min(280px, 25vw) * 0.031)',
+        borderRadius: presetMenuVisualState 
+          ? 'calc(min(280px, 25vw) * 0.031) calc(min(280px, 25vw) * 0.031) 0 calc(min(280px, 25vw) * 0.031)' // Square off bottom-right when expanded
+          : 'calc(min(280px, 25vw) * 0.031)', // Normal rounded corners when collapsed
         boxShadow: '0 8px 32px rgba(0,0,0,0.28)',
         border: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)',
         zIndex: 2,
@@ -5321,6 +5315,38 @@ const HexGridWithToolbar = () => {
             </svg>
           </button>
           <button
+            onClick={() => { 
+              const newMode = mode === 'mouse' ? 'draw' : 'mouse';
+              setModeAndClearSelection(newMode);
+            }}
+            style={{
+              flex: 1,
+              aspectRatio: '1/1',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: mode === 'mouse' ? 'rgb(54,98,227)' : '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              transition: 'background 0.2s',
+              outline: 'none',
+              padding: 0,
+              height: 'min(44px, 7vh)',
+            }}
+            title="Mouse Mode"
+          >
+            {/* Mouse cursor SVG - bigger with handle */}
+            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none">
+              <path d="M6 3L12 17L14.5 12.5L19 10.5L6 3Z" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round"/>
+              <rect x="16.3" y="16" width="3.5" height="7" rx="1.5" fill="#fff" stroke="#fff" strokeWidth="0.5" transform="rotate(316 12.75 18.5)"/>
+            </svg>
+          </button>
+        </div>
+        {/* Erase and Text mode buttons */}
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0, marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))' }}>
+          <button
             onClick={() => setModeAndClearSelection('erase')}
             style={{
               flex: 1,
@@ -5348,9 +5374,38 @@ const HexGridWithToolbar = () => {
               </g>
             </svg>
           </button>
+          <button
+            onClick={() => { 
+              const newMode = mode === 'text' ? 'draw' : 'text';
+              setModeAndClearSelection(newMode);
+            }}
+            style={{
+              flex: 1,
+              aspectRatio: '1/1',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: mode === 'text' ? 'rgb(54,98,227)' : '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+              transition: 'background 0.2s',
+              outline: 'none',
+              padding: 0,
+              height: 'min(44px, 7vh)',
+            }}
+            title="Text Mode"
+          >
+            {/* Text "T" SVG - bigger and Times New Roman font */}
+            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none">
+              <text x="5" y="18" fill="#fff" style={{ font: 'bold 20px "Times New Roman", serif' }}>T</text>
+            </svg>
+          </button>
         </div>
+
         {/* Buttons for charges/lone pairs */}
-        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0, marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))' }}>
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))' }}>
           <button
             onClick={() => { 
               const newMode = mode === 'plus' ? 'draw' : 'plus';
@@ -5437,69 +5492,8 @@ const HexGridWithToolbar = () => {
           >
             {/* Two dots SVG */}
             <svg width="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" height="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" viewBox="0 0 22 22" fill="none">
-              <circle cx="8" cy="11" r="2.1" fill="#fff" />
-              <circle cx="14" cy="11" r="2.1" fill="#fff" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Mouse and Text mode buttons */}
-        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))' }}>
-          <button
-            onClick={() => { 
-              const newMode = mode === 'mouse' ? 'draw' : 'mouse';
-              setModeAndClearSelection(newMode);
-            }}
-            style={{
-              flex: 1,
-              aspectRatio: '1/1',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: mode === 'mouse' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
-              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
-              cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
-              outline: 'none',
-              padding: 0,
-              height: 'min(44px, 7vh)',
-            }}
-            title="Mouse Mode"
-          >
-            {/* Mouse cursor SVG - bigger with handle */}
-            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none">
-              <path d="M6 3L12 17L14.5 12.5L19 10.5L6 3Z" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round"/>
-              <rect x="16.3" y="16" width="3.5" height="7" rx="1.5" fill="#fff" stroke="#fff" strokeWidth="0.5" transform="rotate(316 12.75 18.5)"/>
-            </svg>
-          </button>
-          <button
-            onClick={() => { 
-              const newMode = mode === 'text' ? 'draw' : 'text';
-              setModeAndClearSelection(newMode);
-            }}
-            style={{
-              flex: 1,
-              aspectRatio: '1/1',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backgroundColor: mode === 'text' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
-              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
-              cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
-              outline: 'none',
-              padding: 0,
-              height: 'min(44px, 7vh)',
-            }}
-            title="Text Mode"
-          >
-            {/* Text "T" SVG - bigger and Times New Roman font */}
-            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none">
-              <text x="5" y="18" fill="#fff" style={{ font: 'bold 20px "Times New Roman", serif' }}>T</text>
+              <circle cx="7" cy="11" r="2.6" fill="#fff" />
+              <circle cx="15" cy="11" r="2.6" fill="#fff" />
             </svg>
           </button>
         </div>
@@ -5822,8 +5816,155 @@ const HexGridWithToolbar = () => {
             <line x1="11" y1="13" x2="11" y2="22"/>
             <line x1="15" y1="13" x2="15" y2="22"/>
           </svg>
-        </button>
+                </button>
       </div>
+      
+
+
+      {/* Preset Menu - expands to the right */}
+      <div style={{
+        width: isPresetMenuExpanded ? '650px' : '0px', // Animate from 0 to full width
+        minWidth: '0px', // Ensure it can collapse to 0
+        height: '160px', // Much shorter than main toolbar
+        overflow: 'hidden', // Hide content during slide animation
+        pointerEvents: isPresetMenuExpanded ? 'auto' : 'none', // Disable interactions when collapsed
+          background: 'linear-gradient(to bottom, rgb(16,32,34), rgb(15,40,30))',
+          backgroundImage: `
+            linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
+            linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
+            linear-gradient(to bottom, rgb(17,35,36), rgb(15,40,32))`,
+          backgroundSize: 'calc(min(280px, 25vw) * 0.28) calc(min(280px, 25vw) * 0.28), calc(min(280px, 25vw) * 0.28) calc(min(280px, 25vw) * 0.28), 100% 100%',
+          backgroundPosition: 'calc(-1 * (min(240px, 25vw) + max(calc(4vw - 28px), 8px)) + -2.2px) calc(-1 * (92vh - 160px - 4vh) + -8px), calc(-1 * (min(240px, 25vw) + max(calc(4vw - 28px), 8px)) + calc(min(280px, 25vw) * 0.14) + -2.2px) calc(-1 * (92vh - 160px - 4vh) + calc(min(280px, 25vw) * 0.14) + -8px), 0 0',
+          padding: '12px 16px',
+          boxSizing: 'border-box',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '8px',
+          position: 'absolute',
+          bottom: '4vh', // Align with bottom of toolbar
+          left: `calc(min(240px, 25vw) + max(calc(4vw - 28px), 8px) - 2.2px)`, // Overlap the main toolbar by 8px
+          visibility: isPresetMenuExpanded ? 'visible' : 'hidden', // Completely hide when collapsed
+          borderRadius: '0 8px 8px 0', // Square off top-left and bottom-left corners to connect seamlessly with main toolbar
+          border: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)',
+          borderLeft: 'none', // Remove left border to seamlessly attach to main toolbar
+          zIndex: 4, // Above main toolbar (which is zIndex: 2) and button (which is zIndex: 3)
+          touchAction: 'none',
+          transition: 'all 0.5s ease-out', // Smooth slide animation
+        }}>
+          {/* Preset Menu Title */}
+          <div style={{
+            color: '#888',
+            fontWeight: 600,
+            fontSize: '14px',
+            letterSpacing: '0.04em',
+            textAlign: 'left',
+            userSelect: 'none',
+            marginBottom: '4px',
+            whiteSpace: 'nowrap', // Prevent text wrapping during animation
+          }}>Presets</div>
+          
+          {/* Placeholder content grid */}
+          <div style={{
+            display: 'flex',
+            flexDirection: 'row',
+            gap: '8px',
+            flexWrap: 'nowrap', // Prevent wrapping during animation
+            justifyContent: 'flex-start',
+            alignItems: 'center',
+            flex: 1,
+            minWidth: '0', // Allow shrinking during animation
+          }}>
+            {/* Placeholder preset buttons */}
+            {[1, 2, 3, 4, 5, 6].map(i => (
+              <div
+                key={i}
+                style={{
+                  width: '95px',
+                  height: '95px',
+                  backgroundColor: '#23395d',
+                  border: 'none', // Remove border
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: '#888',
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s',
+                  flexShrink: 0, // Maintain button size during animation
+                }}
+                onMouseEnter={(e) => e.target.style.backgroundColor = '#2a4470'}
+                onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
+              >
+                {i}
+              </div>
+            ))}
+          </div>
+        </div>
+        
+        {/* Vertical Preset Menu Toggle Button - attached to toolbar */}
+      <button
+        onClick={() => {
+          if (isPresetMenuExpanded) {
+            // Collapsing: Start animation immediately, change visual state after animation
+            setIsPresetMenuExpanded(false);
+            setTimeout(() => setPresetMenuVisualState(false), 500);
+          } else {
+            // Expanding: Change visual state immediately, start animation
+            setPresetMenuVisualState(true);
+            setIsPresetMenuExpanded(true);
+          }
+        }}
+        style={{
+          position: 'absolute',
+          bottom: '5vh', // Position just above the bottom of the toolbar
+          left: isPresetMenuExpanded 
+            ? `calc(min(240px, 25vw) + max(calc(4vw - 28px), 8px) + 650px - 2.2px)` // When expanded, move to right side of preset menu (650px width) minus 2.2px
+            : `calc(min(240px, 25vw) + max(calc(4vw - 28px), 8px) - 2.2px)`, // When collapsed, attach to main toolbar minus 2.2px
+          transform: 'translateY(-10px)', // Small offset to sit just above the toolbar bottom
+          width: '16px',
+          height: '130px', // Shorter than before (was 170px)
+          background: isPresetMenuExpanded ? 'rgb(54,98,227)' : 'linear-gradient(to bottom, rgb(35, 52, 69), rgb(28, 74, 56))',
+          borderTop: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)', // Dark green border matching toolbar
+          borderRight: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)', // Dark green border matching toolbar
+          borderBottom: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)', // Dark green border matching toolbar
+          borderLeft: isPresetMenuExpanded ? 'none' : 'none', // No left border to seamlessly attach (to toolbar or preset menu)
+          borderRadius: '0 8px 8px 0', // Always round the right side
+          cursor: 'pointer',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+          transition: 'background 0.2s, left 0.5s ease-out', // Smooth background and position transitions
+          outline: 'none',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '0',
+          zIndex: 3,
+        }}
+        title={isPresetMenuExpanded ? "Collapse Presets" : "Expand Presets"}
+      >
+        {/* Small white triangle pointing right */}
+        <svg 
+          width="10" 
+          height="10" 
+          viewBox="0 0 24 24" 
+          fill="none" 
+          xmlns="http://www.w3.org/2000/svg"
+          style={{
+            transform: isPresetMenuExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s',
+          }}
+        >
+          <path
+            d="M9 18L15 12L9 6"
+            stroke="#fff"
+            strokeWidth="2.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+      
       {/* Canvas wrapper fills all except toolbar area */}
       <div style={{
         position: 'absolute',
