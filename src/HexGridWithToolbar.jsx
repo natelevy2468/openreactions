@@ -40,6 +40,10 @@ const HexGridWithToolbar = () => {
   const [clipboard, setClipboard] = useState(null);
   const [isPasteMode, setIsPasteMode] = useState(false);
   const [pastePreviewPosition, setPastePreviewPosition] = useState({ x: 0, y: 0 });
+  // Grid snapping state
+  const [gridVertexIndex, setGridVertexIndex] = useState(new Map());
+  const [snapAlignment, setSnapAlignment] = useState(null);
+  const [showSnapPreview, setShowSnapPreview] = useState(true); // Allow users to toggle snapping
   // Track vertices that have exactly 3 bonds (will only show indicator for these)
   const [verticesWith3Bonds, setVerticesWith3Bonds] = useState([]);
   // Fourth bond feature states
@@ -282,6 +286,94 @@ const HexGridWithToolbar = () => {
     }
     return { newSegments, newVertices };
   }, [calculateBondDirection, calculateDoubleBondVertices]);
+
+  // Build spatial index of grid vertices for fast lookup
+  const buildGridVertexIndex = useCallback((gridVertices) => {
+    const index = new Map();
+    gridVertices.forEach((vertex, i) => {
+      const key = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+      index.set(key, { ...vertex, index: i });
+    });
+    return index;
+  }, []);
+
+  // Find the closest grid vertex to a given point
+  const findClosestGridVertex = useCallback((x, y, maxDistance = 30) => {
+    let closestVertex = null;
+    let minDistance = maxDistance;
+    
+    gridVertexIndex.forEach((vertex) => {
+      const distance = Math.sqrt((vertex.x - x) ** 2 + (vertex.y - y) ** 2);
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestVertex = vertex;
+      }
+    });
+    
+    return closestVertex ? { vertex: closestVertex, distance: minDistance } : null;
+  }, [gridVertexIndex]);
+
+  // Calculate best alignment for pasted molecule to grid
+  const calculateGridAlignment = useCallback((pastedVertices, clickX, clickY) => {
+    if (!pastedVertices || pastedVertices.length === 0) return null;
+    
+    // Strategy 1: Align closest pasted vertex to closest grid vertex
+    let bestAlignment = null;
+    let bestScore = Infinity;
+    
+    pastedVertices.forEach((pastedVertex, index) => {
+      const pastedWorldX = clickX - offset.x + pastedVertex.x;
+      const pastedWorldY = clickY - offset.y + pastedVertex.y;
+      
+      const closestGrid = findClosestGridVertex(pastedWorldX, pastedWorldY, 50);
+      if (!closestGrid) return;
+      
+      // Calculate translation needed to align this pasted vertex to grid vertex
+      const translationX = closestGrid.vertex.x - pastedWorldX;
+      const translationY = closestGrid.vertex.y - pastedWorldY;
+      
+      // Test this alignment for all vertices
+      let totalScore = 0;
+      const vertexMappings = new Map();
+      let validAlignment = true;
+      
+      pastedVertices.forEach((vertex, i) => {
+        const alignedX = clickX - offset.x + vertex.x + translationX;
+        const alignedY = clickY - offset.y + vertex.y + translationY;
+        
+        const nearestGrid = findClosestGridVertex(alignedX, alignedY, 15); // Smaller threshold for actual snapping
+        if (nearestGrid) {
+          vertexMappings.set(i, nearestGrid.vertex);
+          totalScore += nearestGrid.distance;
+        } else {
+          // If any vertex can't snap to grid, this alignment fails
+          validAlignment = false;
+          totalScore += 100; // Heavy penalty
+        }
+      });
+      
+      if (validAlignment && totalScore < bestScore) {
+        bestScore = totalScore;
+        bestAlignment = {
+          translation: { x: translationX, y: translationY },
+          rotation: 0, // TODO: Add rotation support later
+          vertexMappings,
+          score: totalScore,
+          anchorIndex: index
+        };
+      }
+    });
+    
+    return bestAlignment;
+  }, [findClosestGridVertex, offset]);
+
+  // Update grid index when vertices change
+  useEffect(() => {
+    if (vertices.length > 0) {
+      const index = buildGridVertexIndex(vertices);
+      setGridVertexIndex(index);
+    }
+  }, [vertices, buildGridVertexIndex]);
 
   // Count bonds connected to a specific vertex
   const countBondsAtVertex = useCallback((vertex) => {
@@ -2162,69 +2254,201 @@ const HexGridWithToolbar = () => {
         ctx.save();
         ctx.globalAlpha = 0.5; // Semi-transparent preview
         
-        const previewX = pastePreviewPosition.x - offset.x;
-        const previewY = pastePreviewPosition.y - offset.y;
+        // Use snapped position if available, otherwise use mouse position
+        let previewX, previewY;
+        if (snapAlignment && showSnapPreview) {
+          previewX = pastePreviewPosition.x - offset.x + snapAlignment.translation.x;
+          previewY = pastePreviewPosition.y - offset.y + snapAlignment.translation.y;
+        } else {
+          previewX = pastePreviewPosition.x - offset.x;
+          previewY = pastePreviewPosition.y - offset.y;
+        }
+        
+        // Highlight the target grid vertex closest to molecule center
+        if (snapAlignment && showSnapPreview && snapAlignment.vertexMappings.size > 0) {
+          ctx.save();
+          ctx.globalAlpha = 0.8;
+          ctx.fillStyle = '#4CAF50'; // Green for snap target
+          ctx.strokeStyle = '#4CAF50';
+          ctx.lineWidth = 2;
+          
+          // Calculate center of the pasted molecule
+          let centerX = 0, centerY = 0;
+          clipboard.vertices.forEach(vertex => {
+            centerX += previewX + vertex.x;
+            centerY += previewY + vertex.y;
+          });
+          centerX /= clipboard.vertices.length;
+          centerY /= clipboard.vertices.length;
+          
+          // Find the target grid vertex closest to the molecule center
+          let closestGridVertex = null;
+          let minDistanceToCenter = Infinity;
+          
+          snapAlignment.vertexMappings.forEach((gridVertex) => {
+            const distance = Math.sqrt(
+              (gridVertex.x - centerX) ** 2 + (gridVertex.y - centerY) ** 2
+            );
+            if (distance < minDistanceToCenter) {
+              minDistanceToCenter = distance;
+              closestGridVertex = gridVertex;
+            }
+          });
+          
+          // Draw highlight circle only on the closest vertex
+          if (closestGridVertex) {
+            const gx = closestGridVertex.x + offset.x;
+            const gy = closestGridVertex.y + offset.y;
+            
+            // Draw highlight circle around target grid vertex
+            ctx.beginPath();
+            ctx.arc(gx, gy, 8, 0, 2 * Math.PI);
+            ctx.stroke();
+            
+            // Fill center
+            ctx.beginPath();
+            ctx.arc(gx, gy, 4, 0, 2 * Math.PI);
+            ctx.fill();
+          }
+          
+          ctx.restore();
+        }
         
         // Draw preview vertices with atoms
         clipboard.vertices.forEach(vertex => {
           const vx = previewX + vertex.x;
           const vy = previewY + vertex.y;
           
-          // Draw atom label if present, otherwise draw vertex circle
+          // Draw atom label with exact same logic as main rendering
           if (vertex.atom) {
-            ctx.font = '26px Arial';
-            ctx.fillStyle = '#888';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
+            ctx.save();
+            let symbol = vertex.atom.symbol || vertex.atom;
             
-            // Handle atom objects with symbol property
-            const atomSymbol = typeof vertex.atom === 'string' ? vertex.atom : vertex.atom.symbol;
-            ctx.fillText(atomSymbol || '', vx + offset.x, vy + offset.y);
+            // Use exact same font rendering as main drawing
+            const segments = [];
+            let currentSegment = '';
+            let isCurrentNumber = false;
             
-            // Draw charge if present
-            if (vertex.atom.charge) {
-              ctx.font = '15px Arial';
-              const chargeSymbol = vertex.atom.charge > 0 ? '+' : '−';
-              const chargeX = vx + offset.x + 12;
-              const chargeY = vy + offset.y - 10;
-              ctx.fillText(chargeSymbol, chargeX, chargeY);
-            }
-            
-            // Draw lone pairs if present
-            if (vertex.atom.lonePairs) {
-              ctx.fillStyle = '#888';
-              const positions = vertex.atom.lonePairOrder || ['top', 'right', 'bottom', 'left'];
-              for (let i = 0; i < Math.min(vertex.atom.lonePairs, positions.length); i++) {
-                const position = positions[i];
-                let dotX, dotY;
-                
-                switch(position) {
-                  case 'top':
-                    dotX = vx + offset.x;
-                    dotY = vy + offset.y - 20;
-                    break;
-                  case 'right':
-                    dotX = vx + offset.x + 20;
-                    dotY = vy + offset.y;
-                    break;
-                  case 'bottom':
-                    dotX = vx + offset.x;
-                    dotY = vy + offset.y + 20;
-                    break;
-                  case 'left':
-                    dotX = vx + offset.x - 20;
-                    dotY = vy + offset.y;
-                    break;
+            for (let i = 0; i < symbol.length; i++) {
+              const char = symbol[i];
+              const isNumber = /[0-9]/.test(char);
+              
+              if (i === 0 || isNumber !== isCurrentNumber) {
+                if (currentSegment) {
+                  segments.push({ text: currentSegment, isNumber: isCurrentNumber });
                 }
-                
-                ctx.beginPath();
-                ctx.arc(dotX - 3, dotY, 2, 0, 2 * Math.PI);
-                ctx.fill();
-                ctx.beginPath();
-                ctx.arc(dotX + 3, dotY, 2, 0, 2 * Math.PI);
-                ctx.fill();
+                currentSegment = char;
+                isCurrentNumber = isNumber;
+              } else {
+                currentSegment += char;
               }
             }
+            
+            if (currentSegment) {
+              segments.push({ text: currentSegment, isNumber: isCurrentNumber });
+            }
+            
+            // Calculate total width for centering (same as main rendering)
+            let totalWidth = 0;
+            for (const segment of segments) {
+              const font = segment.isNumber ? '400 15px "Inter", "Segoe UI", "Arial", sans-serif' : '40 26px "Inter", "Segoe UI", "Arial", sans-serif';
+              ctx.font = font;
+              const segmentWidth = ctx.measureText(segment.text).width;
+              totalWidth += segmentWidth;
+              
+              // Apply kerning adjustment
+              if (segment.isNumber && segments.indexOf(segment) > 0) {
+                const prevSegment = segments[segments.indexOf(segment) - 1];
+                if (prevSegment && !prevSegment.isNumber) {
+                  const lastChar = prevSegment.text.slice(-1);
+                  if (['C', 'O'].includes(lastChar)) {
+                    totalWidth -= 3;
+                  } else if (['F', 'P', 'S'].includes(lastChar)) {
+                    totalWidth -= 2.8;
+                  } else if (['N', 'E', 'B'].includes(lastChar)) {
+                    totalWidth -= 2.5;
+                  } else if (['H', 'T', 'I', 'L'].includes(lastChar)) {
+                    totalWidth -= 1.7;
+                  } else if (['l', 'i'].includes(lastChar)) {
+                    totalWidth -= 1.3;
+                  } else {
+                    totalWidth -= 2.3;
+                  }
+                }
+              }
+            }
+            
+            // Render each segment with proper positioning (same as main rendering)
+            let currentX = vx + offset.x - totalWidth / 2;
+            const baseYOffset = 2;
+            
+            for (const segment of segments) {
+              const isNumber = segment.isNumber;
+              const font = isNumber ? '40 15px "Inter", "Segoe UI", "Arial", sans-serif' : '40 26px "Inter", "Segoe UI", "Arial", sans-serif';
+              const yOffset = isNumber ? 4 : 0;
+              
+              ctx.font = font;
+              ctx.textAlign = 'left';
+              ctx.textBaseline = 'middle';
+              
+              // Add outline for readability (same as main rendering)
+              ctx.shadowColor = 'rgba(255,255,255,0.85)';
+              ctx.shadowBlur = 4;
+              ctx.lineWidth = 5;
+              ctx.strokeStyle = '#fff';
+              
+              ctx.strokeText(segment.text, currentX, vy + offset.y + baseYOffset + yOffset);
+              ctx.shadowBlur = 0;
+              ctx.fillStyle = '#888'; // Gray for preview
+              ctx.fillText(segment.text, currentX, vy + offset.y + baseYOffset + yOffset);
+              
+              // Move to next position
+              const segmentWidth = ctx.measureText(segment.text).width;
+              currentX += segmentWidth;
+              
+              // Apply kerning
+              if (isNumber && segments.indexOf(segment) > 0) {
+                const prevSegment = segments[segments.indexOf(segment) - 1];
+                if (prevSegment && !prevSegment.isNumber) {
+                  const lastChar = prevSegment.text.slice(-1);
+                  if (['C', 'O'].includes(lastChar)) {
+                    currentX -= 3;
+                  } else if (['F', 'P', 'S'].includes(lastChar)) {
+                    currentX -= 2.8;
+                  } else if (['N', 'E', 'B'].includes(lastChar)) {
+                    currentX -= 2.5;
+                  } else if (['H', 'T', 'I', 'L'].includes(lastChar)) {
+                    currentX -= 1.7;
+                  } else if (['l', 'i'].includes(lastChar)) {
+                    currentX -= 1.3;
+                  } else {
+                    currentX -= 2.3;
+                  }
+                }
+              }
+            }
+            
+            // Draw charge if present (same position logic as main rendering)
+            if (vertex.atom.charge) {
+              ctx.save();
+              const chargeX = vx + offset.x + totalWidth/2 + 8;
+              const chargeY = vy + offset.y - 8;
+              
+              const chargeSymbol = vertex.atom.charge > 0 ? '+' : '−';
+              
+              ctx.font = '600 16px "Inter", "Segoe UI", "Arial", sans-serif';
+              ctx.shadowColor = 'rgba(255,255,255,0.85)';
+              ctx.shadowBlur = 4;
+              ctx.lineWidth = 4;
+              ctx.strokeStyle = '#fff';
+              ctx.strokeText(chargeSymbol, chargeX, chargeY);
+              ctx.shadowBlur = 0;
+              ctx.fillStyle = '#888';
+              ctx.fillText(chargeSymbol, chargeX, chargeY);
+              ctx.restore();
+            }
+            
+            ctx.restore();
           }
           // Note: Don't draw anything for vertices without atoms
         });
@@ -2242,50 +2466,174 @@ const HexGridWithToolbar = () => {
             ctx.strokeStyle = '#888';
             ctx.lineWidth = 3;
             
-            // Draw bonds based on their type and order
+            // Use the exact same rendering logic as the main drawing function
+            if (segment.bondOrder === 0) {
+              // Grid line - don't render in preview
+              return;
+            }
+            
             if (segment.bondOrder === 1) {
-              // Single bond
-              ctx.beginPath();
-              ctx.moveTo(x1, y1);
-              ctx.lineTo(x2, y2);
-              ctx.stroke();
+              // Check if we should show stereochemistry preview
+              const showStereochemistryPreview = false; // No hover preview in paste mode
+              
+              if (segment.bondType === 'wedge') {
+                // Draw wedge bond
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                const ux = dx / len;
+                const uy = dy / len;
+                const perpX = -uy;
+                const perpY = ux;
+                
+                // Check bond direction for wedge orientation
+                const bondDirection = segment.bondDirection || 1;
+                const wedgeWidth = 8;
+                
+                ctx.fillStyle = '#888';
+                ctx.beginPath();
+                
+                if (bondDirection === 1) {
+                  // Forward direction: narrow at start, wide at end
+                  ctx.moveTo(x1, y1);
+                  ctx.lineTo(x2 + perpX * wedgeWidth, y2 + perpY * wedgeWidth);
+                  ctx.lineTo(x2 - perpX * wedgeWidth, y2 - perpY * wedgeWidth);
+                } else {
+                  // Reverse direction: wide at start, narrow at end
+                  ctx.moveTo(x1 + perpX * wedgeWidth, y1 + perpY * wedgeWidth);
+                  ctx.lineTo(x1 - perpX * wedgeWidth, y1 - perpY * wedgeWidth);
+                  ctx.lineTo(x2, y2);
+                }
+                ctx.closePath();
+                ctx.fill();
+              } else if (segment.bondType === 'dash') {
+                // Draw dashed bond
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                const ux = dx / len;
+                const uy = dy / len;
+                const perpX = -uy;
+                const perpY = ux;
+                
+                const bondDirection = segment.bondDirection || 1;
+                const minDashWidth = 4;
+                const maxDashWidth = 13;
+                const totalDashes = 6;
+                
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 3;
+                ctx.lineCap = 'round';
+                
+                for (let i = 0; i < totalDashes; i++) {
+                  let t = i / (totalDashes - 1);
+                  if (bondDirection === -1) t = 1 - t;
+                  
+                  const dashX = x1 + (x2 - x1) * (i / (totalDashes - 1));
+                  const dashY = y1 + (y2 - y1) * (i / (totalDashes - 1));
+                  const dashWidth = minDashWidth + (maxDashWidth - minDashWidth) * t;
+                  
+                  ctx.beginPath();
+                  ctx.moveTo(dashX - perpX * dashWidth/2, dashY - perpY * dashWidth/2);
+                  ctx.lineTo(dashX + perpX * dashWidth/2, dashY + perpY * dashWidth/2);
+                  ctx.stroke();
+                }
+                ctx.lineCap = 'butt';
+              } else if (segment.bondType === 'ambiguous') {
+                // Draw ambiguous (wavy) bond
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                const ux = dx / len;
+                const uy = dy / len;
+                const perpX = -uy;
+                const perpY = ux;
+                
+                const waveWidth = 4.5;
+                const waveFrequency = 4.5;
+                const waveSegments = 100;
+                
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                
+                for (let i = 0; i <= waveSegments; i++) {
+                  const t = i / waveSegments;
+                  const waveT = t * waveFrequency * 2 * Math.PI;
+                  const waveOffset = Math.sin(waveT) * waveWidth;
+                  
+                  const pointX = x1 + (x2 - x1) * t + perpX * waveOffset;
+                  const pointY = y1 + (y2 - y1) * t + perpY * waveOffset;
+                  
+                  if (i === 0) {
+                    ctx.moveTo(pointX, pointY);
+                  } else {
+                    ctx.lineTo(pointX, pointY);
+                  }
+                }
+                ctx.stroke();
+              } else {
+                // Regular single bond
+                ctx.strokeStyle = '#888';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                const dx = x2 - x1;
+                const dy = y2 - y1;
+                const len = Math.sqrt(dx * dx + dy * dy);
+                const ux = dx / len;
+                const uy = dy / len;
+                ctx.moveTo(x1 - ux * 1, y1 - uy * 1);
+                ctx.lineTo(x2 + ux * 1, y2 + uy * 1);
+                ctx.stroke();
+              }
             } else if (segment.bondOrder === 2) {
-              // Double bond - use the same logic as the main drawing function
+              // Double bond - use exact same logic as main rendering
               const dx = x2 - x1;
               const dy = y2 - y1;
               const len = Math.sqrt(dx * dx + dy * dy);
+              const dirMainNorm = [dx / len, dy / len];
+              const perpX = -dirMainNorm[1];
+              const perpY = dirMainNorm[0];
               
-              // Calculate proper perpendicular vector (unit vector, no multiplication by 6)
-              const perpX = -dy / len;
-              const perpY = dx / len;
+              // Use exact same offset calculations as main rendering
+              const offset = 5;
+              const ext = 6;
               
-              // Check if either vertex is unconnected (default case for double bonds)
-              const v1 = clipboard.vertices[segment.vertex1Index];
-              const v2 = clipboard.vertices[segment.vertex2Index];
-              
-              // Check how many other segments are connected to each vertex
+              // Check connections in the clipboard
               const v1Connections = clipboard.segments.filter(s => 
-                s !== segment && (s.vertex1Index === segment.vertex1Index || s.vertex2Index === segment.vertex1Index)
+                s !== segment && s.bondOrder > 0 && 
+                (s.vertex1Index === segment.vertex1Index || s.vertex2Index === segment.vertex1Index)
               ).length;
               const v2Connections = clipboard.segments.filter(s => 
-                s !== segment && (s.vertex1Index === segment.vertex2Index || s.vertex2Index === segment.vertex2Index)
+                s !== segment && s.bondOrder > 0 && 
+                (s.vertex1Index === segment.vertex2Index || s.vertex2Index === segment.vertex2Index)
               ).length;
               
-              const v1Unconnected = v1Connections === 0;
-              const v2Unconnected = v2Connections === 0;
+              const noBondsAtBothEnds = v1Connections === 0 && v2Connections === 0;
+              const shorten = noBondsAtBothEnds ? -2 : -3;
+              const ux = dx / len;
+              const uy = dy / len;
               
-              if (v1Unconnected || v2Unconnected) {
-                // Default case: Two equal parallel lines, both offset from center
-                // Match the exact formula from main rendering
-                const offset = 5; // distance between the two lines
-                const ext = 6; // extension at ends
-                const noBondsAtBothEnds = v1Connections === 0 && v2Connections === 0;
-                const shorten = noBondsAtBothEnds ? -2 : -3;
-                
-                // Calculate unit vector along the bond
-                const ux = dx / len;
-                const uy = dy / len;
-                
+              // Determine if either vertex is unconnected
+              const upperVertexUnconnected = segment.upperVertex ? 
+                clipboard.segments.filter(s => 
+                  s !== segment && s.bondOrder > 0 && 
+                  ((Math.abs(s.x1 - segment.upperVertex.x) < 0.01 && Math.abs(s.y1 - segment.upperVertex.y) < 0.01) ||
+                   (Math.abs(s.x2 - segment.upperVertex.x) < 0.01 && Math.abs(s.y2 - segment.upperVertex.y) < 0.01))
+                ).length === 0 : false;
+              
+              const lowerVertexUnconnected = segment.lowerVertex ? 
+                clipboard.segments.filter(s => 
+                  s !== segment && s.bondOrder > 0 && 
+                  ((Math.abs(s.x1 - segment.lowerVertex.x) < 0.01 && Math.abs(s.y1 - segment.lowerVertex.y) < 0.01) ||
+                   (Math.abs(s.x2 - segment.lowerVertex.x) < 0.01 && Math.abs(s.y2 - segment.lowerVertex.y) < 0.01))
+                ).length === 0 : false;
+              
+              ctx.strokeStyle = '#888';
+              ctx.lineWidth = 3;
+              
+              if (upperVertexUnconnected || lowerVertexUnconnected) {
+                // Two equal parallel lines, both offset from center
                 ctx.beginPath();
                 ctx.moveTo(x1 - perpX * offset - ux * (ext + shorten), y1 - perpY * offset - uy * (ext + shorten));
                 ctx.lineTo(x2 - perpX * offset + ux * (ext + shorten), y2 - perpY * offset + uy * (ext + shorten));
@@ -2295,36 +2643,40 @@ const HexGridWithToolbar = () => {
                 ctx.moveTo(x1 + perpX * offset - ux * (ext + shorten), y1 + perpY * offset - uy * (ext + shorten));
                 ctx.lineTo(x2 + perpX * offset + ux * (ext + shorten), y2 + perpY * offset + uy * (ext + shorten));
                 ctx.stroke();
-              } else if (segment.flipSmallerLine) {
-                // One full line, one shorter line
-                ctx.beginPath();
-                ctx.moveTo(x1 + perpX, y1 + perpY);
-                ctx.lineTo(x2 + perpX, y2 + perpY);
-                ctx.stroke();
-                
-                // Shorter line (80% length, centered)
-                const shortenFactor = 0.8;
-                const startOffset = (1 - shortenFactor) / 2;
-                const shortX1 = x1 - perpX + dx * startOffset;
-                const shortY1 = y1 - perpY + dy * startOffset;
-                const shortX2 = x1 - perpX + dx * (startOffset + shortenFactor);
-                const shortY2 = y1 - perpY + dy * (startOffset + shortenFactor);
-                
-                ctx.beginPath();
-                ctx.moveTo(shortX1, shortY1);
-                ctx.lineTo(shortX2, shortY2);
-                ctx.stroke();
               } else {
-                // Two equal lines
-                ctx.beginPath();
-                ctx.moveTo(x1 + perpX, y1 + perpY);
-                ctx.lineTo(x2 + perpX, y2 + perpY);
-                ctx.stroke();
+                // Use the more complex rendering logic for connected double bonds
+                // This would require implementing the full orientation logic
+                // For now, use simplified version but with correct offsets
+                const offsetMultiplier = 2;
                 
-                ctx.beginPath();
-                ctx.moveTo(x1 - perpX, y1 - perpY);
-                ctx.lineTo(x2 - perpX, y2 - perpY);
-                ctx.stroke();
+                if (segment.flipSmallerLine) {
+                  // One full line, one shorter line
+                  ctx.beginPath();
+                  ctx.moveTo(x1 - ux * (ext + shorten - 3), y1 - uy * (ext + shorten - 3));
+                  ctx.lineTo(x2 + ux * (ext + shorten - 3), y2 + uy * (ext + shorten - 3));
+                  ctx.stroke();
+                  
+                  // Shorter line
+                  const shortenStart = v1Connections > 0 ? 8 : 0;
+                  const shortenEnd = v2Connections > 0 ? 8 : 0;
+                  ctx.beginPath();
+                  ctx.moveTo(x1 + perpX * offset * offsetMultiplier - ux * (ext + shorten - shortenStart), 
+                            y1 + perpY * offset * offsetMultiplier - uy * (ext + shorten - shortenStart));
+                  ctx.lineTo(x2 + perpX * offset * offsetMultiplier + ux * (ext + shorten - shortenEnd), 
+                            y2 + perpY * offset * offsetMultiplier + uy * (ext + shorten - shortenEnd));
+                  ctx.stroke();
+                } else {
+                  // Two equal lines offset to opposite sides
+                  ctx.beginPath();
+                  ctx.moveTo(x1 - perpX * offset - ux * (ext + shorten - 3), y1 - perpY * offset - uy * (ext + shorten - 3));
+                  ctx.lineTo(x2 - perpX * offset + ux * (ext + shorten - 3), y2 - perpY * offset + uy * (ext + shorten - 3));
+                  ctx.stroke();
+                  
+                  ctx.beginPath();
+                  ctx.moveTo(x1 + perpX * offset - ux * (ext + shorten - 3), y1 + perpY * offset - uy * (ext + shorten - 3));
+                  ctx.lineTo(x2 + perpX * offset + ux * (ext + shorten - 3), y2 + perpY * offset + uy * (ext + shorten - 3));
+                  ctx.stroke();
+                }
               }
             } else if (segment.bondOrder === 3) {
               // Triple bond
@@ -2333,6 +2685,9 @@ const HexGridWithToolbar = () => {
               const len = Math.sqrt(dx * dx + dy * dy);
               const perpX = -dy / len * 6;
               const perpY = dx / len * 6;
+              
+              ctx.strokeStyle = '#888';
+              ctx.lineWidth = 3;
               
               // Center line
               ctx.beginPath();
@@ -2435,7 +2790,7 @@ const HexGridWithToolbar = () => {
         
         ctx.restore();
       }
-  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition]);
+  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition, snapAlignment, showSnapPreview]);
 
   function drawArrowOnCanvas(ctx, x1, y1, x2, y2, color = "#000", width = 3) {
     ctx.save();
@@ -3090,38 +3445,66 @@ const HexGridWithToolbar = () => {
   // Cancel paste mode
   const cancelPasteMode = useCallback(() => {
     setIsPasteMode(false);
+    setSnapAlignment(null);
   }, []);
   
   // Paste clipboard contents at given position
   const pasteAtPosition = useCallback((x, y) => {
     if (!clipboard) return;
     
-    const offsetX = x - offset.x;
-    const offsetY = y - offset.y;
+    // Use grid snapping if available
+    const useSnapping = snapAlignment && showSnapPreview && snapAlignment.score < 50; // Only snap if alignment is reasonable
+    let offsetX, offsetY;
     
-    // Create new vertices
+    if (useSnapping) {
+      offsetX = x - offset.x + snapAlignment.translation.x;
+      offsetY = y - offset.y + snapAlignment.translation.y;
+    } else {
+      offsetX = x - offset.x;
+      offsetY = y - offset.y;
+    }
+    
+    // Create new vertices (or map to existing grid vertices)
     const newVertexMap = new Map(); // Map from clipboard index to new vertex
     const newVertices = [...vertices];
     const newVertexAtoms = { ...vertexAtoms };
     const newVertexTypes = { ...vertexTypes };
     
     clipboard.vertices.forEach((clipVertex, index) => {
-      const newVertex = {
-        x: offsetX + clipVertex.x,
-        y: offsetY + clipVertex.y
-      };
+      let targetVertex;
       
-      newVertices.push(newVertex);
-      newVertexMap.set(index, newVertex);
-      
-      // Create vertex key for atoms/types
-      const vertexKey = `${newVertex.x.toFixed(2)},${newVertex.y.toFixed(2)}`;
-      
-      if (clipVertex.atom) {
-        newVertexAtoms[vertexKey] = clipVertex.atom;
-      }
-      if (clipVertex.type) {
-        newVertexTypes[vertexKey] = clipVertex.type;
+      if (useSnapping && snapAlignment.vertexMappings.has(index)) {
+        // Use existing grid vertex
+        targetVertex = snapAlignment.vertexMappings.get(index);
+        newVertexMap.set(index, targetVertex);
+        
+        // Update existing grid vertex with pasted atom data
+        const vertexKey = `${targetVertex.x.toFixed(2)},${targetVertex.y.toFixed(2)}`;
+        if (clipVertex.atom) {
+          newVertexAtoms[vertexKey] = clipVertex.atom;
+        }
+        if (clipVertex.type) {
+          newVertexTypes[vertexKey] = clipVertex.type;
+        }
+      } else {
+        // Create new vertex at pasted position
+        const newVertex = {
+          x: offsetX + clipVertex.x,
+          y: offsetY + clipVertex.y
+        };
+        
+        newVertices.push(newVertex);
+        newVertexMap.set(index, newVertex);
+        
+        // Create vertex key for atoms/types
+        const vertexKey = `${newVertex.x.toFixed(2)},${newVertex.y.toFixed(2)}`;
+        
+        if (clipVertex.atom) {
+          newVertexAtoms[vertexKey] = clipVertex.atom;
+        }
+        if (clipVertex.type) {
+          newVertexTypes[vertexKey] = clipVertex.type;
+        }
       }
     });
     
@@ -3189,16 +3572,52 @@ const HexGridWithToolbar = () => {
       newArrows.push(newArrow);
     });
     
+    // Remove overlapping grid lines (bondOrder === 0) where new bonds were placed
+    // This mimics the behavior when drawing bonds over grid lines
+    const finalSegments = newSegments.map(segment => {
+      if (segment.bondOrder > 0) {
+        // This is a real bond - check if there's a grid line at the same position
+        const gridLineIndex = newSegments.findIndex(gridSeg => 
+          gridSeg.bondOrder === 0 &&
+          Math.abs(gridSeg.x1 - segment.x1) < 0.01 &&
+          Math.abs(gridSeg.y1 - segment.y1) < 0.01 &&
+          Math.abs(gridSeg.x2 - segment.x2) < 0.01 &&
+          Math.abs(gridSeg.y2 - segment.y2) < 0.01
+        );
+        
+        if (gridLineIndex !== -1) {
+          // Remove the grid line by filtering it out
+          return segment; // Keep the real bond
+        }
+      }
+      return segment;
+    }).filter((segment, index, array) => {
+      // Remove grid lines that have been replaced by real bonds
+      if (segment.bondOrder === 0) {
+        const hasOverlappingBond = array.some(otherSeg => 
+          otherSeg !== segment &&
+          otherSeg.bondOrder > 0 &&
+          Math.abs(otherSeg.x1 - segment.x1) < 0.01 &&
+          Math.abs(otherSeg.y1 - segment.y1) < 0.01 &&
+          Math.abs(otherSeg.x2 - segment.x2) < 0.01 &&
+          Math.abs(otherSeg.y2 - segment.y2) < 0.01
+        );
+        return !hasOverlappingBond; // Remove grid line if there's an overlapping bond
+      }
+      return true; // Keep all real bonds
+    });
+    
     // Update state
     setVertices(newVertices);
     setVertexAtoms(newVertexAtoms);
     setVertexTypes(newVertexTypes);
-    setSegments(newSegments);
+    setSegments(finalSegments);
     setArrows(newArrows);
     
     // Exit paste mode
     setIsPasteMode(false);
-  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset]);
+    setSnapAlignment(null);
+  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices]);
 
   // Helper function to change mode and clear selection
   const setModeAndClearSelection = useCallback((newMode) => {
@@ -3883,7 +4302,7 @@ const HexGridWithToolbar = () => {
       // Do nothing - this is just to ensure we don't show menu or create bonds for other modes
       return;
     }
-  }, [isDragging, segments, vertices, vertexAtoms, offset, mode, distanceToVertex, lineThreshold, vertexThreshold, isPasteMode, pasteAtPosition]);
+      }, [isDragging, segments, vertices, vertexAtoms, offset, mode, distanceToVertex, lineThreshold, vertexThreshold, isPasteMode, pasteAtPosition, calculateGridAlignment, showSnapPreview]);
 
   // Arrow drawing function
   const drawArrow = () => {
@@ -4353,6 +4772,14 @@ const HexGridWithToolbar = () => {
     // Update paste preview position if in paste mode
     if (isPasteMode && !isDragging) {
       setPastePreviewPosition({ x, y });
+      
+      // Calculate grid alignment for snapping
+      if (clipboard && clipboard.vertices && showSnapPreview) {
+        const alignment = calculateGridAlignment(clipboard.vertices, x, y);
+        setSnapAlignment(alignment);
+      } else {
+        setSnapAlignment(null);
+      }
     }
 
     // Handle fourth bond preview mode
@@ -5182,13 +5609,18 @@ const HexGridWithToolbar = () => {
       if (e.key === 'Escape' && isPasteMode) {
         cancelPasteMode();
       }
+      
+      // Toggle grid snapping with 'G' key during paste mode
+      if (e.key === 'g' && isPasteMode) {
+        setShowSnapPreview(!showSnapPreview);
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [selectedSegments, selectedVertices, selectedArrows, clipboard, isPasteMode, copySelection, cancelPasteMode]);
+      }, [selectedSegments, selectedVertices, selectedArrows, clipboard, isPasteMode, copySelection, cancelPasteMode, showSnapPreview]);
 
   // Helper function to format atom text with subscript numbers
   const formatAtomText = (text) => {
@@ -6171,6 +6603,46 @@ const HexGridWithToolbar = () => {
           </svg>
           Copy
         </button>
+      )}
+      
+      {/* Paste Mode Indicator */}
+      {isPasteMode && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '20px',
+            right: '20px',
+            zIndex: 10,
+            backgroundColor: showSnapPreview ? '#4CAF50' : '#FF9800',
+            color: 'white',
+            padding: '8px 16px',
+            borderRadius: '8px',
+            fontSize: '14px',
+            fontWeight: '600',
+            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+            boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+          }}
+        >
+          <div>
+            {showSnapPreview ? 'Grid Snap: ON' : 'Grid Snap: OFF'}
+          </div>
+          <div style={{ fontSize: '12px', opacity: '0.9' }}>
+            Press G to toggle
+          </div>
+          {snapAlignment && showSnapPreview && (
+            <div style={{ 
+              fontSize: '12px', 
+              backgroundColor: 'rgba(255,255,255,0.2)', 
+              padding: '2px 6px', 
+              borderRadius: '4px' 
+            }}>
+              {snapAlignment.vertexMappings.size} snapped
+            </div>
+          )}
+        </div>
       )}
       
       {/* About Popup */}
