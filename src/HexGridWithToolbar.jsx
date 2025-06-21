@@ -2254,10 +2254,48 @@ const HexGridWithToolbar = () => {
               const dx = x2 - x1;
               const dy = y2 - y1;
               const len = Math.sqrt(dx * dx + dy * dy);
-              const perpX = -dy / len * 6;
-              const perpY = dx / len * 6;
               
-              if (segment.flipSmallerLine) {
+              // Calculate proper perpendicular vector (unit vector, no multiplication by 6)
+              const perpX = -dy / len;
+              const perpY = dx / len;
+              
+              // Check if either vertex is unconnected (default case for double bonds)
+              const v1 = clipboard.vertices[segment.vertex1Index];
+              const v2 = clipboard.vertices[segment.vertex2Index];
+              
+              // Check how many other segments are connected to each vertex
+              const v1Connections = clipboard.segments.filter(s => 
+                s !== segment && (s.vertex1Index === segment.vertex1Index || s.vertex2Index === segment.vertex1Index)
+              ).length;
+              const v2Connections = clipboard.segments.filter(s => 
+                s !== segment && (s.vertex1Index === segment.vertex2Index || s.vertex2Index === segment.vertex2Index)
+              ).length;
+              
+              const v1Unconnected = v1Connections === 0;
+              const v2Unconnected = v2Connections === 0;
+              
+              if (v1Unconnected || v2Unconnected) {
+                // Default case: Two equal parallel lines, both offset from center
+                // Match the exact formula from main rendering
+                const offset = 5; // distance between the two lines
+                const ext = 6; // extension at ends
+                const noBondsAtBothEnds = v1Connections === 0 && v2Connections === 0;
+                const shorten = noBondsAtBothEnds ? -2 : -3;
+                
+                // Calculate unit vector along the bond
+                const ux = dx / len;
+                const uy = dy / len;
+                
+                ctx.beginPath();
+                ctx.moveTo(x1 - perpX * offset - ux * (ext + shorten), y1 - perpY * offset - uy * (ext + shorten));
+                ctx.lineTo(x2 - perpX * offset + ux * (ext + shorten), y2 - perpY * offset + uy * (ext + shorten));
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(x1 + perpX * offset - ux * (ext + shorten), y1 + perpY * offset - uy * (ext + shorten));
+                ctx.lineTo(x2 + perpX * offset + ux * (ext + shorten), y2 + perpY * offset + uy * (ext + shorten));
+                ctx.stroke();
+              } else if (segment.flipSmallerLine) {
                 // One full line, one shorter line
                 ctx.beginPath();
                 ctx.moveTo(x1 + perpX, y1 + perpY);
@@ -3094,7 +3132,7 @@ const HexGridWithToolbar = () => {
       const vertex2 = newVertexMap.get(clipSegment.vertex2Index);
       
       if (vertex1 && vertex2) {
-        newSegments.push({
+        const newSegment = {
           x1: vertex1.x,
           y1: vertex1.y,
           x2: vertex2.x,
@@ -3103,10 +3141,24 @@ const HexGridWithToolbar = () => {
           bondType: clipSegment.bondType || null,
           bondDirection: clipSegment.bondDirection,
           direction: clipSegment.direction,
-          upperVertex: clipSegment.upperVertex,
-          lowerVertex: clipSegment.lowerVertex,
           flipSmallerLine: clipSegment.flipSmallerLine
-        });
+        };
+        
+        // For double bonds, recalculate upperVertex and lowerVertex properties
+        if (newSegment.bondOrder === 2 && newSegment.direction) {
+          const vertices = calculateDoubleBondVertices(
+            newSegment.x1, newSegment.y1, 
+            newSegment.x2, newSegment.y2, 
+            newSegment.direction
+          );
+          newSegment.upperVertex = vertices.upperVertex;
+          newSegment.lowerVertex = vertices.lowerVertex;
+        } else {
+          newSegment.upperVertex = clipSegment.upperVertex;
+          newSegment.lowerVertex = clipSegment.lowerVertex;
+        }
+        
+        newSegments.push(newSegment);
       }
     });
     
