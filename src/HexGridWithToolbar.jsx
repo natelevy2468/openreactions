@@ -1,6 +1,20 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { detectSixMemberedRings, isSegmentInRing, getRingInteriorDirection, isSpecialRingBond, getRingInfo } from './ringDetection';
 import { determineVertexTypes, isTopOfHex, getType, getIfTop } from './vertexDetection';
+import { drawArrowOnCanvas, drawEquilArrowOnCanvas, drawCurvedArrowOnCanvas, calculateCurvedArrowPeak } from './rendering/ArrowRenderer';
+import { 
+  isPointInRect, 
+  isLineIntersectingRect, 
+  updateSelection as updateSelectionUtil,
+  clearSelection as clearSelectionUtil,
+  copySelection as copySelectionUtil,
+  cancelPasteMode as cancelPasteModeUtil,
+  pasteAtPosition as pasteAtPositionUtil
+} from './utils/SelectionUtils';
+import { handleMouseMove as handleMouseMoveUtil, handleMouseDown as handleMouseDownUtil, handleMouseUp as handleMouseUpUtil } from './handlers/MouseHandlers';
+import { createEscapeKeyHandler, createGeneralEscapeHandler, createFourthBondKeyHandler, createCopyPasteKeyHandler, createUndoKeyHandler } from './handlers/KeyboardHandlers';
+import { handleArrowMouseMove, handleArrowClick } from './handlers/ArrowHandlers';
+import { formatAtomText } from './utils/TextUtils.jsx';
 
 const HexGridWithToolbar = () => {
   const canvasRef = useRef(null);
@@ -224,6 +238,10 @@ const HexGridWithToolbar = () => {
   const [draggingArrowIndex, setDraggingArrowIndex] = useState(null);
   const [dragArrowOffset, setDragArrowOffset] = useState({ x: 0, y: 0 });
 
+  // Undo/Redo history system
+  const [history, setHistory] = useState([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+
   // Generate unique segments and vertices based on view size
   const generateGrid = useCallback((width, height) => {
     const newSegments = [];
@@ -290,90 +308,79 @@ const HexGridWithToolbar = () => {
   // Build spatial index of grid vertices for fast lookup
   const buildGridVertexIndex = useCallback((gridVertices) => {
     const index = new Map();
+    const spatialGrid = new Map(); // Add spatial grid for fast lookups
+    const gridSize = 60; // Spatial grid cell size (should be >= search radius)
+    
     gridVertices.forEach((vertex, i) => {
       const key = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
       index.set(key, { ...vertex, index: i });
+      
+      // Add to spatial grid
+      const gridX = Math.floor(vertex.x / gridSize);
+      const gridY = Math.floor(vertex.y / gridSize);
+      const spatialKey = `${gridX},${gridY}`;
+      
+      if (!spatialGrid.has(spatialKey)) {
+        spatialGrid.set(spatialKey, []);
+      }
+      spatialGrid.get(spatialKey).push({ ...vertex, index: i });
     });
+    
+    index.spatialGrid = spatialGrid;
+    index.gridSize = gridSize;
     return index;
   }, []);
 
-  // Find the closest grid vertex to a given point
+  // Find the closest grid vertex to a given point using spatial indexing
   const findClosestGridVertex = useCallback((x, y, maxDistance = 30) => {
+    if (!gridVertexIndex.spatialGrid) return null;
+    
     let closestVertex = null;
     let minDistance = maxDistance;
     
-    gridVertexIndex.forEach((vertex) => {
-      const distance = Math.sqrt((vertex.x - x) ** 2 + (vertex.y - y) ** 2);
-      if (distance < minDistance) {
-        minDistance = distance;
-        closestVertex = vertex;
+    const gridSize = gridVertexIndex.gridSize;
+    
+    // If maxDistance is Infinity, search all cells (aggressive snapping)
+    if (maxDistance === Infinity) {
+      minDistance = Infinity;
+      gridVertexIndex.spatialGrid.forEach((cellVertices) => {
+        cellVertices.forEach((vertex) => {
+          const distance = Math.sqrt((vertex.x - x) ** 2 + (vertex.y - y) ** 2);
+          if (distance < minDistance) {
+            minDistance = distance;
+            closestVertex = vertex;
+          }
+        });
+      });
+    } else {
+      // Normal spatial search with limited radius
+      const searchRadius = Math.ceil(maxDistance / gridSize);
+      const centerGridX = Math.floor(x / gridSize);
+      const centerGridY = Math.floor(y / gridSize);
+      
+      // Only search nearby spatial grid cells
+      for (let dx = -searchRadius; dx <= searchRadius; dx++) {
+        for (let dy = -searchRadius; dy <= searchRadius; dy++) {
+          const gridX = centerGridX + dx;
+          const gridY = centerGridY + dy;
+          const spatialKey = `${gridX},${gridY}`;
+          const cellVertices = gridVertexIndex.spatialGrid.get(spatialKey);
+          
+          if (cellVertices) {
+            cellVertices.forEach((vertex) => {
+              const distance = Math.sqrt((vertex.x - x) ** 2 + (vertex.y - y) ** 2);
+              if (distance < minDistance) {
+                minDistance = distance;
+                closestVertex = vertex;
+              }
+            });
+          }
+        }
       }
-    });
+    }
     
     return closestVertex ? { vertex: closestVertex, distance: minDistance } : null;
   }, [gridVertexIndex]);
-
-  // Calculate best alignment for pasted molecule to grid
-  const calculateGridAlignment = useCallback((pastedVertices, clickX, clickY) => {
-    if (!pastedVertices || pastedVertices.length === 0) return null;
-    
-    // Strategy 1: Align closest pasted vertex to closest grid vertex
-    let bestAlignment = null;
-    let bestScore = Infinity;
-    
-    pastedVertices.forEach((pastedVertex, index) => {
-      const pastedWorldX = clickX - offset.x + pastedVertex.x;
-      const pastedWorldY = clickY - offset.y + pastedVertex.y;
-      
-      const closestGrid = findClosestGridVertex(pastedWorldX, pastedWorldY, 50);
-      if (!closestGrid) return;
-      
-      // Calculate translation needed to align this pasted vertex to grid vertex
-      const translationX = closestGrid.vertex.x - pastedWorldX;
-      const translationY = closestGrid.vertex.y - pastedWorldY;
-      
-      // Test this alignment for all vertices
-      let totalScore = 0;
-      const vertexMappings = new Map();
-      let validAlignment = true;
-      
-      pastedVertices.forEach((vertex, i) => {
-        const alignedX = clickX - offset.x + vertex.x + translationX;
-        const alignedY = clickY - offset.y + vertex.y + translationY;
-        
-        const nearestGrid = findClosestGridVertex(alignedX, alignedY, 15); // Smaller threshold for actual snapping
-        if (nearestGrid) {
-          vertexMappings.set(i, nearestGrid.vertex);
-          totalScore += nearestGrid.distance;
-        } else {
-          // If any vertex can't snap to grid, this alignment fails
-          validAlignment = false;
-          totalScore += 100; // Heavy penalty
-        }
-      });
-      
-      if (validAlignment && totalScore < bestScore) {
-        bestScore = totalScore;
-        bestAlignment = {
-          translation: { x: translationX, y: translationY },
-          rotation: 0, // TODO: Add rotation support later
-          vertexMappings,
-          score: totalScore,
-          anchorIndex: index
-        };
-      }
-    });
-    
-    return bestAlignment;
-  }, [findClosestGridVertex, offset]);
-
-  // Update grid index when vertices change
-  useEffect(() => {
-    if (vertices.length > 0) {
-      const index = buildGridVertexIndex(vertices);
-      setGridVertexIndex(index);
-    }
-  }, [vertices, buildGridVertexIndex]);
 
   // Count bonds connected to a specific vertex
   const countBondsAtVertex = useCallback((vertex) => {
@@ -394,6 +401,205 @@ const HexGridWithToolbar = () => {
     
     return count;
   }, [segments]);
+
+  // Count bonds at vertex but ignore 4th bond indicators for grid snapping
+  const countBondsAtVertexForSnapping = useCallback((vertex) => {
+    const vx = vertex.x;
+    const vy = vertex.y;
+    let count = 0;
+    
+    for (const seg of segments) {
+      if (seg.bondOrder > 0) { // Only count bonds (not grid lines)
+        // Check if this segment connects to our vertex (at either end)
+        if ((Math.abs(seg.x1 - vx) < 0.01 && Math.abs(seg.y1 - vy) < 0.01) || 
+            (Math.abs(seg.x2 - vx) < 0.01 && Math.abs(seg.y2 - vy) < 0.01)) {
+          // Count each bond order as the appropriate number of bonds
+          count += seg.bondOrder;
+        }
+      }
+    }
+    
+    // If this vertex has a 4th bond indicator, treat it as having only 3 bonds
+    // This is because the 4th bond indicator represents a potential 4th bond, not an actual one
+    const hasIndicator = verticesWith3Bonds.some(v => 
+      Math.abs(v.x - vx) < 0.01 && Math.abs(v.y - vy) < 0.01
+    );
+    
+    if (hasIndicator && count >= 3) {
+      return 3; // Cap at 3 bonds for grid snapping purposes
+    }
+    
+    return count;
+  }, [segments, verticesWith3Bonds]);
+
+  // Clear all selections
+  const clearSelection = useCallback(() => {
+    clearSelectionUtil(
+      setSelectedSegments,
+      setSelectedVertices,
+      setSelectedArrows,
+      setSelectionBounds
+    );
+  }, []);
+
+  // Capture current state for undo history
+  const captureState = useCallback(() => {
+    const currentState = {
+      segments: JSON.parse(JSON.stringify(segments)),
+      vertices: JSON.parse(JSON.stringify(vertices)),
+      vertexAtoms: JSON.parse(JSON.stringify(vertexAtoms)),
+      vertexTypes: JSON.parse(JSON.stringify(vertexTypes)),
+      arrows: JSON.parse(JSON.stringify(arrows)),
+      freeFloatingVertices: new Set(freeFloatingVertices),
+      detectedRings: JSON.parse(JSON.stringify(detectedRings)),
+      verticesWith3Bonds: JSON.parse(JSON.stringify(verticesWith3Bonds))
+    };
+
+    setHistory(prevHistory => {
+      // If we're not at the end of history, truncate everything after current position
+      const newHistory = prevHistory.slice(0, historyIndex + 1);
+      // Add new state
+      newHistory.push(currentState);
+      // Limit history to 50 states to prevent memory issues
+      if (newHistory.length > 50) {
+        newHistory.shift();
+        return newHistory;
+      }
+      return newHistory;
+    });
+
+    setHistoryIndex(prevIndex => {
+      const newIndex = Math.min(prevIndex + 1, 49); // Cap at 49 (0-indexed)
+      return newIndex;
+    });
+  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, verticesWith3Bonds, historyIndex]);
+
+  // Undo the last action
+  const undo = useCallback(() => {
+    if (historyIndex <= 0) return; // Nothing to undo
+
+    const previousState = history[historyIndex - 1];
+    if (!previousState) return;
+
+    // Restore all state variables
+    setSegments(previousState.segments);
+    setVertices(previousState.vertices);
+    setVertexAtoms(previousState.vertexAtoms);
+    setVertexTypes(previousState.vertexTypes);
+    setArrows(previousState.arrows);
+    setFreeFloatingVertices(previousState.freeFloatingVertices);
+    setDetectedRings(previousState.detectedRings);
+    setVerticesWith3Bonds(previousState.verticesWith3Bonds);
+
+    // Update history index
+    setHistoryIndex(prev => prev - 1);
+
+    // Clear any active states
+    clearSelection();
+    setShowAtomInput(false);
+    setIsPasteMode(false);
+    setFourthBondMode(false);
+    setFourthBondSource(null);
+    setFourthBondPreview(null);
+    setCurvedArrowStartPoint(null);
+    setArrowPreview(null);
+  }, [history, historyIndex, clearSelection]);
+
+  // Calculate best alignment for pasted molecule to grid
+  const calculateGridAlignment = useCallback((pastedVertices, clickX, clickY) => {
+    if (!pastedVertices || pastedVertices.length === 0) return null;
+    
+    // Cache recent calculations to avoid duplicate work
+    const cacheKey = `${clickX.toFixed(0)},${clickY.toFixed(0)},${pastedVertices.length}`;
+    if (calculateGridAlignment.cache && calculateGridAlignment.cache.key === cacheKey) {
+      return calculateGridAlignment.cache.result;
+    }
+    
+    // Performance optimization: only try alignments from first 3 vertices
+    const maxTryVertices = Math.min(3, pastedVertices.length);
+    let bestAlignment = null;
+    let bestScore = Infinity;
+    
+    for (let index = 0; index < maxTryVertices; index++) {
+      const pastedVertex = pastedVertices[index];
+      const pastedWorldX = clickX - offset.x + pastedVertex.x;
+      const pastedWorldY = clickY - offset.y + pastedVertex.y;
+      
+      // Always find closest grid vertex regardless of distance (aggressive snapping)
+      const closestGrid = findClosestGridVertex(pastedWorldX, pastedWorldY, Infinity);
+      if (!closestGrid) continue;
+      
+      // Calculate translation needed to align this pasted vertex to grid vertex
+      const translationX = closestGrid.vertex.x - pastedWorldX;
+      const translationY = closestGrid.vertex.y - pastedWorldY;
+      
+      // Test this alignment for all vertices
+      let totalScore = closestGrid.distance;
+      const vertexMappings = new Map();
+      let snappedCount = 1; // Anchor vertex always snaps
+      vertexMappings.set(index, closestGrid.vertex);
+      
+             // Test remaining vertices
+       for (let i = 0; i < pastedVertices.length; i++) {
+         if (i === index) continue; // Skip anchor vertex
+         
+         const vertex = pastedVertices[i];
+         const alignedX = clickX - offset.x + vertex.x + translationX;
+         const alignedY = clickY - offset.y + vertex.y + translationY;
+         
+         // Always snap to closest grid vertex (aggressive snapping)
+         const nearestGrid = findClosestGridVertex(alignedX, alignedY, Infinity);
+         if (nearestGrid) {
+           // Quick bond count check (optimization: skip orientation for now)
+           const targetBondCount = countBondsAtVertexForSnapping(nearestGrid.vertex);
+           
+           if (targetBondCount <= 4) {
+             vertexMappings.set(i, nearestGrid.vertex);
+             totalScore += nearestGrid.distance * 0.1; // Reduce distance weight for aggressive snapping
+             snappedCount++;
+           } else {
+             totalScore += 30; // Penalty for unbondable vertex
+           }
+         } else {
+           totalScore += 100; // Higher penalty if no grid vertex found (shouldn't happen)
+         }
+       }
+      
+             // Accept alignment if it's better than current best
+       const snappingRatio = snappedCount / pastedVertices.length;
+       if (snappingRatio >= 0.1 && totalScore < bestScore) { // Very low threshold for aggressive snapping
+        bestScore = totalScore;
+        bestAlignment = {
+          translation: { x: translationX, y: translationY },
+          rotation: 0,
+          vertexMappings,
+          score: totalScore,
+          anchorIndex: index,
+          snappedCount: snappedCount
+        };
+        
+        // Early exit if we found a really good alignment
+        if (snappingRatio >= 0.8 && totalScore < 50) break;
+      }
+    }
+    
+    // Cache the result
+    calculateGridAlignment.cache = { key: cacheKey, result: bestAlignment };
+    return bestAlignment;
+  }, [findClosestGridVertex, offset, countBondsAtVertexForSnapping, segments]);
+
+  // Update grid index when vertices change
+  useEffect(() => {
+    if (vertices.length > 0) {
+      const index = buildGridVertexIndex(vertices);
+      setGridVertexIndex(index);
+      
+      // Clear alignment cache when grid changes
+      if (calculateGridAlignment.cache) {
+        calculateGridAlignment.cache = null;
+      }
+    }
+  }, [vertices, buildGridVertexIndex]);
 
   // Draw grid: segments and vertices (with atoms), hiding gray lines around atoms
   const drawGrid = useCallback(() => {
@@ -2048,7 +2254,7 @@ const HexGridWithToolbar = () => {
         const isSelected = mode === 'mouse' && selectedArrows.has(index);
         const arrowColor = isSelected ? 'rgb(54,98,227)' : '#000';
         
-        drawArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, arrowColor, 3);
+                      drawArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, arrowColor, 3, mode);
         
         // Draw semi-transparent blue circle in the center of forward arrows when in mouse mode
         if (mode === 'mouse') {
@@ -2075,7 +2281,7 @@ const HexGridWithToolbar = () => {
         const isSelected = mode === 'mouse' && selectedArrows.has(index);
         const arrowColor = isSelected ? 'rgb(54,98,227)' : '#000';
         
-        drawEquilArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, arrowColor, 3, topX1, topX2, bottomX1, bottomX2, index);
+                      drawEquilArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, arrowColor, 3, topX1, topX2, bottomX1, bottomX2, index, mode, isPointInArrowCircle, offset);
         
         // Draw semi-transparent blue circle in the center of equilibrium arrows when in mouse mode
         if (mode === 'mouse') {
@@ -2098,7 +2304,7 @@ const HexGridWithToolbar = () => {
         const isSelected = mode === 'mouse' && selectedArrows.has(index);
         const arrowColor = isSelected ? 'rgb(54,98,227)' : '#000';
         
-        drawCurvedArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, type, arrowColor, index, peakX, peakY, arrows);
+                      drawCurvedArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, type, arrowColor, index, peakX, peakY, arrows, mode, hoverCurvedArrow);
       }
     });
     
@@ -2126,7 +2332,9 @@ const HexGridWithToolbar = () => {
           -1,
           peakPos.x,
           peakPos.y,
-          arrows
+          arrows,
+          mode,
+          hoverCurvedArrow
         );
         
         // Additionally, mark the start point more prominently to show it's fixed
@@ -2147,7 +2355,7 @@ const HexGridWithToolbar = () => {
           const previewY1 = y;
           const previewX2 = x + 40;
           const previewY2 = y;
-          drawArrowOnCanvas(ctx, previewX1, previewY1, previewX2, previewY2, 'rgba(0,0,0,0.4)', 3);
+          drawArrowOnCanvas(ctx, previewX1, previewY1, previewX2, previewY2, 'rgba(0,0,0,0.4)', 3, mode);
         } else if (mode === 'equil') {
           const previewX1 = x - 40;
           const previewY1 = y;
@@ -2155,7 +2363,7 @@ const HexGridWithToolbar = () => {
           const previewY2 = y;
           // Use same coordinates for top and bottom in the preview
           drawEquilArrowOnCanvas(ctx, previewX1, previewY1, previewX2, previewY2, 'rgba(0,0,0,0.4)', 3, 
-            previewX1, previewX2, previewX1, previewX2);
+            previewX1, previewX2, previewX1, previewX2, -1, mode, isPointInArrowCircle, offset);
         } else if (mode.startsWith('curve')) {
           // For first click of a curved arrow, show a small indicator with directional tip
           ctx.save();
@@ -2491,18 +2699,18 @@ const HexGridWithToolbar = () => {
                 const wedgeWidth = 8;
                 
                 ctx.fillStyle = '#888';
-                ctx.beginPath();
+              ctx.beginPath();
                 
                 if (bondDirection === 1) {
                   // Forward direction: narrow at start, wide at end
-                  ctx.moveTo(x1, y1);
+              ctx.moveTo(x1, y1);
                   ctx.lineTo(x2 + perpX * wedgeWidth, y2 + perpY * wedgeWidth);
                   ctx.lineTo(x2 - perpX * wedgeWidth, y2 - perpY * wedgeWidth);
                 } else {
                   // Reverse direction: wide at start, narrow at end
                   ctx.moveTo(x1 + perpX * wedgeWidth, y1 + perpY * wedgeWidth);
                   ctx.lineTo(x1 - perpX * wedgeWidth, y1 - perpY * wedgeWidth);
-                  ctx.lineTo(x2, y2);
+              ctx.lineTo(x2, y2);
                 }
                 ctx.closePath();
                 ctx.fill();
@@ -2536,7 +2744,7 @@ const HexGridWithToolbar = () => {
                   ctx.beginPath();
                   ctx.moveTo(dashX - perpX * dashWidth/2, dashY - perpY * dashWidth/2);
                   ctx.lineTo(dashX + perpX * dashWidth/2, dashY + perpY * dashWidth/2);
-                  ctx.stroke();
+              ctx.stroke();
                 }
                 ctx.lineCap = 'butt';
               } else if (segment.bondType === 'ambiguous') {
@@ -2599,15 +2807,28 @@ const HexGridWithToolbar = () => {
               const offset = 5;
               const ext = 6;
               
-              // Check connections in the clipboard
-              const v1Connections = clipboard.segments.filter(s => 
+              // Check connections in the clipboard AND existing bonds at target location
+              let v1Connections = clipboard.segments.filter(s => 
                 s !== segment && s.bondOrder > 0 && 
                 (s.vertex1Index === segment.vertex1Index || s.vertex2Index === segment.vertex1Index)
               ).length;
-              const v2Connections = clipboard.segments.filter(s => 
+              let v2Connections = clipboard.segments.filter(s => 
                 s !== segment && s.bondOrder > 0 && 
                 (s.vertex1Index === segment.vertex2Index || s.vertex2Index === segment.vertex2Index)
               ).length;
+              
+              // If using grid snapping, also count existing bonds at the target vertices
+              if (snapAlignment && showSnapPreview) {
+                const v1Target = snapAlignment.vertexMappings.get(segment.vertex1Index);
+                const v2Target = snapAlignment.vertexMappings.get(segment.vertex2Index);
+                
+                if (v1Target) {
+                  v1Connections += countBondsAtVertexForSnapping(v1Target);
+                }
+                if (v2Target) {
+                  v2Connections += countBondsAtVertexForSnapping(v2Target);
+                }
+              }
               
               const noBondsAtBothEnds = v1Connections === 0 && v2Connections === 0;
               const shorten = noBondsAtBothEnds ? -2 : -3;
@@ -2648,34 +2869,34 @@ const HexGridWithToolbar = () => {
                 // This would require implementing the full orientation logic
                 // For now, use simplified version but with correct offsets
                 const offsetMultiplier = 2;
-                
-                if (segment.flipSmallerLine) {
-                  // One full line, one shorter line
-                  ctx.beginPath();
+              
+              if (segment.flipSmallerLine) {
+                // One full line, one shorter line
+                ctx.beginPath();
                   ctx.moveTo(x1 - ux * (ext + shorten - 3), y1 - uy * (ext + shorten - 3));
                   ctx.lineTo(x2 + ux * (ext + shorten - 3), y2 + uy * (ext + shorten - 3));
-                  ctx.stroke();
-                  
+                ctx.stroke();
+                
                   // Shorter line
                   const shortenStart = v1Connections > 0 ? 8 : 0;
                   const shortenEnd = v2Connections > 0 ? 8 : 0;
-                  ctx.beginPath();
+                ctx.beginPath();
                   ctx.moveTo(x1 + perpX * offset * offsetMultiplier - ux * (ext + shorten - shortenStart), 
                             y1 + perpY * offset * offsetMultiplier - uy * (ext + shorten - shortenStart));
                   ctx.lineTo(x2 + perpX * offset * offsetMultiplier + ux * (ext + shorten - shortenEnd), 
                             y2 + perpY * offset * offsetMultiplier + uy * (ext + shorten - shortenEnd));
-                  ctx.stroke();
-                } else {
+                ctx.stroke();
+              } else {
                   // Two equal lines offset to opposite sides
-                  ctx.beginPath();
+                ctx.beginPath();
                   ctx.moveTo(x1 - perpX * offset - ux * (ext + shorten - 3), y1 - perpY * offset - uy * (ext + shorten - 3));
                   ctx.lineTo(x2 - perpX * offset + ux * (ext + shorten - 3), y2 - perpY * offset + uy * (ext + shorten - 3));
-                  ctx.stroke();
-                  
-                  ctx.beginPath();
+                ctx.stroke();
+                
+                ctx.beginPath();
                   ctx.moveTo(x1 + perpX * offset - ux * (ext + shorten - 3), y1 + perpY * offset - uy * (ext + shorten - 3));
                   ctx.lineTo(x2 + perpX * offset + ux * (ext + shorten - 3), y2 + perpY * offset + uy * (ext + shorten - 3));
-                  ctx.stroke();
+                ctx.stroke();
                 }
               }
             } else if (segment.bondOrder === 3) {
@@ -2774,366 +2995,23 @@ const HexGridWithToolbar = () => {
           const y2 = previewY + arrow.y2 + offset.y;
           
           if (arrow.type === 'arrow') {
-            drawArrowOnCanvas(ctx, x1, y1, x2, y2, '#888');
+                            drawArrowOnCanvas(ctx, x1, y1, x2, y2, '#888', 3, mode);
           } else if (arrow.type === 'equilibrium') {
             const topX1 = arrow.topX1 !== undefined ? previewX + arrow.topX1 + offset.x : x1;
             const topX2 = arrow.topX2 !== undefined ? previewX + arrow.topX2 + offset.x : x2;
             const bottomX1 = arrow.bottomX1 !== undefined ? previewX + arrow.bottomX1 + offset.x : x1;
             const bottomX2 = arrow.bottomX2 !== undefined ? previewX + arrow.bottomX2 + offset.x : x2;
-            drawEquilArrowOnCanvas(ctx, x1, y1, x2, y2, '#888', 3, topX1, topX2, bottomX1, bottomX2);
+                          drawEquilArrowOnCanvas(ctx, x1, y1, x2, y2, '#888', 3, topX1, topX2, bottomX1, bottomX2, -1, mode, isPointInArrowCircle, offset);
           } else if (arrow.type && arrow.type.startsWith('curve')) {
             const peakX = arrow.peakX !== undefined ? previewX + arrow.peakX + offset.x : null;
             const peakY = arrow.peakY !== undefined ? previewY + arrow.peakY + offset.y : null;
-            drawCurvedArrowOnCanvas(ctx, x1, y1, x2, y2, arrow.type, '#888', -1, peakX, peakY);
+                          drawCurvedArrowOnCanvas(ctx, x1, y1, x2, y2, arrow.type, '#888', -1, peakX, peakY, null, mode, hoverCurvedArrow);
           }
         });
         
         ctx.restore();
       }
-  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition, snapAlignment, showSnapPreview]);
-
-  function drawArrowOnCanvas(ctx, x1, y1, x2, y2, color = "#000", width = 3) {
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    ctx.beginPath();
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
-    ctx.stroke();
-    
-    // Draw filled triangle arrowhead shifted to the right from the end tip
-    const angle = Math.atan2(y2 - y1, x2 - x1);
-    // Offset the entire triangle to the right
-    const tipOffset = 3; // Move the tip 3px to the right
-    const arrowTipX = x2 + tipOffset * Math.cos(angle);
-    const arrowTipY = y2 + tipOffset * Math.sin(angle);
-    const headlen = 14;
-    const arrowX = arrowTipX - headlen * Math.cos(angle);
-    const arrowY = arrowTipY - headlen * Math.sin(angle);
-    ctx.beginPath();
-    ctx.moveTo(arrowTipX, arrowTipY);
-    ctx.lineTo(
-      arrowX - 7 * Math.sin(angle),
-      arrowY + 7 * Math.cos(angle)
-    );
-    ctx.lineTo(
-      arrowX + 7 * Math.sin(angle),
-      arrowY - 7 * Math.cos(angle)
-    );
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-    
-    // Add larger outward-pointing triangles at both ends of the arrow when in mouse mode
-    if (mode === 'mouse') {
-      // Triangle at the end (tip) - placed further beyond the arrow tip and larger
-      const tipTriangleSize = 12; // Doubled from 6 to 12
-      // Slightly increase distance from arrow tip
-      const tipDistance = 17;
-      const tipX = x2 + tipDistance * Math.cos(angle);
-      const tipY = y2 + tipDistance * Math.sin(angle);
-      
-      ctx.beginPath();
-      ctx.moveTo(tipX, tipY);
-      ctx.lineTo(
-        tipX - tipTriangleSize * Math.cos(angle) - tipTriangleSize * Math.sin(angle),
-        tipY - tipTriangleSize * Math.sin(angle) + tipTriangleSize * Math.cos(angle)
-      );
-      ctx.lineTo(
-        tipX - tipTriangleSize * Math.cos(angle) + tipTriangleSize * Math.sin(angle),
-        tipY - tipTriangleSize * Math.sin(angle) - tipTriangleSize * Math.cos(angle)
-      );
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(54, 98, 227, 0.7)';
-      ctx.fill();
-      
-      // Triangle at the start - placed further beyond the start point and larger
-      const startTriangleSize = 12; // Doubled from 6 to 12
-      // Slightly increase distance from arrow start
-      const startDistance = 17;
-      const startX = x1 - startDistance * Math.cos(angle);
-      const startY = y1 - startDistance * Math.sin(angle);
-      
-      ctx.beginPath();
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(
-        startX + startTriangleSize * Math.cos(angle) - startTriangleSize * Math.sin(angle),
-        startY + startTriangleSize * Math.sin(angle) + startTriangleSize * Math.cos(angle)
-      );
-      ctx.lineTo(
-        startX + startTriangleSize * Math.cos(angle) + startTriangleSize * Math.sin(angle),
-        startY + startTriangleSize * Math.sin(angle) - startTriangleSize * Math.cos(angle)
-      );
-      ctx.closePath();
-      ctx.fillStyle = 'rgba(54, 98, 227, 0.7)';
-      ctx.fill();
-    }
-    
-    ctx.restore();
-  }
-
-  function drawEquilArrowOnCanvas(ctx, x1, y1, x2, y2, color = "#000", width = 3, topX1, topX2, bottomX1, bottomX2, arrowIndex = -1) {
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    
-    // Use separate coordinates if provided, otherwise use the defaults
-    const topStartX = topX1 !== undefined ? topX1 : x1;
-    const topEndX = topX2 !== undefined ? topX2 : x2;
-    const bottomStartX = bottomX1 !== undefined ? bottomX1 : x1;
-    const bottomEndX = bottomX2 !== undefined ? bottomX2 : x2;
-    
-    // Top arrow: left to right
-    ctx.beginPath();
-    ctx.moveTo(topStartX, y1 - 5);
-    ctx.lineTo(topEndX, y1 - 5);
-    ctx.stroke();
-    
-    // Right arrowhead (filled triangle) - shifted to the right
-    const angleR = 0; // horizontal
-    const headlen = 14;
-    // Offset the entire top triangle to the right
-    const tipOffset = 3; // Move the tip 3px to the right
-    const rx = topEndX + tipOffset;
-    const ry = y1 - 5;
-    const arrowX = rx - headlen * Math.cos(angleR);
-    const arrowY = ry - headlen * Math.sin(angleR);
-    ctx.beginPath();
-    ctx.moveTo(rx, ry);
-    ctx.lineTo(arrowX - 7 * Math.sin(angleR), arrowY + 7 * Math.cos(angleR));
-    ctx.lineTo(arrowX + 7 * Math.sin(angleR), arrowY - 7 * Math.cos(angleR));
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-    
-    // Add large outward-pointing triangle at the right end in mouse mode
-    if (mode === 'mouse') {
-      const triangleSize = 16; // Increased from 12 to 16
-      const triangleOffset = 18; // Increased from 14 to 18 for better positioning
-
-      // Get hover information for special hover effects
-      const { index: hoveredArrowIndex, part: hoveredArrowPart } = isPointInArrowCircle(
-        rx + offset.x, ry, true // Pass current coords and skipDistance=true to just check if this is the hovered arrow
-      );
-      const isHoveredTopEnd = hoveredArrowIndex === arrowIndex && hoveredArrowPart === 'topEnd';
-      
-      // Right triangle (pointing right) - top half only for equilibrium arrows to avoid overlap
-      ctx.beginPath();
-      ctx.moveTo(rx + triangleOffset, ry);
-      ctx.lineTo(rx + triangleOffset - triangleSize, ry - triangleSize);
-      ctx.lineTo(rx + triangleOffset - triangleSize, ry); // Changed: only go to center height, not below
-      ctx.closePath();
-      // Use darker color when hovered
-      ctx.fillStyle = isHoveredTopEnd ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.7)';
-      ctx.fill();
-      
-      // Top left triangle indicator has been removed
-    }
-    
-    // Bottom arrow: right to left
-    ctx.beginPath();
-    ctx.moveTo(bottomEndX, y2 + 5);
-    ctx.lineTo(bottomStartX, y2 + 5);
-    ctx.stroke();
-    
-    // Left arrowhead (filled triangle) - shifted to the left
-    const angleL = Math.PI; // horizontal, left
-    // Offset the entire bottom triangle to the left
-    const tipOffsetL = 3; // Move the tip 3px to the left
-    const lx = bottomStartX - tipOffsetL;
-    const ly = y2 + 5;
-    const arrowXL = lx - headlen * Math.cos(angleL);
-    const arrowYL = ly - headlen * Math.sin(angleL);
-    ctx.beginPath();
-    ctx.moveTo(lx, ly);
-    ctx.lineTo(arrowXL - 7 * Math.sin(angleL), arrowYL + 7 * Math.cos(angleL));
-    ctx.lineTo(arrowXL + 7 * Math.sin(angleL), arrowYL - 7 * Math.cos(angleL));
-    ctx.closePath();
-    ctx.fillStyle = color;
-    ctx.fill();
-    
-    // Add large outward-pointing triangles at both ends in mouse mode
-    if (mode === 'mouse') {
-      const triangleSize = 16; // Increased from 12 to 16
-      const triangleOffset = 18; // Increased from 14 to 18 for better positioning
-      
-      // Get hover information for special hover effects
-      const { index: hoveredArrowIndex, part: hoveredArrowPart } = isPointInArrowCircle(
-        lx + offset.x, ly, true // Pass current coords and skipDistance=true to just check if this is the hovered arrow
-      );
-      const isHoveredBottomStart = hoveredArrowIndex === arrowIndex && hoveredArrowPart === 'bottomStart';
-      
-      // Left triangle (pointing left) for bottom arrow - bottom half only for equilibrium arrows to avoid overlap
-      ctx.beginPath();
-      ctx.moveTo(lx - triangleOffset, ly);
-      ctx.lineTo(lx - triangleOffset + triangleSize, ly); // Changed: only go to center height, not above
-      ctx.lineTo(lx - triangleOffset + triangleSize, ly + triangleSize);
-      ctx.closePath();
-      // Use darker color when hovered
-      ctx.fillStyle = isHoveredBottomStart ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.7)';
-      ctx.fill();
-      
-      // Bottom right triangle indicator has been removed
-    }
-    
-    ctx.restore();
-  }
-
-  // Helper function to calculate the peak position of a curved arrow
-  const calculateCurvedArrowPeak = (x1, y1, x2, y2, type) => {
-    // Calculate distance and midpoint between the two points
-    const deltaX = x2 - x1;
-    const deltaY = y2 - y1;
-    const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-    const midX = (x1 + x2) / 2;
-    const midY = (y1 + y2) / 2;
-    
-    // Perpendicular vector to the line from start to end
-    const perpX = -deltaY / (distance || 1);
-    const perpY = deltaX / (distance || 1);
-    
-    // Determine direction and curvature level
-    const isTopRow = ['curve0', 'curve1', 'curve2'].includes(type);
-    const curvatureMap = {
-      'curve0': 0.25, 'curve1': 0.6, 'curve2': 1.0,
-      'curve3': 0.25, 'curve4': 0.6, 'curve5': 1.0
-    };
-    
-    // Get curvature factor for this arrow type
-    const curveFactor = curvatureMap[type] || 0.5;
-    
-    // Calculate peak position directly - simpler and more predictable
-    const peakHeight = distance * curveFactor;
-    
-    // Calculate peak position by moving perpendicular to the line
-    let peakX, peakY;
-    if (isTopRow) {
-      // Clockwise arrows (top row) - peak below the line
-      peakX = midX - perpX * peakHeight;
-      peakY = midY - perpY * peakHeight;
-    } else {
-      // Counterclockwise arrows (bottom row) - peak above the line
-      peakX = midX + perpX * peakHeight;
-      peakY = midY + perpY * peakHeight;
-    }
-    
-    return { x: peakX, y: peakY };
-  };
-
-  // Draw curved arrows based on type
-  function drawCurvedArrowOnCanvas(ctx, x1, y1, x2, y2, type, color = "#000", arrowIndex = -1, peakX = null, peakY = null, arrowsArray = null) {
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 3;
-    ctx.fillStyle = color;
-
-    // Default values
-    let startX = x1;
-    let startY = y1;
-    let endX = x2;
-    let endY = y2;
-    
-    // If peak position is not provided, calculate it based on type
-    if (peakX === null || peakY === null) {
-      const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, type);
-      peakX = peakPos.x;
-      peakY = peakPos.y;
-    }
-    
-    // Draw using quadratic Bezier curve with the peak as the control point
-    ctx.beginPath();
-    ctx.moveTo(startX, startY);
-    ctx.quadraticCurveTo(peakX, peakY, endX, endY);
-    ctx.stroke();
-    
-    // Calculate tangent at the end point for the arrowhead
-    // For a quadratic Bezier curve, the tangent at t=1 (end point) is the direction from the control point to the end point
-    const tangentX = endX - peakX;
-    const tangentY = endY - peakY;
-    const tangentLength = Math.sqrt(tangentX * tangentX + tangentY * tangentY);
-    
-    // Normalize the tangent vector
-    const normalizedTangentX = tangentX / tangentLength;
-    const normalizedTangentY = tangentY / tangentLength;
-    
-    // Draw arrowhead - move triangle forward so its center is at the curve end
-    const headlen = 14;
-    const triangleOffset = 7; // Move triangle forward by half its width
-    
-    // Move the tip forward along the tangent
-    const arrowTipX = endX + triangleOffset * normalizedTangentX;
-    const arrowTipY = endY + triangleOffset * normalizedTangentY;
-    
-    const arrowX = arrowTipX - headlen * normalizedTangentX;
-    const arrowY = arrowTipY - headlen * normalizedTangentY;
-    
-    const angle = Math.atan2(normalizedTangentY, normalizedTangentX);
-    
-    ctx.beginPath();
-    ctx.moveTo(arrowTipX, arrowTipY);
-    ctx.lineTo(
-      arrowX - 7 * Math.sin(angle),
-      arrowY + 7 * Math.cos(angle)
-    );
-    ctx.lineTo(
-      arrowX + 7 * Math.sin(angle),
-      arrowY - 7 * Math.cos(angle)
-    );
-    ctx.closePath();
-    ctx.fill();
-    
-    // Add blue circles at both endpoints when in mouse mode
-    if (mode === 'mouse') {
-      const circleRadius = 10;
-      
-      // Get hover information for special hover effects using the hover state
-      const isHoveredStart = hoverCurvedArrow.index === arrowIndex && hoverCurvedArrow.part === 'start';
-      const isHoveredEnd = hoverCurvedArrow.index === arrowIndex && hoverCurvedArrow.part === 'end';
-      const isHoveredPeak = hoverCurvedArrow.index === arrowIndex && hoverCurvedArrow.part === 'peak';
-      
-      // Blue circle at start point
-      ctx.beginPath();
-      ctx.arc(startX, startY, circleRadius, 0, 2 * Math.PI);
-      ctx.fillStyle = isHoveredStart ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
-      ctx.fill();
-      
-      // Blue circle at end point
-      ctx.beginPath();
-      ctx.arc(endX, endY, circleRadius, 0, 2 * Math.PI);
-      ctx.fillStyle = isHoveredEnd ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
-      ctx.fill();
-      
-      // Blue circle at peak point
-      // For quadratic Bezier curves, the actual peak on the curve at t=0.5 is:
-      // P(0.5) = 0.25 * P0 + 0.5 * P1 + 0.25 * P2
-      // where P0=start, P1=control point (peakX,peakY), P2=end
-      if (peakX !== null && peakY !== null) {
-        // Calculate the actual point on the curve at t=0.5
-        const actualCurvePeakX = 0.25 * startX + 0.5 * peakX + 0.25 * endX;
-        const actualCurvePeakY = 0.25 * startY + 0.5 * peakY + 0.25 * endY;
-        
-        ctx.beginPath();
-        ctx.arc(actualCurvePeakX, actualCurvePeakY, circleRadius, 0, 2 * Math.PI);
-        ctx.fillStyle = isHoveredPeak ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
-        ctx.fill();
-      } else {
-        // Fallback: calculate peak if not provided
-        const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, type);
-        if (peakPos) {
-          // Calculate actual curve peak from control point
-          const actualCurvePeakX = 0.25 * startX + 0.5 * peakPos.x + 0.25 * endX;
-          const actualCurvePeakY = 0.25 * startY + 0.5 * peakPos.y + 0.25 * endY;
-          
-          ctx.beginPath();
-          ctx.arc(actualCurvePeakX, actualCurvePeakY, circleRadius, 0, 2 * Math.PI);
-          ctx.fillStyle = isHoveredPeak ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
-          ctx.fill();
-        }
-      }
-    }
-    
-    ctx.restore();
-  }
+  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, countBondsAtVertexForSnapping, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition, snapAlignment, showSnapPreview]);
 
   // Check if a point is inside a blue circle indicator
   const isPointInIndicator = useCallback((x, y) => {
@@ -3152,472 +3030,77 @@ const HexGridWithToolbar = () => {
     return null; // No indicator was clicked
   }, [verticesWith3Bonds]);
 
-  // Helper functions for selection box intersection
-  const isPointInRect = (px, py, x1, y1, x2, y2) => {
-    return px >= x1 && px <= x2 && py >= y1 && py <= y2;
-  };
 
-  const isLineIntersectingRect = (lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry2) => {
-    // Check if either endpoint is inside the rectangle
-    if (isPointInRect(lx1, ly1, rx1, ry1, rx2, ry2) || 
-        isPointInRect(lx2, ly2, rx1, ry1, rx2, ry2)) {
-      return true;
-    }
-    
-    // Check if line intersects with any edge of the rectangle
-    const intersectsEdge = (x1, y1, x2, y2, x3, y3, x4, y4) => {
-      const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
-      if (Math.abs(denom) < 1e-10) return false; // parallel lines
-      
-      const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
-      const u = -((x1 - x2) * (y1 - y3) - (y1 - y2) * (x1 - x3)) / denom;
-      
-      return t >= 0 && t <= 1 && u >= 0 && u <= 1;
-    };
-    
-    // Check intersection with all four edges of rectangle
-    return intersectsEdge(lx1, ly1, lx2, ly2, rx1, ry1, rx2, ry1) || // top edge
-           intersectsEdge(lx1, ly1, lx2, ly2, rx2, ry1, rx2, ry2) || // right edge
-           intersectsEdge(lx1, ly1, lx2, ly2, rx2, ry2, rx1, ry2) || // bottom edge
-           intersectsEdge(lx1, ly1, lx2, ly2, rx1, ry2, rx1, ry1);   // left edge
-  };
 
   // Function to update selection based on current selection box
   const updateSelection = useCallback(() => {
-    if (!isSelecting) return;
-    
-    const x1 = Math.min(selectionStart.x, selectionEnd.x);
-    const y1 = Math.min(selectionStart.y, selectionEnd.y);
-    const x2 = Math.max(selectionStart.x, selectionEnd.x);
-    const y2 = Math.max(selectionStart.y, selectionEnd.y);
-    
-    const newSelectedSegments = new Set();
-    const newSelectedVertices = new Set();
-    const newSelectedArrows = new Set();
-    
-    // Check segments
-    segments.forEach((segment, index) => {
-      const sx1 = segment.x1 + offset.x;
-      const sy1 = segment.y1 + offset.y;
-      const sx2 = segment.x2 + offset.x;
-      const sy2 = segment.y2 + offset.y;
-      
-      if (isLineIntersectingRect(sx1, sy1, sx2, sy2, x1, y1, x2, y2)) {
-        newSelectedSegments.add(index);
-      }
-    });
-    
-    // Check vertices
-    vertices.forEach((vertex, index) => {
-      const vx = vertex.x + offset.x;
-      const vy = vertex.y + offset.y;
-      
-      if (isPointInRect(vx, vy, x1, y1, x2, y2)) {
-        newSelectedVertices.add(index);
-      }
-    });
-    
-    // Check arrows
-    arrows.forEach((arrow, index) => {
-      const ax1 = arrow.x1 + offset.x;
-      const ay1 = arrow.y1 + offset.y;
-      const ax2 = arrow.x2 + offset.x;
-      const ay2 = arrow.y2 + offset.y;
-      
-      if (isLineIntersectingRect(ax1, ay1, ax2, ay2, x1, y1, x2, y2)) {
-        newSelectedArrows.add(index);
-      }
-    });
-    
-    setSelectedSegments(newSelectedSegments);
-    setSelectedVertices(newSelectedVertices);
-    setSelectedArrows(newSelectedArrows);
-    
-    // Store selection bounds if any items are selected
-    if (newSelectedSegments.size > 0 || newSelectedVertices.size > 0 || newSelectedArrows.size > 0) {
-      setSelectionBounds({ x1, y1, x2, y2 });
-    } else {
-      setSelectionBounds(null);
-    }
+    updateSelectionUtil(
+      isSelecting,
+      selectionStart,
+      selectionEnd,
+      segments,
+      vertices,
+      arrows,
+      offset,
+      setSelectedSegments,
+      setSelectedVertices,
+      setSelectedArrows,
+      setSelectionBounds
+    );
   }, [isSelecting, selectionStart, selectionEnd, segments, vertices, arrows, offset]);
-
-  // Clear all selections
-  const clearSelection = useCallback(() => {
-    setSelectedSegments(new Set());
-    setSelectedVertices(new Set());
-    setSelectedArrows(new Set());
-    setSelectionBounds(null);
-  }, []);
   
   // Copy selected items to clipboard
   const copySelection = useCallback(() => {
-    if (selectedSegments.size === 0 && selectedVertices.size === 0 && selectedArrows.size === 0) {
-      return; // Nothing to copy
-    }
-    
-    // Calculate bounds of selected items
-    let minX = Infinity, maxX = -Infinity;
-    let minY = Infinity, maxY = -Infinity;
-    
-    // Include selected vertices in bounds
-    selectedVertices.forEach(vertexIndex => {
-      const vertex = vertices[vertexIndex];
-      if (vertex) {
-        minX = Math.min(minX, vertex.x);
-        maxX = Math.max(maxX, vertex.x);
-        minY = Math.min(minY, vertex.y);
-        maxY = Math.max(maxY, vertex.y);
-      }
-    });
-    
-    // Include vertices of selected segments in bounds
-    selectedSegments.forEach(segmentIndex => {
-      const segment = segments[segmentIndex];
-      if (segment) {
-        minX = Math.min(minX, segment.x1);
-        maxX = Math.max(maxX, segment.x1);
-        minY = Math.min(minY, segment.y1);
-        maxY = Math.max(maxY, segment.y1);
-        minX = Math.min(minX, segment.x2);
-        maxX = Math.max(maxX, segment.x2);
-        minY = Math.min(minY, segment.y2);
-        maxY = Math.max(maxY, segment.y2);
-      }
-    });
-    
-    // Include arrows in bounds
-    selectedArrows.forEach(arrowIndex => {
-      const arrow = arrows[arrowIndex];
-      if (arrow) {
-        minX = Math.min(minX, arrow.x1, arrow.x2);
-        maxX = Math.max(maxX, arrow.x1, arrow.x2);
-        minY = Math.min(minY, arrow.y1, arrow.y2);
-        maxY = Math.max(maxY, arrow.y1, arrow.y2);
-        
-        // Include peak positions for curved arrows
-        if (arrow.peakX !== undefined && arrow.peakY !== undefined) {
-          minX = Math.min(minX, arrow.peakX);
-          maxX = Math.max(maxX, arrow.peakX);
-          minY = Math.min(minY, arrow.peakY);
-          maxY = Math.max(maxY, arrow.peakY);
-        }
-      }
-    });
-    
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    
-    // Create a map of vertices that need to be copied (either selected or part of selected segments)
-    const verticesToCopy = new Map(); // Map from old vertex ID to new index in copied array
-    const copiedVertices = [];
-    
-    // Add selected vertices
-    selectedVertices.forEach(vertexIndex => {
-      const vertex = vertices[vertexIndex];
-      if (vertex) {
-        const vertexKey = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
-        if (!verticesToCopy.has(vertexKey)) {
-          verticesToCopy.set(vertexKey, copiedVertices.length);
-          copiedVertices.push({
-            x: vertex.x - centerX,
-            y: vertex.y - centerY,
-            atom: vertexAtoms[vertexKey] || null,
-            type: vertexTypes[vertexKey] || null
-          });
-        }
-      }
-    });
-    
-    // Add vertices from selected segments
-    selectedSegments.forEach(segmentIndex => {
-      const segment = segments[segmentIndex];
-      if (segment) {
-        // Find vertices at segment endpoints
-        const v1 = vertices.find(v => Math.abs(v.x - segment.x1) < 0.01 && Math.abs(v.y - segment.y1) < 0.01);
-        const v2 = vertices.find(v => Math.abs(v.x - segment.x2) < 0.01 && Math.abs(v.y - segment.y2) < 0.01);
-        
-        if (v1) {
-          const v1Key = `${v1.x.toFixed(2)},${v1.y.toFixed(2)}`;
-          if (!verticesToCopy.has(v1Key)) {
-            verticesToCopy.set(v1Key, copiedVertices.length);
-            copiedVertices.push({
-              x: v1.x - centerX,
-              y: v1.y - centerY,
-              atom: vertexAtoms[v1Key] || null,
-              type: vertexTypes[v1Key] || null
-            });
-          }
-        }
-        
-        if (v2) {
-          const v2Key = `${v2.x.toFixed(2)},${v2.y.toFixed(2)}`;
-          if (!verticesToCopy.has(v2Key)) {
-            verticesToCopy.set(v2Key, copiedVertices.length);
-            copiedVertices.push({
-              x: v2.x - centerX,
-              y: v2.y - centerY,
-              atom: vertexAtoms[v2Key] || null,
-              type: vertexTypes[v2Key] || null
-            });
-          }
-        }
-      }
-    });
-    
-    // Copy segments with updated vertex references
-    const copiedSegments = [];
-    selectedSegments.forEach(segmentIndex => {
-      const segment = segments[segmentIndex];
-      if (segment && segment.bondOrder > 0) {
-        // Find vertex indices for segment endpoints
-        const v1Key = `${segment.x1.toFixed(2)},${segment.y1.toFixed(2)}`;
-        const v2Key = `${segment.x2.toFixed(2)},${segment.y2.toFixed(2)}`;
-        
-        if (verticesToCopy.has(v1Key) && verticesToCopy.has(v2Key)) {
-          copiedSegments.push({
-            vertex1Index: verticesToCopy.get(v1Key),
-            vertex2Index: verticesToCopy.get(v2Key),
-            bondType: segment.bondType,
-            bondOrder: segment.bondOrder,
-            bondDirection: segment.bondDirection,
-            direction: segment.direction,
-            upperVertex: segment.upperVertex,
-            lowerVertex: segment.lowerVertex,
-            flipSmallerLine: segment.flipSmallerLine
-          });
-        }
-      }
-    });
-    
-    // Copy arrows with relative positions
-    const copiedArrows = [];
-    selectedArrows.forEach(arrowIndex => {
-      const arrow = arrows[arrowIndex];
-      if (arrow) {
-        const copiedArrow = {
-          x1: arrow.x1 - centerX,
-          y1: arrow.y1 - centerY,
-          x2: arrow.x2 - centerX,
-          y2: arrow.y2 - centerY,
-          type: arrow.type
-        };
-        
-        // Copy additional properties for different arrow types
-        if (arrow.type === 'equilibrium') {
-          if (arrow.topX1 !== undefined) copiedArrow.topX1 = arrow.topX1 - centerX;
-          if (arrow.topX2 !== undefined) copiedArrow.topX2 = arrow.topX2 - centerX;
-          if (arrow.bottomX1 !== undefined) copiedArrow.bottomX1 = arrow.bottomX1 - centerX;
-          if (arrow.bottomX2 !== undefined) copiedArrow.bottomX2 = arrow.bottomX2 - centerX;
-        } else if (arrow.type && arrow.type.startsWith('curve')) {
-          if (arrow.peakX !== undefined && arrow.peakY !== undefined) {
-            copiedArrow.peakX = arrow.peakX - centerX;
-            copiedArrow.peakY = arrow.peakY - centerY;
-          }
-        }
-        
-        copiedArrows.push(copiedArrow);
-      }
-    });
-    
-    setClipboard({
-      vertices: copiedVertices,
-      segments: copiedSegments,
-      arrows: copiedArrows,
-      bounds: {
-        minX: minX - centerX,
-        maxX: maxX - centerX,
-        minY: minY - centerY,
-        maxY: maxY - centerY,
-        width: maxX - minX,
-        height: maxY - minY,
-        centerX: 0,
-        centerY: 0
-      }
-    });
-    
-    // Immediately enter paste mode after copying
-    setIsPasteMode(true);
-    clearSelection();
+    copySelectionUtil(
+      selectedSegments,
+      selectedVertices,
+      selectedArrows,
+      segments,
+      vertices,
+      vertexAtoms,
+      vertexTypes,
+      arrows,
+      getIfTop,
+      setClipboard,
+      setIsPasteMode,
+      clearSelection
+    );
   }, [selectedSegments, selectedVertices, selectedArrows, segments, vertices, vertexAtoms, vertexTypes, arrows, clearSelection]);
   
 
   
   // Cancel paste mode
   const cancelPasteMode = useCallback(() => {
-    setIsPasteMode(false);
-    setSnapAlignment(null);
+    cancelPasteModeUtil(setIsPasteMode, setSnapAlignment);
   }, []);
   
   // Paste clipboard contents at given position
   const pasteAtPosition = useCallback((x, y) => {
-    if (!clipboard) return;
+    // Capture state before pasting
+    captureState();
     
-    // Use grid snapping if available
-    const useSnapping = snapAlignment && showSnapPreview && snapAlignment.score < 50; // Only snap if alignment is reasonable
-    let offsetX, offsetY;
-    
-    if (useSnapping) {
-      offsetX = x - offset.x + snapAlignment.translation.x;
-      offsetY = y - offset.y + snapAlignment.translation.y;
-    } else {
-      offsetX = x - offset.x;
-      offsetY = y - offset.y;
-    }
-    
-    // Create new vertices (or map to existing grid vertices)
-    const newVertexMap = new Map(); // Map from clipboard index to new vertex
-    const newVertices = [...vertices];
-    const newVertexAtoms = { ...vertexAtoms };
-    const newVertexTypes = { ...vertexTypes };
-    
-    clipboard.vertices.forEach((clipVertex, index) => {
-      let targetVertex;
-      
-      if (useSnapping && snapAlignment.vertexMappings.has(index)) {
-        // Use existing grid vertex
-        targetVertex = snapAlignment.vertexMappings.get(index);
-        newVertexMap.set(index, targetVertex);
-        
-        // Update existing grid vertex with pasted atom data
-        const vertexKey = `${targetVertex.x.toFixed(2)},${targetVertex.y.toFixed(2)}`;
-        if (clipVertex.atom) {
-          newVertexAtoms[vertexKey] = clipVertex.atom;
-        }
-        if (clipVertex.type) {
-          newVertexTypes[vertexKey] = clipVertex.type;
-        }
-      } else {
-        // Create new vertex at pasted position
-        const newVertex = {
-          x: offsetX + clipVertex.x,
-          y: offsetY + clipVertex.y
-        };
-        
-        newVertices.push(newVertex);
-        newVertexMap.set(index, newVertex);
-        
-        // Create vertex key for atoms/types
-        const vertexKey = `${newVertex.x.toFixed(2)},${newVertex.y.toFixed(2)}`;
-        
-        if (clipVertex.atom) {
-          newVertexAtoms[vertexKey] = clipVertex.atom;
-        }
-        if (clipVertex.type) {
-          newVertexTypes[vertexKey] = clipVertex.type;
-        }
-      }
-    });
-    
-    // Create new segments
-    const newSegments = [...segments];
-    clipboard.segments.forEach(clipSegment => {
-      const vertex1 = newVertexMap.get(clipSegment.vertex1Index);
-      const vertex2 = newVertexMap.get(clipSegment.vertex2Index);
-      
-      if (vertex1 && vertex2) {
-        const newSegment = {
-          x1: vertex1.x,
-          y1: vertex1.y,
-          x2: vertex2.x,
-          y2: vertex2.y,
-          bondOrder: clipSegment.bondOrder || 1,
-          bondType: clipSegment.bondType || null,
-          bondDirection: clipSegment.bondDirection,
-          direction: clipSegment.direction,
-          flipSmallerLine: clipSegment.flipSmallerLine
-        };
-        
-        // For double bonds, recalculate upperVertex and lowerVertex properties
-        if (newSegment.bondOrder === 2 && newSegment.direction) {
-          const vertices = calculateDoubleBondVertices(
-            newSegment.x1, newSegment.y1, 
-            newSegment.x2, newSegment.y2, 
-            newSegment.direction
-          );
-          newSegment.upperVertex = vertices.upperVertex;
-          newSegment.lowerVertex = vertices.lowerVertex;
-        } else {
-          newSegment.upperVertex = clipSegment.upperVertex;
-          newSegment.lowerVertex = clipSegment.lowerVertex;
-        }
-        
-        newSegments.push(newSegment);
-      }
-    });
-    
-    // Create new arrows
-    const newArrows = [...arrows];
-    clipboard.arrows.forEach(clipArrow => {
-      const newArrow = {
-        x1: offsetX + clipArrow.x1,
-        y1: offsetY + clipArrow.y1,
-        x2: offsetX + clipArrow.x2,
-        y2: offsetY + clipArrow.y2,
-        type: clipArrow.type
-      };
-      
-      // Copy additional properties
-      if (clipArrow.type === 'equilibrium') {
-        if (clipArrow.topX1 !== undefined) newArrow.topX1 = offsetX + clipArrow.topX1;
-        if (clipArrow.topX2 !== undefined) newArrow.topX2 = offsetX + clipArrow.topX2;
-        if (clipArrow.bottomX1 !== undefined) newArrow.bottomX1 = offsetX + clipArrow.bottomX1;
-        if (clipArrow.bottomX2 !== undefined) newArrow.bottomX2 = offsetX + clipArrow.bottomX2;
-      } else if (clipArrow.type && clipArrow.type.startsWith('curve')) {
-        if (clipArrow.peakX !== undefined && clipArrow.peakY !== undefined) {
-          newArrow.peakX = offsetX + clipArrow.peakX;
-          newArrow.peakY = offsetY + clipArrow.peakY;
-        }
-      }
-      
-      newArrows.push(newArrow);
-    });
-    
-    // Remove overlapping grid lines (bondOrder === 0) where new bonds were placed
-    // This mimics the behavior when drawing bonds over grid lines
-    const finalSegments = newSegments.map(segment => {
-      if (segment.bondOrder > 0) {
-        // This is a real bond - check if there's a grid line at the same position
-        const gridLineIndex = newSegments.findIndex(gridSeg => 
-          gridSeg.bondOrder === 0 &&
-          Math.abs(gridSeg.x1 - segment.x1) < 0.01 &&
-          Math.abs(gridSeg.y1 - segment.y1) < 0.01 &&
-          Math.abs(gridSeg.x2 - segment.x2) < 0.01 &&
-          Math.abs(gridSeg.y2 - segment.y2) < 0.01
-        );
-        
-        if (gridLineIndex !== -1) {
-          // Remove the grid line by filtering it out
-          return segment; // Keep the real bond
-        }
-      }
-      return segment;
-    }).filter((segment, index, array) => {
-      // Remove grid lines that have been replaced by real bonds
-      if (segment.bondOrder === 0) {
-        const hasOverlappingBond = array.some(otherSeg => 
-          otherSeg !== segment &&
-          otherSeg.bondOrder > 0 &&
-          Math.abs(otherSeg.x1 - segment.x1) < 0.01 &&
-          Math.abs(otherSeg.y1 - segment.y1) < 0.01 &&
-          Math.abs(otherSeg.x2 - segment.x2) < 0.01 &&
-          Math.abs(otherSeg.y2 - segment.y2) < 0.01
-        );
-        return !hasOverlappingBond; // Remove grid line if there's an overlapping bond
-      }
-      return true; // Keep all real bonds
-    });
-    
-    // Update state
-    setVertices(newVertices);
-    setVertexAtoms(newVertexAtoms);
-    setVertexTypes(newVertexTypes);
-    setSegments(finalSegments);
-    setArrows(newArrows);
-    
-    // Exit paste mode
-    setIsPasteMode(false);
-    setSnapAlignment(null);
-  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices]);
+    pasteAtPositionUtil(
+      x,
+      y,
+      clipboard,
+      snapAlignment,
+      showSnapPreview,
+      offset,
+      vertices,
+      vertexAtoms,
+      vertexTypes,
+      segments,
+      arrows,
+      calculateDoubleBondVertices,
+      setVertices,
+      setVertexAtoms,
+      setVertexTypes,
+      setSegments,
+      setArrows,
+      setIsPasteMode,
+      setSnapAlignment
+    );
+  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState]);
 
   // Helper function to change mode and clear selection
   const setModeAndClearSelection = useCallback((newMode) => {
@@ -3766,6 +3249,9 @@ const HexGridWithToolbar = () => {
   // Handle atom input submission when user presses Enter or clicks outside
   const handleAtomInputSubmit = () => {
     if (menuVertexKey) {
+      // Capture state before modifying atom
+      captureState();
+      
       // If input is empty, remove the atom
       if (!atomInputValue.trim()) {
         const { [menuVertexKey]: _, ...rest } = vertexAtoms;
@@ -3816,6 +3302,9 @@ const HexGridWithToolbar = () => {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
+    // Capture state before any action (will be added to history if action proceeds)
+    let shouldCaptureState = false;
+    
     // Handle paste mode click - should work in any mode
     if (isPasteMode) {
       pasteAtPosition(x, y);
@@ -3825,6 +3314,9 @@ const HexGridWithToolbar = () => {
     // Handle fourth bond mode
     if (fourthBondMode) {
       if (fourthBondPreview) {
+        // Capture state before creating fourth bond
+        captureState();
+        
         // Calculate normalized direction vector from source to end
         const dx = fourthBondPreview.endX - (fourthBondSource.x + offset.x);
         const dy = fourthBondPreview.endY - (fourthBondSource.y + offset.y);
@@ -3929,6 +3421,8 @@ const HexGridWithToolbar = () => {
       if (foundVertex) {
         const key = `${foundVertex.x.toFixed(2)},${foundVertex.y.toFixed(2)}`;
         if (vertexAtoms[key]) {
+          // Capture state before modifying charges/lone pairs
+          captureState();
           setVertexAtoms(prev => {
             const prevVal = prev[key];
             let newVal = prevVal;
@@ -3971,6 +3465,8 @@ const HexGridWithToolbar = () => {
       // First check if we're erasing an arrow (straight or equilibrium)
       const { index: arrowIndex } = isPointInArrowCircle(x, y, true);
       if (arrowIndex !== -1) {
+        // Capture state before erasing arrow
+        captureState();
         // Remove this arrow
         setArrows(arrows => arrows.filter((_, i) => i !== arrowIndex));
         return;
@@ -3979,6 +3475,8 @@ const HexGridWithToolbar = () => {
       // Check if we're erasing a curved arrow
       const curvedArrowIndex = isPointOnCurvedArrow(x, y);
       if (curvedArrowIndex !== -1) {
+        // Capture state before erasing curved arrow
+        captureState();
         // Remove this curved arrow
         setArrows(arrows => arrows.filter((_, i) => i !== curvedArrowIndex));
         return;
@@ -4022,6 +3520,8 @@ const HexGridWithToolbar = () => {
         return seg;
       });
       if (bondRemoved) {
+        // Capture state before erasing bond
+        captureState();
         setSegments(newSegments);
         
         // Run ring detection after bond changes
@@ -4036,6 +3536,8 @@ const HexGridWithToolbar = () => {
         if (dist <= vertexThreshold) {
           const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
           if (vertexAtoms[key]) {
+            // Capture state before erasing atom
+            captureState();
             const { [key]: _, ...rest } = vertexAtoms;
             setVertexAtoms(rest);
             return;
@@ -4048,6 +3550,9 @@ const HexGridWithToolbar = () => {
       return;
     } else if (mode === 'text') {
       // Text mode: Create a vertex at the clicked position and immediately show input box
+      
+      // Capture state before creating new vertex
+      captureState();
       
       // Calculate coordinates in the grid reference frame (subtract offset)
       const gridX = x - offset.x;
@@ -4132,6 +3637,9 @@ const HexGridWithToolbar = () => {
         }
       });
       if (closestIdx !== null) {
+        // Capture state before modifying bonds
+        captureState();
+        
         setSegments(segments => {
           // Determine bond settings based on mode
           let updatedSegments;
@@ -4570,865 +4078,158 @@ const HexGridWithToolbar = () => {
 
   // Dragging handlers...
   const handleMouseDown = event => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    // Only set mouseDownOnCanvas if the mouse is inside the canvas
-    if (x >= 0 && y >= 0 && x <= canvasRef.current.width && y <= canvasRef.current.height) {
-      setMouseDownOnCanvas(true);
-    } else {
-      setMouseDownOnCanvas(false);
-    }
-    
-    // Handle paste mode click - should work in any mode
-    if (isPasteMode) {
-      pasteAtPosition(x, y);
-      return; // Exit early after pasting
-    }
-    
-    // Check if clicking on an arrow control circle or end triangles in mouse mode
-    if (mode === 'mouse') {
-      // First check straight/equilibrium arrows
-      const { index: arrowIndex, part: arrowPart } = isPointInArrowCircle(x, y);
-      if (arrowIndex !== -1) {
-        // Store the arrow and its part that is being dragged
-        const arrow = arrows[arrowIndex];
-        let pointX, pointY;
-        
-        if (arrow.type === 'equil') {
-          if (arrowPart === 'center') {
-            // Center of equilibrium arrow
-            pointX = (arrow.x1 + arrow.x2) / 2 + offset.x;
-            pointY = arrow.y1 + offset.y;
-          } else if (arrowPart === 'topStart') {
-            // Left end of top equilibrium arrow
-            pointX = arrow.x1 + offset.x;
-            pointY = arrow.y1 - 5 + offset.y; 
-          } else if (arrowPart === 'topEnd') {
-            // Right end of top equilibrium arrow
-            pointX = arrow.x2 + offset.x;
-            pointY = arrow.y1 - 5 + offset.y;
-          } else if (arrowPart === 'bottomStart') {
-            // Left end of bottom equilibrium arrow
-            pointX = arrow.x1 + offset.x;
-            pointY = arrow.y2 + 5 + offset.y;
-          } else if (arrowPart === 'bottomEnd') {
-            // Right end of bottom equilibrium arrow
-            pointX = arrow.x2 + offset.x;
-            pointY = arrow.y2 + 5 + offset.y;
-          }
-        } else {
-          // Regular arrow
-          if (arrowPart === 'center') {
-            // Center of regular arrow
-            pointX = (arrow.x1 + arrow.x2) / 2 + offset.x;
-            pointY = (arrow.y1 + arrow.y2) / 2 + offset.y;
-          } else if (arrowPart === 'start') {
-            // Start of regular arrow
-            pointX = arrow.x1 + offset.x;
-            pointY = arrow.y1 + offset.y;
-          } else if (arrowPart === 'end') {
-            // End of regular arrow
-            pointX = arrow.x2 + offset.x;
-            pointY = arrow.y2 + offset.y;
-          }
-        }
-        
-        setDraggingArrowIndex(arrowIndex);
-        // Store which part of the arrow is being dragged
-        setDragArrowOffset({
-          x: x - pointX,
-          y: y - pointY,
-          part: arrowPart
-        });
-        setDragStart({ x, y });
-        setIsDragging(true);
-        setDidDrag(false);
-        return; // Exit early since we're handling an arrow drag
-      }
-      
-      // Then check curved arrows
-      const { index: curvedArrowIndex, part: curvedArrowPart } = isPointInCurvedArrowCircle(x, y);
-      if (curvedArrowIndex !== -1) {
-        // Store the curved arrow and its part that is being dragged
-        const arrow = arrows[curvedArrowIndex];
-        let pointX, pointY;
-        
-        if (curvedArrowPart === 'start') {
-          // Start of curved arrow
-          pointX = arrow.x1 + offset.x;
-          pointY = arrow.y1 + offset.y;
-        } else if (curvedArrowPart === 'end') {
-          // End of curved arrow
-          pointX = arrow.x2 + offset.x;
-          pointY = arrow.y2 + offset.y;
-        } else if (curvedArrowPart === 'peak') {
-          // Peak of curved arrow - need to calculate actual curve peak position
-          const startX = arrow.x1 + offset.x;
-          const startY = arrow.y1 + offset.y;
-          const endX = arrow.x2 + offset.x;
-          const endY = arrow.y2 + offset.y;
-          
-          let controlX, controlY;
-          if (arrow.peakX !== undefined && arrow.peakY !== undefined) {
-            // Use stored control point position
-            controlX = arrow.peakX + offset.x;
-            controlY = arrow.peakY + offset.y;
-          } else {
-            // Calculate control point position if not stored
-            const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, arrow.type);
-            if (peakPos) {
-              controlX = peakPos.x;
-              controlY = peakPos.y;
-            }
-          }
-          
-          // Calculate actual curve peak from control point
-          pointX = 0.25 * startX + 0.5 * controlX + 0.25 * endX;
-          pointY = 0.25 * startY + 0.5 * controlY + 0.25 * endY;
-        }
-        
-        setDraggingArrowIndex(curvedArrowIndex);
-        // Store which part of the arrow is being dragged
-        setDragArrowOffset({
-          x: x - pointX,
-          y: y - pointY,
-          part: curvedArrowPart
-        });
-        setDragStart({ x, y });
-        setIsDragging(true);
-        setDidDrag(false);
-        return; // Exit early since we're handling a curved arrow drag
-      }
-      
-      // Find if user clicked on a free-floating vertex or its box
-      for (let v of vertices) {
-        const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
-        
-        if (freeFloatingVertices.has(key)) {
-          // Check if click is within the box area for free-floating vertices
-          if (isPointInVertexBox(x, y, v)) {
-            setDraggingVertex(v);
-            // Set dragStart for the canvas offset, not vertex dragging
-            setDragStart({ x, y });
-            setIsDragging(true);
-            setDidDrag(false);
-            return; // Exit early since we're handling a free vertex drag
-          } else {
-            // Fallback to circle detection if no atom or box missed
-            const dist = distanceToVertex(x, y, v.x, v.y);
-            if (dist <= vertexThreshold) {
-              setDraggingVertex(v);
-              setDragStart({ x, y });
-              setIsDragging(true);
-              setDidDrag(false);
-              return; // Exit early since we're handling a free vertex drag
-            }
-          }
-        }
-      }
-    }
-    
-    // Handle selection box in mouse mode (but not in paste mode)
-    if (mode === 'mouse' && !isPointOverInteractiveElement(x, y) && !isPasteMode) {
-      // Clear any existing selection
-      clearSelection();
-      
-      // Start selection box
-      setIsSelecting(true);
-      setSelectionStart({ x, y });
-      setSelectionEnd({ x, y });
-      setIsDragging(true);
-      setDidDrag(false);
-      setDragStart({ x, y });
-      return; // Exit early since we're starting a selection
-    }
-    
-    // Clear selection if clicking on canvas in mouse mode but on an interactive element
-    if (mode === 'mouse') {
-      clearSelection();
-    }
-    
-    // Only allow canvas dragging if not in mouse mode
-    if (mode !== 'mouse') {
-      setDragStart({ x, y });
-      setIsDragging(true);
-      setDidDrag(false);
-    }
-    
-    // Clear the 3-bond indicators when mouse is pressed - unless we're in draw or stereochemistry mode
-    const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
-    if (!isDrawOrStereochemistryMode) {
-      setVerticesWith3Bonds([]);
-    }
+    handleMouseDownUtil(
+      event,
+      canvasRef,
+      isPasteMode,
+      mode,
+      arrows,
+      vertices,
+      vertexThreshold,
+      freeFloatingVertices,
+      offset,
+      // Functions
+      pasteAtPosition,
+      isPointInArrowCircle,
+      isPointInCurvedArrowCircle,
+      calculateCurvedArrowPeak,
+      isPointInVertexBox,
+      distanceToVertex,
+      isPointOverInteractiveElement,
+      clearSelection,
+      captureState, // Add captureState function
+      // Setters
+      setMouseDownOnCanvas,
+      setDraggingArrowIndex,
+      setDragArrowOffset,
+      setDragStart,
+      setIsDragging,
+      setDidDrag,
+      setDraggingVertex,
+      setIsSelecting,
+      setSelectionStart,
+      setSelectionEnd,
+      setVerticesWith3Bonds
+    );
   };
   const handleMouseMove = event => {
-    const rect = canvasRef.current.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    
-
-    
-    // Update paste preview position if in paste mode
-    if (isPasteMode && !isDragging) {
-      setPastePreviewPosition({ x, y });
-      
-      // Calculate grid alignment for snapping
-      if (clipboard && clipboard.vertices && showSnapPreview) {
-        const alignment = calculateGridAlignment(clipboard.vertices, x, y);
-        setSnapAlignment(alignment);
-      } else {
-        setSnapAlignment(null);
-      }
-    }
-
-    // Handle fourth bond preview mode
-    if (fourthBondMode && fourthBondSource && !isDragging) {
-      const sourceX = fourthBondSource.x + offset.x;
-      const sourceY = fourthBondSource.y + offset.y;
-
-      // Calculate direction vector from source to mouse
-      const dx = x - sourceX;
-      const dy = y - sourceY;
-      const currentLength = Math.sqrt(dx * dx + dy * dy);
-
-      // Normalize direction vector (prevents division by zero with || 1)
-      const ux = dx / (currentLength || 1);
-      const uy = dy / (currentLength || 1);
-
-      // Set endpoint at constant length in exact mouse direction
-      const endX = sourceX + ux * hexRadius;
-      const endY = sourceY + uy * hexRadius;
-      
-      // Update preview
-      setFourthBondPreview({
-        startX: sourceX,
-        startY: sourceY,
-        endX: endX,
-        endY: endY,
-        snappedToVertex: false
-      });
-      return; // Exit early to prevent other mouse move handling
-    }
-
-    // Handle dragging if active
-    if (isDragging) {
-      setDidDrag(true);
-      const dx = x - dragStart.x;
-      const dy = y - dragStart.y;
-      
-      // Ensure cursor is 'grabbing' during any drag operation
-      canvasRef.current.style.cursor = 'grabbing';
-      
-      // If we're dragging an arrow in mouse mode
-      if (mode === 'mouse' && draggingArrowIndex !== null) {
-        // Get the arrow being dragged
-        const arrow = arrows[draggingArrowIndex];
-        if (arrow) {
-          const part = dragArrowOffset.part || 'center';
-          
-          // Update the arrow's position based on which part is being dragged
-          setArrows(prevArrows => {
-            return prevArrows.map((a, idx) => {
-              if (idx === draggingArrowIndex) {
-                if (a.type === 'equil') {
-                  // Handle equilibrium arrows
-                  if (part === 'center') {
-                    // When dragging center, move the whole arrow while preserving the relative positions
-                    // of all arrow endpoints
-                    const newCenterX = x - dragArrowOffset.x - offset.x;
-                    const newCenterY = y - dragArrowOffset.y - offset.y;
-                    
-                    const currentCenterX = (a.x1 + a.x2) / 2;
-                    const dx = newCenterX - currentCenterX;
-                    
-                    // Calculate new positions for all points, preserving their relative distances
-                    const newX1 = a.x1 + dx;
-                    const newX2 = a.x2 + dx;
-                    const newTopX1 = a.topX1 !== undefined ? a.topX1 + dx : newX1;
-                    const newTopX2 = a.topX2 !== undefined ? a.topX2 + dx : newX2;
-                    const newBottomX1 = a.bottomX1 !== undefined ? a.bottomX1 + dx : newX1;
-                    const newBottomX2 = a.bottomX2 !== undefined ? a.bottomX2 + dx : newX2;
-                    
-                    return {
-                      ...a,
-                      x1: newX1,
-                      y1: newCenterY,
-                      x2: newX2,
-                      y2: newCenterY,
-                      topX1: newTopX1,
-                      topX2: newTopX2, 
-                      bottomX1: newBottomX1,
-                      bottomX2: newBottomX2
-                    };
-                  } else                  if (part === 'topStart') {
-                    // When dragging top left end, adjust only the top arrow's x1 coordinate
-                    const newX1 = x - dragArrowOffset.x - offset.x;
-                    
-                    return {
-                      ...a,
-                      // Only update topX1, leaving x1 as the overall bounding box
-                      topX1: newX1,
-                      // Ensure x1 is the leftmost of all points for bounding box purposes
-                      x1: Math.min(newX1, a.bottomX1 !== undefined ? a.bottomX1 : a.x1)
-                    };
-                  } else if (part === 'topEnd') {
-                    // When dragging top right end, adjust both ends of the top arrow while keeping center fixed
-                    const newX2 = x - dragArrowOffset.x - offset.x;
-                    
-                    // Calculate the current center of the top arrow
-                    const topCurrentX1 = a.topX1 !== undefined ? a.topX1 : a.x1;
-                    const topCurrentX2 = a.topX2 !== undefined ? a.topX2 : a.x2;
-                    const topCenter = (topCurrentX1 + topCurrentX2) / 2;
-                    
-                    // Calculate how much the right endpoint moved
-                    const rightSideChange = newX2 - topCurrentX2;
-                    
-                    // Move the left endpoint by the same amount in the opposite direction to maintain center
-                    const newX1 = topCurrentX1 - rightSideChange;
-                    
-                    return {
-                      ...a,
-                      // Update both ends of the top arrow
-                      topX1: newX1,
-                      topX2: newX2,
-                      // Ensure overall bounding box is updated
-                      x1: Math.min(newX1, a.bottomX1 !== undefined ? a.bottomX1 : a.x1),
-                      x2: Math.max(newX2, a.bottomX2 !== undefined ? a.bottomX2 : a.x2)
-                    };
-                  } else if (part === 'bottomStart') {
-                    // When dragging bottom left end, adjust both ends of the bottom arrow while keeping center fixed
-                    const newX1 = x - dragArrowOffset.x - offset.x;
-                    
-                    // Calculate the current center of the bottom arrow
-                    const bottomCurrentX1 = a.bottomX1 !== undefined ? a.bottomX1 : a.x1;
-                    const bottomCurrentX2 = a.bottomX2 !== undefined ? a.bottomX2 : a.x2;
-                    const bottomCenter = (bottomCurrentX1 + bottomCurrentX2) / 2;
-                    
-                    // Calculate how much the left endpoint moved
-                    const leftSideChange = newX1 - bottomCurrentX1;
-                    
-                    // Move the right endpoint by the same amount in the opposite direction to maintain center
-                    const newX2 = bottomCurrentX2 - leftSideChange;
-                    
-                    return {
-                      ...a,
-                      // Update both ends of the bottom arrow
-                      bottomX1: newX1,
-                      bottomX2: newX2,
-                      // Ensure overall bounding box is updated
-                      x1: Math.min(newX1, a.topX1 !== undefined ? a.topX1 : a.x1),
-                      x2: Math.max(newX2, a.topX2 !== undefined ? a.topX2 : a.x2)
-                    };
-                  } else if (part === 'bottomEnd') {
-                    // When dragging bottom right end, adjust only the bottom arrow's x2 coordinate
-                    const newX2 = x - dragArrowOffset.x - offset.x;
-                    
-                    return {
-                      ...a,
-                      // Only update bottomX2, leaving x2 as the overall bounding box
-                      bottomX2: newX2,
-                      // Ensure x2 is the rightmost of all points for bounding box purposes
-                      x2: Math.max(newX2, a.topX2 !== undefined ? a.topX2 : a.x2)
-                    };
-                  }
-                } else if (a.type && a.type.startsWith('curve')) {
-                  // Handle curved arrows
-                  if (part === 'start') {
-                    // When dragging start, adjust only the start coordinates
-                    const newX1 = x - dragArrowOffset.x - offset.x;
-                    const newY1 = y - dragArrowOffset.y - offset.y;
-                    
-                    return {
-                      ...a,
-                      x1: newX1,
-                      y1: newY1,
-                      // Keep x2,y2 unchanged
-                    };
-                  } else if (part === 'end') {
-                    // When dragging end, adjust only the end coordinates
-                    const newX2 = x - dragArrowOffset.x - offset.x;
-                    const newY2 = y - dragArrowOffset.y - offset.y;
-                    
-                    return {
-                      ...a,
-                      x2: newX2,
-                      y2: newY2,
-                      // Keep x1,y1 unchanged
-                    };
-                  } else if (part === 'peak') {
-                    // When dragging peak, we need to calculate the control point position
-                    // that would place the curve peak at the mouse position
-                    
-                    // Get the endpoints
-                    const startX = a.x1;
-                    const startY = a.y1;
-                    const endX = a.x2;
-                    const endY = a.y2;
-                    
-                    // Target position for the curve peak (where the mouse is)
-                    const targetPeakX = x - dragArrowOffset.x - offset.x;
-                    const targetPeakY = y - dragArrowOffset.y - offset.y;
-                    
-                    // Calculate control point that gives us this curve peak
-                    // From: curvePeak = 0.25 * start + 0.5 * control + 0.25 * end
-                    // Solving for control: control = 2 * curvePeak - 0.5 * start - 0.5 * end
-                    const newControlX = 2 * targetPeakX - 0.5 * startX - 0.5 * endX;
-                    const newControlY = 2 * targetPeakY - 0.5 * startY - 0.5 * endY;
-                    
-                    return {
-                      ...a,
-                      peakX: newControlX,
-                      peakY: newControlY,
-                      // Keep x1,y1,x2,y2 unchanged
-                    };
-                  }
-                } else {
-                  // Handle regular arrows
-                  if (part === 'center') {
-                    // When dragging center, move the whole arrow
-                    const newCenterX = x - dragArrowOffset.x - offset.x;
-                    const newCenterY = y - dragArrowOffset.y - offset.y;
-                    const halfLengthX = (a.x2 - a.x1) / 2;
-                    const halfLengthY = (a.y2 - a.y1) / 2;
-                    
-                    return {
-                      ...a,
-                      x1: newCenterX - halfLengthX,
-                      y1: newCenterY - halfLengthY,
-                      x2: newCenterX + halfLengthX,
-                      y2: newCenterY + halfLengthY
-                    };
-                  } else if (part === 'start') {
-                    // When dragging start, only move the start point (x1,y1)
-                    const newX1 = x - dragArrowOffset.x - offset.x;
-                    const newY1 = y - dragArrowOffset.y - offset.y;
-                    
-                    return {
-                      ...a,
-                      x1: newX1,
-                      y1: newY1,
-                      // Keep x2,y2 unchanged
-                    };
-                  } else if (part === 'end') {
-                    // When dragging end, only move the end point (x2,y2)
-                    const newX2 = x - dragArrowOffset.x - offset.x;
-                    const newY2 = y - dragArrowOffset.y - offset.y;
-                    
-                    return {
-                      ...a,
-                      x2: newX2,
-                      y2: newY2,
-                      // Keep x1,y1 unchanged
-                    };
-                  }
-                }
-              }
-              return a;
-            });
-          });
-          
-          setDragStart({ x, y });
-        }
-      }
-      // If we're dragging a free-floating vertex in mouse mode
-      else if (mode === 'mouse' && draggingVertex) {
-        // Update the position of the vertex being dragged
-        setVertices(prevVertices => {
-          return prevVertices.map(v => {
-            // Check if this is the vertex we're dragging
-            if (Math.abs(v.x - draggingVertex.x) < 0.01 && Math.abs(v.y - draggingVertex.y) < 0.01) {
-              // Update the freeFloatingVertices Set with the new position
-              const oldKey = `${draggingVertex.x.toFixed(2)},${draggingVertex.y.toFixed(2)}`;
-              const newKey = `${(draggingVertex.x + dx).toFixed(2)},${(draggingVertex.y + dy).toFixed(2)}`;
-              
-              setFreeFloatingVertices(prev => {
-                const newSet = new Set(prev);
-                newSet.delete(oldKey);
-                newSet.add(newKey);
-                return newSet;
-              });
-              
-              // Also update any segments connected to this vertex
-              setSegments(prevSegments => {
-                return prevSegments.map(seg => {
-                  if (Math.abs(seg.x1 - draggingVertex.x) < 0.01 && Math.abs(seg.y1 - draggingVertex.y) < 0.01) {
-                    return { ...seg, x1: draggingVertex.x + dx, y1: draggingVertex.y + dy };
-                  }
-                  if (Math.abs(seg.x2 - draggingVertex.x) < 0.01 && Math.abs(seg.y2 - draggingVertex.y) < 0.01) {
-                    return { ...seg, x2: draggingVertex.x + dx, y2: draggingVertex.y + dy };
-                  }
-                  return seg;
-                });
-              });
-              
-              // Also update the atom label positions
-              setVertexAtoms(prevAtoms => {
-                const oldKey = `${draggingVertex.x.toFixed(2)},${draggingVertex.y.toFixed(2)}`;
-                const newKey = `${(draggingVertex.x + dx).toFixed(2)},${(draggingVertex.y + dy).toFixed(2)}`;
-                
-                if (prevAtoms[oldKey]) {
-                  const { [oldKey]: atom, ...rest } = prevAtoms;
-                  return { ...rest, [newKey]: atom };
-                }
-                return prevAtoms;
-              });
-              
-              // Return the updated vertex
-              return { ...v, x: draggingVertex.x + dx, y: draggingVertex.y + dy };
-            }
-            return v;
-          });
-        });
-        
-        // Update the draggingVertex reference with its new position
-        setDraggingVertex(prevVertex => ({
-          x: prevVertex.x + dx,
-          y: prevVertex.y + dy
-        }));
-        
-        setDragStart({ x, y });
-      } else if (isSelecting) {
-        // Update selection box
-        setSelectionEnd({ x, y });
-      } else {
-        // Regular canvas drag - move the entire view (only if not in mouse mode)
-        if (mode !== 'mouse') {
-          setOffset(prev => ({ x: prev.x + dx, y: prev.y + dy }));
-          setDragStart({ x, y });
-        }
-      }
-      
-      setHoverVertex(null);
-      setHoverSegmentIndex(null);
-      setHoverCurvedArrow({ index: -1, part: null }); // Clear curved arrow hover when dragging
-      return;
-    }
-      
-    // Handle hover effects for vertices and segments in various modes
-    if (mode === 'draw' || mode === 'erase' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous' || mode === 'mouse') {
-      // Check if mouse is over an arrow control circle or triangle in mouse mode
-      if (mode === 'mouse') {
-        const { index: arrowIndex, part: arrowPart } = isPointInArrowCircle(x, y);
-        if (arrowIndex !== -1) {
-          const arrow = arrows[arrowIndex];
-          // Change cursor based on the part of the arrow being hovered
-          if (arrowPart === 'center') {
-            // Center - 4-way move cursor for moving the whole arrow
-            canvasRef.current.style.cursor = 'move';
-          } else if (arrow.type === 'equil' && (arrowPart === 'topStart' || arrowPart === 'topEnd' || 
-                    arrowPart === 'bottomStart' || arrowPart === 'bottomEnd')) {
-            // Equilibrium arrow ends - horizontal resize cursor (vertically locked)
-            canvasRef.current.style.cursor = 'ew-resize';
-          } else if (arrowPart === 'start' || arrowPart === 'end') {
-            // Regular arrow ends - 4-way move cursor for free movement
-            canvasRef.current.style.cursor = 'move';
-          }
-          
-          setHoverVertex(null);
-          setHoverSegmentIndex(null);
-          setHoverIndicator(null); // Clear indicator hover when over arrow
-          return;
-        } else {
-          // Check curved arrows if no straight arrow was found
-          const { index: curvedArrowIndex, part: curvedArrowPart } = isPointInCurvedArrowCircle(x, y);
-          if (curvedArrowIndex !== -1) {
-            // Change cursor to indicate curved arrow endpoint manipulation - 4-way move cursor
-            canvasRef.current.style.cursor = 'move';
-            
-            // Update curved arrow hover state
-            setHoverCurvedArrow({ index: curvedArrowIndex, part: curvedArrowPart });
-            
-            setHoverVertex(null);
-            setHoverSegmentIndex(null);
-            setHoverIndicator(null); // Clear indicator hover when over curved arrow
-            return;
-          } else {
-            // Reset cursor if not over any arrow part
-            canvasRef.current.style.cursor = 'default';
-            // Clear curved arrow hover state
-            setHoverCurvedArrow({ index: -1, part: null });
-          }
-        }
-      }
-      
-      // Check if mouse is over a fourth bond indicator triangle in draw and stereochemistry modes
-      const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
-      if (isDrawOrStereochemistryMode && verticesWith3Bonds.length > 0) {
-        let foundIndicator = null;
-        
-        // Check each indicator
-        for (const vertex of verticesWith3Bonds) {
-          if (vertex.indicatorArea) {
-            const dx = x - vertex.indicatorArea.x;
-            const dy = y - vertex.indicatorArea.y;
-            const distance = Math.sqrt(dx * dx + dy * dy);
-            
-            if (distance <= vertex.indicatorArea.radius) {
-              foundIndicator = vertex;
-              break;
-            }
-          }
-        }
-        
-        // Update hover state
-        if (foundIndicator) {
-          setHoverIndicator(foundIndicator);
-          canvasRef.current.style.cursor = 'pointer'; // Show pointer cursor when hovering over indicator
-          setHoverVertex(null); // Clear vertex hover when over indicator
-          setHoverSegmentIndex(null); // Clear segment hover when over indicator
-          return; // Exit early since we found an indicator
-        } else {
-          setHoverIndicator(null); // Clear indicator hover when not over any
-        }
-      } else {
-        setHoverIndicator(null); // Clear indicator hover when not in appropriate mode
-      }
-      
-      let found = null;
-      for (let v of vertices) {
-        const dist = distanceToVertex(x, y, v.x, v.y);
-        if (dist <= vertexThreshold) {
-          found = v;
-          break;
-        }
-      }
-      
-      // Set hover vertex in draw, erase modes, or for free-floating vertices in mouse mode
-      if (mode === 'draw' || mode === 'erase') {
-        setHoverVertex(found);
-      } else if (mode === 'mouse') {
-        // In mouse mode, check both exact vertex matches and box areas for free-floating vertices
-        if (found) {
-          // If directly found a vertex by circle detection
-          const key = `${found.x.toFixed(2)},${found.y.toFixed(2)}`;
-          if (freeFloatingVertices.has(key)) {
-            setHoverVertex(found);
-            canvasRef.current.style.cursor = 'pointer'; // Change cursor when hovering over draggable vertex
-          } else {
-            setHoverVertex(null);
-            canvasRef.current.style.cursor = 'default';
-          }
-        } else {
-          // If no direct vertex hit, check if we're inside any free-floating vertex boxes
-          let foundInBox = null;
-          
-          for (let v of vertices) {
-            const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
-            if (freeFloatingVertices.has(key) && isPointInVertexBox(x, y, v)) {
-              foundInBox = v;
-              break;
-            }
-          }
-          
-          if (foundInBox) {
-            setHoverVertex(foundInBox);
-            canvasRef.current.style.cursor = 'pointer'; // Show pointer cursor when hovering over box
-          } else {
-            setHoverVertex(null);
-            canvasRef.current.style.cursor = 'default';
-          }
-        }
-      } else {
-        // For stereochemistry modes, don't highlight vertices, but keep segments hoverable
-        setHoverVertex(null);
-      }
-      
-      // Only set hoverSegmentIndex if not hovering a vertex
-      if (!found) {
-        let closestIdx = null;
-        let minDist = lineThreshold;
-        segments.forEach((seg, idx) => {
-          const A = x - (seg.x1 + offset.x);
-          const B = y - (seg.y1 + offset.y);
-          const C = (seg.x2 + offset.x) - (seg.x1 + offset.x);
-          const D = (seg.y2 + offset.y) - (seg.y1 + offset.y);
-          const dot = A * C + B * D;
-          const len_sq = C * C + D * D;
-          let t = dot / len_sq;
-          t = Math.max(0, Math.min(1, t));
-          const projX = seg.x1 + offset.x + t * C;
-          const projY = seg.y1 + offset.y + t * D;
-          const dx = x - projX;
-          const dy = y - projY;
-          const distSeg = Math.sqrt(dx * dx + dy * dy);
-          if (distSeg < minDist) {
-            minDist = distSeg;
-            closestIdx = idx;
-          }
-        });
-        setHoverSegmentIndex(closestIdx);
-      } else {
-        setHoverSegmentIndex(null);
-      }
-    } else {
-      // For other modes, clear all hover indicators
-      setHoverVertex(null);
-      setHoverSegmentIndex(null);
-      setHoverCurvedArrow({ index: -1, part: null }); // Clear curved arrow hover when not in mouse mode
-    }
+    handleMouseMoveUtil(
+      event,
+      canvasRef,
+      isPasteMode,
+      isDragging,
+      fourthBondMode,
+      fourthBondSource,
+      mode,
+      draggingArrowIndex,
+      draggingVertex,
+      isSelecting,
+      clipboard,
+      showSnapPreview,
+      hexRadius,
+      offset,
+      dragStart,
+      dragArrowOffset,
+      arrows,
+      vertices,
+      vertexThreshold,
+      lineThreshold,
+      verticesWith3Bonds,
+      freeFloatingVertices,
+      segments,
+      // Setters
+      setPastePreviewPosition,
+      calculateGridAlignment,
+      setSnapAlignment,
+      setFourthBondPreview,
+      setDidDrag,
+      setArrows,
+      setDragStart,
+      setVertices,
+      setFreeFloatingVertices,
+      setSegments,
+      setVertexAtoms,
+      setDraggingVertex,
+      setSelectionEnd,
+      setOffset,
+      setHoverVertex,
+      setHoverSegmentIndex,
+      setHoverCurvedArrow,
+      isPointInArrowCircle,
+      isPointInCurvedArrowCircle,
+      setHoverIndicator,
+      distanceToVertex,
+      isPointInVertexBox
+    );
   };
   const handleMouseUp = event => {
-    // Handle selection box completion
-    if (isSelecting) {
-      setIsSelecting(false);
-      // Here we would handle the selected elements, but for now just clear the selection
-      // TODO: Implement selection logic for copy/paste functionality
-    }
-    
-    setIsDragging(false);
-    
-    // Reset cursor to default
-    if (canvasRef.current) {
-      canvasRef.current.style.cursor = 'default';
-    }
-    
-    // Reset dragging vertex if we were dragging one
-    if (draggingVertex) {
-      setDraggingVertex(null);
-    }
-    
-    // Reset arrow dragging state if we were dragging an arrow
-    if (draggingArrowIndex !== null) {
-      setDraggingArrowIndex(null);
-      setDragArrowOffset({ x: 0, y: 0 });
-    }
-    
-    // Only restore hover state in draw/erase/stereochemistry modes
-    const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
-    
-    if (!isDrawOrStereochemistryMode) {
-      setHoverVertex(null);
-      setHoverSegmentIndex(null);
-      
-      // Clear 3-bond indicators if not in draw or stereochemistry modes
-      setVerticesWith3Bonds([]);
-    } else if (mode !== 'draw') {
-      // For stereochemistry modes, clear vertex hover but keep segments hoverable
-      setHoverVertex(null);
-    }
-    
-    // Cancel fourth bond mode if right-click
-    if (event.button === 2 && fourthBondMode) {
-      setFourthBondMode(false);
-      setFourthBondSource(null);
-      setFourthBondPreview(null);
-    }
-    
-    // Only place arrows if:
-    // 1. Not a drag
-    // 2. Mouse down started on the canvas
-    // 3. Mouse up is also on the canvas
-    // 4. In an arrow mode
-    if (
-      !didDrag &&
-      mouseDownOnCanvas &&
-      (mode === 'arrow' || mode === 'equil' || mode.startsWith('curve'))
-    ) {
-      const rect = canvasRef.current.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      if (x >= 0 && y >= 0 && x <= canvasRef.current.width && y <= canvasRef.current.height) {
-        handleArrowClick(event);
-      }
-    }
-    
-    setMouseDownOnCanvas(false);
+    handleMouseUpUtil(
+      event,
+      canvasRef,
+      isSelecting,
+      isDragging,
+      draggingVertex,
+      draggingArrowIndex,
+      didDrag,
+      mouseDownOnCanvas,
+      mode,
+      fourthBondMode,
+      // Functions
+      handleArrowClickLocal,
+      // Setters
+      setIsSelecting,
+      setIsDragging,
+      setDraggingVertex,
+      setDraggingArrowIndex,
+      setDragArrowOffset,
+      setHoverVertex,
+      setHoverSegmentIndex,
+      setVerticesWith3Bonds,
+      setFourthBondMode,
+      setFourthBondSource,
+      setFourthBondPreview,
+      setMouseDownOnCanvas
+    );
   };
 
   // Arrow mouse handlers
-  const handleArrowMouseMove = (event) => {
-    if (mode !== 'arrow' && mode !== 'equil' && !mode.startsWith('curve')) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
-    
-    // For curved arrows with existing start point, show the curve preview
-    if (mode.startsWith('curve') && curvedArrowStartPoint) {
-      setArrowPreview({ 
-        x1: curvedArrowStartPoint.x + offset.x,
-        y1: curvedArrowStartPoint.y + offset.y,
-        x2: x, 
-        y2: y,
-        isCurved: true
-      });
-    } else {
-      // Standard preview for regular arrows or first click of curved arrows
-      setArrowPreview({ x, y });
-    }
+  const handleArrowMouseMoveLocal = (event) => {
+    handleArrowMouseMove(
+      event,
+      mode,
+      canvasRef,
+      curvedArrowStartPoint,
+      offset,
+      setArrowPreview
+    );
   };
 
 
 
-  const handleArrowClick = (event) => {
-    if (mode !== 'arrow' && mode !== 'equil' && !mode.startsWith('curve')) return;
+  const handleArrowClickLocal = (event) => {
+    // Capture state before creating arrows
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    if (x >= 0 && y >= 0 && x <= canvas.width && y <= canvas.height) {
-      // Rest of your arrow click handling code
-      if (mode === 'arrow') {
-        setArrows(arrows => [...arrows, { 
-          x1: x - 40 - offset.x, 
-          y1: y - offset.y, 
-          x2: x + 40 - offset.x, 
-          y2: y - offset.y, 
-          type: 'arrow' 
-        }]);
-        setArrowPreview(null);
-        return;
-      }
-      if (mode === 'equil') {
-        setArrows(arrows => [...arrows, { 
-          x1: x - 40 - offset.x, 
-          y1: y - offset.y, 
-          x2: x + 40 - offset.x, 
-          y2: y - offset.y, 
-          // Track separate lengths for top and bottom arrows
-          topX1: x - 40 - offset.x,
-          topX2: x + 40 - offset.x,
-          bottomX1: x - 40 - offset.x,
-          bottomX2: x + 40 - offset.x,
-          type: 'equil' 
-        }]);
-        setArrowPreview(null);
-        return;
-      }
-      // Two-click curved arrow logic
-      if (mode.startsWith('curve')) {
-        // If this is the first click, store the start point
-        if (!curvedArrowStartPoint) {
-          setCurvedArrowStartPoint({ x: x - offset.x, y: y - offset.y });
-        } else {
-          // This is the second click, create the curved arrow
-          const startX = curvedArrowStartPoint.x;
-          const startY = curvedArrowStartPoint.y;
-          const endX = x - offset.x;
-          const endY = y - offset.y;
-          
-          // Calculate initial peak position based on arrow type
-          const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, mode);
-          
-          setArrows(arrows => [...arrows, {
-            x1: startX,
-            y1: startY,
-            x2: endX,
-            y2: endY,
-            peakX: peakPos.x,
-            peakY: peakPos.y,
-            type: mode
-          }]);
-          // Clear the start point and preview
-          setCurvedArrowStartPoint(null);
-          setArrowPreview(null);
-        }
-      }
+    // Only capture state if we're actually going to create an arrow
+    if (mode === 'arrow' || mode === 'equil' || mode.startsWith('curve')) {
+      captureState();
     }
+    
+    handleArrowClick(
+      event,
+      mode,
+      canvasRef,
+      offset,
+      curvedArrowStartPoint,
+      calculateCurvedArrowPeak,
+      setArrows,
+      setArrowPreview,
+      setCurvedArrowStartPoint
+    );
   };
 
   // Resize handler
@@ -5461,10 +4262,21 @@ const HexGridWithToolbar = () => {
     setVertexTypes(newVertexTypes);
   }, [vertices, segments, vertexAtoms]);
 
+  // Capture initial state when component first loads
+  useEffect(() => {
+    // Only capture initial state if history is empty and vertices are loaded
+    if (history.length === 0 && vertices.length > 0) {
+      captureState();
+    }
+  }, [vertices, history.length, captureState]);
+
   useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow]);
 
   // Erase all handler
   const handleEraseAll = () => {
+    // Capture state before erasing everything
+    captureState();
+    
     const canvas = canvasRef.current;
     if (!canvas) return;
     const { newSegments, newVertices } = generateGrid(canvas.width, canvas.height);
@@ -5480,40 +4292,17 @@ const HexGridWithToolbar = () => {
 
   // Add keyboard handler for ESC key to cancel curved arrow and selection
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape') {
-        if (curvedArrowStartPoint) {
-          // Clear the curved arrow start point and preview
-          setCurvedArrowStartPoint(null);
-          setArrowPreview(null);
-          
-          // Show brief visual feedback that drawing was canceled
-          const canvas = canvasRef.current;
-          if (canvas) {
-            const ctx = canvas.getContext('2d');
-            
-            ctx.save();
-            ctx.fillStyle = 'rgba(200,0,0,0.15)';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.restore();
-            
-            // Redraw after a short delay - the effect of setting state above 
-            // will trigger a redraw via the useEffect for drawGrid
-            setTimeout(() => {
-              // Force redraw without using drawGrid directly
-              setOffset(prev => ({...prev}));
-            }, 150);
-          }
-        }
-        
-        if (isSelecting) {
-          // Clear selection
-          setIsSelecting(false);
-          setSelectionStart({ x: 0, y: 0 });
-          setSelectionEnd({ x: 0, y: 0 });
-        }
-      }
-    };
+    const handleKeyDown = createEscapeKeyHandler(
+      curvedArrowStartPoint,
+      isSelecting,
+      setCurvedArrowStartPoint,
+      setArrowPreview,
+      setIsSelecting,
+      setSelectionStart,
+      setSelectionEnd,
+      setOffset,
+      canvasRef
+    );
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
@@ -5523,18 +4312,17 @@ const HexGridWithToolbar = () => {
 
   // Add keyboard handler for ESC key to close atom input
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key === 'Escape' && showAtomInput) {
-        setShowAtomInput(false);
-      }
-      if (e.key === 'Escape' && showAboutPopup) {
-        setShowAboutPopup(false);
-      }
-      // Clear selection with escape key in mouse mode
-      if (e.key === 'Escape' && mode === 'mouse' && (selectedSegments.size > 0 || selectedVertices.size > 0 || selectedArrows.size > 0)) {
-        clearSelection();
-      }
-    };
+    const handleKeyDown = createGeneralEscapeHandler(
+      showAtomInput,
+      showAboutPopup,
+      mode,
+      selectedSegments,
+      selectedVertices,
+      selectedArrows,
+      setShowAtomInput,
+      setShowAboutPopup,
+      clearSelection
+    );
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [showAtomInput, showAboutPopup, mode, selectedSegments, selectedVertices, selectedArrows, clearSelection]);
@@ -5571,14 +4359,12 @@ const HexGridWithToolbar = () => {
 
   // Handle keyboard events for the fourth bond mode
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      // ESC key cancels fourth bond mode
-      if (e.key === 'Escape' && fourthBondMode) {
-        setFourthBondMode(false);
-        setFourthBondSource(null);
-        setFourthBondPreview(null);
-      }
-    };
+    const handleKeyDown = createFourthBondKeyHandler(
+      fourthBondMode,
+      setFourthBondMode,
+      setFourthBondSource,
+      setFourthBondPreview
+    );
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
@@ -5588,117 +4374,39 @@ const HexGridWithToolbar = () => {
   
   // Handle keyboard events for copy/paste
   useEffect(() => {
-    const handleKeyDown = (e) => {
-      // Copy (Cmd/Ctrl + C)
-      if ((e.metaKey || e.ctrlKey) && e.key === 'c' && !e.shiftKey && !e.altKey) {
-        if (selectedSegments.size > 0 || selectedVertices.size > 0 || selectedArrows.size > 0) {
-          e.preventDefault();
-          copySelection();
-        }
-      }
-      
-      // Paste (Cmd/Ctrl + V)
-      if ((e.metaKey || e.ctrlKey) && e.key === 'v' && !e.shiftKey && !e.altKey) {
-        if (clipboard && clipboard.vertices.length > 0 && !isPasteMode) {
-          e.preventDefault();
-          setIsPasteMode(true);
-        }
-      }
-      
-      // Cancel paste mode with Escape
-      if (e.key === 'Escape' && isPasteMode) {
-        cancelPasteMode();
-      }
-      
-      // Toggle grid snapping with 'G' key during paste mode
-      if (e.key === 'g' && isPasteMode) {
-        setShowSnapPreview(!showSnapPreview);
-      }
-    };
+    const handleKeyDown = createCopyPasteKeyHandler(
+      selectedSegments,
+      selectedVertices,
+      selectedArrows,
+      clipboard,
+      isPasteMode,
+      showSnapPreview,
+      copySelection,
+      setIsPasteMode,
+      cancelPasteMode,
+      setShowSnapPreview
+    );
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-      }, [selectedSegments, selectedVertices, selectedArrows, clipboard, isPasteMode, copySelection, cancelPasteMode, showSnapPreview]);
+  }, [selectedSegments, selectedVertices, selectedArrows, clipboard, isPasteMode, copySelection, cancelPasteMode, showSnapPreview]);
 
-  // Helper function to format atom text with subscript numbers
-  const formatAtomText = (text) => {
-    // Split the text into segments (numbers vs non-numbers)
-    const segments = [];
-    let currentSegment = '';
-    let isCurrentNumber = false;
-    
-    // Process each character
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      const isNumber = /[0-9]/.test(char);
-      
-      // If type changed or at the start, create a new segment
-      if (i === 0 || isNumber !== isCurrentNumber) {
-        if (currentSegment) {
-          segments.push({ text: currentSegment, isNumber: isCurrentNumber });
-        }
-        currentSegment = char;
-        isCurrentNumber = isNumber;
-      } else {
-        // Continue building the current segment
-        currentSegment += char;
-      }
-    }
-    
-    // Add the final segment
-    if (currentSegment) {
-      segments.push({ text: currentSegment, isNumber: isCurrentNumber });
-    }
-    
-    // Helper function to determine proper kerning based on character pair
-    const getKerningStyle = (segment, index) => {
-      if (!segment.isNumber || index === 0) return {};
-      
-      // Get previous segment (which must be letters)
-      const prevSegment = segments[index-1];
-      if (!prevSegment || prevSegment.isNumber) return {};
-      
-      // Apply kerning based on the last character of previous segment
-      const lastChar = prevSegment.text.slice(-1);
-      
-      // Fine-tuned kerning adjustments for common elements to match canvas rendering
-      if (['C', 'O'].includes(lastChar)) {
-        return { marginLeft: '-3px' }; // More kerning for round letters
-      } else if (['F', 'P', 'S'].includes(lastChar)) {
-        return { marginLeft: '-2.8px' }; // Medium-high adjustment 
-      } else if (['N', 'E', 'B'].includes(lastChar)) {
-        return { marginLeft: '-2.5px' }; // Medium kerning
-      } else if (['H', 'T', 'I', 'L'].includes(lastChar)) {
-        return { marginLeft: '-1.7px' }; // Less kerning for narrow letters
-      } else if (['l', 'i'].includes(lastChar)) {
-        return { marginLeft: '-1.3px' }; // Minimal kerning for very narrow letters
-      }
-      
-      return { marginLeft: '-2.3px' }; // Default kerning
-    };
-    
-    // Render the segments with improved styling to match canvas rendering
-    return (
-      <span style={{ fontWeight: '40', color: 'black' }}>
-        {segments.map((segment, index) => (
-          <span
-            key={index}
-            style={segment.isNumber ? {
-              fontSize: '0.58em',        // Smaller size for proper subscript appearance (matching canvas 15px)
-              position: 'relative',
-              bottom: '-4px',            // Precisely positioned to match canvas rendering
-              fontWeight: '40',
-              ...getKerningStyle(segment, index) // Apply fine-tuned character-specific kerning
-            } : {}}
-          >
-            {segment.text}
-          </span>
-        ))}
-      </span>
+  // Handle keyboard events for undo
+  useEffect(() => {
+    const handleKeyDown = createUndoKeyHandler(
+      historyIndex,
+      undo
     );
-  };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [historyIndex, undo]);
+
+
 
   // Auto-select text in atom input when it appears
   useEffect(() => {
@@ -6267,6 +4975,42 @@ const HexGridWithToolbar = () => {
           </button>
         </div>
         <div style={{ flex: 1, minHeight: '10px' }} />
+        
+        {/* Undo Button */}
+        <button
+          onClick={undo}
+          disabled={historyIndex <= 0}
+          style={{
+            width: '100%',
+            padding: 'calc(min(280px, 25vw) * 0.019) 0',
+            backgroundColor: historyIndex <= 0 ? '#555' : '#23395d',
+            color: historyIndex <= 0 ? '#999' : '#fff',
+            border: 'none',
+            borderRadius: 'calc(min(280px, 25vw) * 0.025)',
+            cursor: historyIndex <= 0 ? 'not-allowed' : 'pointer',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
+            fontWeight: 700,
+            marginTop: 0,
+            marginBottom: 'max(6px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))',
+            outline: 'none',
+            transition: 'background 0.2s, color 0.2s',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+            opacity: historyIndex <= 0 ? 0.6 : 1,
+          }}
+          title={`Undo${historyIndex <= 0 ? ' (No actions to undo)' : ''}`}
+        >
+          {/* Undo SVG */}
+          <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(20px, calc(min(280px, 25vw) * 0.081))" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 7v6h6"/>
+            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+          </svg>
+          Undo
+        </button>
+        
         <button
           onClick={() => { 
             handleEraseAll(); 
@@ -6300,7 +5044,8 @@ const HexGridWithToolbar = () => {
             <line x1="11" y1="13" x2="11" y2="22"/>
             <line x1="15" y1="13" x2="15" y2="22"/>
           </svg>
-                </button>
+          Erase All
+        </button>
       </div>
       
 
@@ -6463,7 +5208,7 @@ const HexGridWithToolbar = () => {
           ref={canvasRef}
           onClick={e => { handleClick(e); }}
           onMouseDown={handleMouseDown}
-          onMouseMove={e => { handleMouseMove(e); handleArrowMouseMove(e); }}
+          onMouseMove={e => { handleMouseMove(e); handleArrowMouseMoveLocal(e); }}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
           style={{
@@ -6569,41 +5314,91 @@ const HexGridWithToolbar = () => {
       )}
       
       {/* Copy Button - appears above selection */}
-      {selectionBounds && (selectedSegments.size > 0 || selectedVertices.size > 0 || selectedArrows.size > 0) && !isPasteMode && (
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            copySelection();
-          }}
-          style={{
-            position: 'absolute',
-            top: `${selectionBounds.y1 + offset.y - 40}px`,
-            left: `${selectionBounds.x1 + offset.x + (selectionBounds.x2 - selectionBounds.x1) / 2}px`,
-            transform: 'translateX(-50%)',
-            zIndex: 4,
-            backgroundColor: 'rgb(54, 98, 227)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '6px',
-            padding: '6px 12px',
-            fontSize: '13px',
-            fontWeight: '600',
-            cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '6px',
-            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-          }}
-          title="Copy (Cmd/Ctrl+C)"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-          </svg>
-          Copy
-        </button>
-      )}
+      {(selectedSegments.size > 0 || selectedVertices.size > 0 || selectedArrows.size > 0) && !isPasteMode && (() => {
+        // Calculate current screen bounds of selected items
+        let minX = Infinity, maxX = -Infinity, minY = Infinity;
+        
+        // Check selected vertices
+        selectedVertices.forEach(vertexIndex => {
+          const vertex = vertices[vertexIndex];
+          if (vertex) {
+            const screenX = vertex.x + offset.x;
+            const screenY = vertex.y + offset.y;
+            minX = Math.min(minX, screenX);
+            maxX = Math.max(maxX, screenX);
+            minY = Math.min(minY, screenY);
+          }
+        });
+        
+        // Check selected segments
+        selectedSegments.forEach(segmentIndex => {
+          const segment = segments[segmentIndex];
+          if (segment) {
+            const screenX1 = segment.x1 + offset.x;
+            const screenY1 = segment.y1 + offset.y;
+            const screenX2 = segment.x2 + offset.x;
+            const screenY2 = segment.y2 + offset.y;
+            minX = Math.min(minX, screenX1, screenX2);
+            maxX = Math.max(maxX, screenX1, screenX2);
+            minY = Math.min(minY, screenY1, screenY2);
+          }
+        });
+        
+        // Check selected arrows
+        selectedArrows.forEach(arrowIndex => {
+          const arrow = arrows[arrowIndex];
+          if (arrow) {
+            const screenX1 = arrow.x1 + offset.x;
+            const screenY1 = arrow.y1 + offset.y;
+            const screenX2 = arrow.x2 + offset.x;
+            const screenY2 = arrow.y2 + offset.y;
+            minX = Math.min(minX, screenX1, screenX2);
+            maxX = Math.max(maxX, screenX1, screenX2);
+            minY = Math.min(minY, screenY1, screenY2);
+          }
+        });
+        
+        // If no valid bounds found, don't render the button
+        if (minX === Infinity) return null;
+        
+        const centerX = (minX + maxX) / 2;
+        
+        return (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              copySelection();
+            }}
+            style={{
+              position: 'absolute',
+              top: `${minY - 40}px`,
+              left: `${centerX}px`,
+              transform: 'translateX(-50%)',
+              zIndex: 4,
+              backgroundColor: 'rgb(54, 98, 227)',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              padding: '6px 12px',
+              fontSize: '13px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+            }}
+            title="Copy (Cmd/Ctrl+C)"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+            </svg>
+            Copy
+          </button>
+        );
+      })()}
       
       {/* Paste Mode Indicator */}
       {isPasteMode && (
