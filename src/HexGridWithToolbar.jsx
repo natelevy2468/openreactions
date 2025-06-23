@@ -505,9 +505,30 @@ const HexGridWithToolbar = () => {
     setArrowPreview(null);
   }, [history, historyIndex, clearSelection]);
 
-  // Calculate best alignment for pasted molecule to grid
+    // Helper function to find grid line that matches bond position and direction
+  const findMatchingGridLine = useCallback((x1, y1, x2, y2) => {
+    // Find grid segments (bondOrder === 0) that match this bond's position
+    const tolerance = 5; // pixels
+    
+    for (const gridSeg of segments) {
+      if (gridSeg.bondOrder !== 0) continue; // Only check grid lines
+      
+      // Check if bond endpoints are close to grid line endpoints (in either direction)
+      const dist1 = Math.sqrt((gridSeg.x1 + offset.x - x1) ** 2 + (gridSeg.y1 + offset.y - y1) ** 2) +
+                   Math.sqrt((gridSeg.x2 + offset.x - x2) ** 2 + (gridSeg.y2 + offset.y - y2) ** 2);
+      const dist2 = Math.sqrt((gridSeg.x1 + offset.x - x2) ** 2 + (gridSeg.y1 + offset.y - y2) ** 2) +
+                   Math.sqrt((gridSeg.x2 + offset.x - x1) ** 2 + (gridSeg.y2 + offset.y - y1) ** 2);
+      
+      if (Math.min(dist1, dist2) < tolerance * 2) {
+        return { segment: gridSeg, distance: Math.min(dist1, dist2) };
+      }
+    }
+    return null;
+  }, [segments, offset]);
+
+  // Calculate best alignment for pasted molecule to grid based on bond alignment
   const calculateGridAlignment = useCallback((pastedVertices, clickX, clickY) => {
-    if (!pastedVertices || pastedVertices.length === 0) return null;
+    if (!pastedVertices || pastedVertices.length === 0 || !clipboard || !clipboard.segments) return null;
     
     // Cache recent calculations to avoid duplicate work
     const cacheKey = `${clickX.toFixed(0)},${clickY.toFixed(0)},${pastedVertices.length}`;
@@ -515,7 +536,7 @@ const HexGridWithToolbar = () => {
       return calculateGridAlignment.cache.result;
     }
     
-    // Performance optimization: only try alignments from first 3 vertices
+    // Try alignments based on bond-to-grid-line matching
     const maxTryVertices = Math.min(3, pastedVertices.length);
     let bestAlignment = null;
     let bestScore = Infinity;
@@ -525,7 +546,7 @@ const HexGridWithToolbar = () => {
       const pastedWorldX = clickX - offset.x + pastedVertex.x;
       const pastedWorldY = clickY - offset.y + pastedVertex.y;
       
-      // Always find closest grid vertex regardless of distance (aggressive snapping)
+      // Find closest grid vertex for this anchor point
       const closestGrid = findClosestGridVertex(pastedWorldX, pastedWorldY, Infinity);
       if (!closestGrid) continue;
       
@@ -533,41 +554,57 @@ const HexGridWithToolbar = () => {
       const translationX = closestGrid.vertex.x - pastedWorldX;
       const translationY = closestGrid.vertex.y - pastedWorldY;
       
-      // Test this alignment for all vertices
-      let totalScore = closestGrid.distance;
+      // Score this alignment based on how well bonds align with grid lines
+      let totalScore = 0;
+      let alignedBonds = 0;
+      let totalBonds = 0;
       const vertexMappings = new Map();
-      let snappedCount = 1; // Anchor vertex always snaps
-      vertexMappings.set(index, closestGrid.vertex);
       
-             // Test remaining vertices
-       for (let i = 0; i < pastedVertices.length; i++) {
-         if (i === index) continue; // Skip anchor vertex
-         
-         const vertex = pastedVertices[i];
-         const alignedX = clickX - offset.x + vertex.x + translationX;
-         const alignedY = clickY - offset.y + vertex.y + translationY;
-         
-         // Always snap to closest grid vertex (aggressive snapping)
-         const nearestGrid = findClosestGridVertex(alignedX, alignedY, Infinity);
-         if (nearestGrid) {
-           // Quick bond count check (optimization: skip orientation for now)
-           const targetBondCount = countBondsAtVertexForSnapping(nearestGrid.vertex);
-           
-           if (targetBondCount <= 4) {
-             vertexMappings.set(i, nearestGrid.vertex);
-             totalScore += nearestGrid.distance * 0.1; // Reduce distance weight for aggressive snapping
-             snappedCount++;
-           } else {
-             totalScore += 30; // Penalty for unbondable vertex
-           }
-         } else {
-           totalScore += 100; // Higher penalty if no grid vertex found (shouldn't happen)
-         }
-       }
+      // Check each bond in the clipboard for grid line alignment
+      clipboard.segments.forEach(segment => {
+        if (segment.bondOrder === 0) return; // Skip grid lines in clipboard
+        
+        const v1 = clipboard.vertices[segment.vertex1Index];
+        const v2 = clipboard.vertices[segment.vertex2Index];
+        if (!v1 || !v2) return;
+        
+        // Calculate screen positions after translation
+        const screenX1 = clickX + v1.x + translationX;
+        const screenY1 = clickY + v1.y + translationY;
+        const screenX2 = clickX + v2.x + translationX;
+        const screenY2 = clickY + v2.y + translationY;
+        
+        totalBonds++;
+        
+        // Check if this bond aligns with a grid line
+        const matchingGridLine = findMatchingGridLine(screenX1, screenY1, screenX2, screenY2);
+        if (matchingGridLine) {
+          alignedBonds++;
+          totalScore += matchingGridLine.distance * 0.1; // Small penalty for distance
+        } else {
+          totalScore += 50; // Penalty for non-aligned bond
+        }
+      });
       
-             // Accept alignment if it's better than current best
-       const snappingRatio = snappedCount / pastedVertices.length;
-       if (snappingRatio >= 0.1 && totalScore < bestScore) { // Very low threshold for aggressive snapping
+      // Also map vertices to grid positions for snapping
+      pastedVertices.forEach((vertex, i) => {
+        const alignedX = clickX - offset.x + vertex.x + translationX;
+        const alignedY = clickY - offset.y + vertex.y + translationY;
+        
+        const nearestGrid = findClosestGridVertex(alignedX, alignedY, 30); // Reasonable threshold for vertex snapping
+        if (nearestGrid) {
+          const targetBondCount = countBondsAtVertexForSnapping(nearestGrid.vertex);
+          if (targetBondCount <= 4) {
+            vertexMappings.set(i, nearestGrid.vertex);
+          }
+        }
+      });
+      
+      // Calculate bond alignment ratio
+      const bondAlignmentRatio = totalBonds > 0 ? alignedBonds / totalBonds : 0;
+      
+      // Accept alignment if most bonds align with grid lines
+      if (bondAlignmentRatio >= 0.3 && totalScore < bestScore) { // At least 30% of bonds must align
         bestScore = totalScore;
         bestAlignment = {
           translation: { x: translationX, y: translationY },
@@ -575,18 +612,21 @@ const HexGridWithToolbar = () => {
           vertexMappings,
           score: totalScore,
           anchorIndex: index,
-          snappedCount: snappedCount
+          snappedCount: vertexMappings.size,
+          bondAlignmentRatio: bondAlignmentRatio,
+          alignedBonds: alignedBonds,
+          totalBonds: totalBonds
         };
         
-        // Early exit if we found a really good alignment
-        if (snappingRatio >= 0.8 && totalScore < 50) break;
+        // Early exit if we found excellent bond alignment
+        if (bondAlignmentRatio >= 0.8) break;
       }
     }
     
     // Cache the result
     calculateGridAlignment.cache = { key: cacheKey, result: bestAlignment };
     return bestAlignment;
-  }, [findClosestGridVertex, offset, countBondsAtVertexForSnapping, segments]);
+  }, [findClosestGridVertex, offset, countBondsAtVertexForSnapping, clipboard, findMatchingGridLine]);
 
   // Update grid index when vertices change
   useEffect(() => {
@@ -2523,7 +2563,7 @@ const HexGridWithToolbar = () => {
         }
         
         // Draw preview vertices with atoms
-        clipboard.vertices.forEach(vertex => {
+        clipboard.vertices.forEach((vertex, vertexIndex) => {
           const vx = previewX + vertex.x;
           const vy = previewY + vertex.y;
           
@@ -2661,7 +2701,7 @@ const HexGridWithToolbar = () => {
           // Note: Don't draw anything for vertices without atoms
         });
         
-        // Draw preview segments
+        // Draw preview segments with bond alignment feedback
         clipboard.segments.forEach(segment => {
           const v1 = clipboard.vertices[segment.vertex1Index];
           const v2 = clipboard.vertices[segment.vertex2Index];
@@ -2671,7 +2711,18 @@ const HexGridWithToolbar = () => {
             const x2 = previewX + v2.x + offset.x;
             const y2 = previewY + v2.y + offset.y;
             
-            ctx.strokeStyle = '#888';
+            // Check if this bond aligns with a grid line when snapping is enabled
+            let bondColor = '#888'; // Default gray
+            if (snapAlignment && showSnapPreview && segment.bondOrder > 0) {
+              const matchingGridLine = findMatchingGridLine(x1, y1, x2, y2);
+              if (matchingGridLine) {
+                bondColor = '#4CAF50'; // Green for aligned bonds
+              } else {
+                bondColor = '#F44336'; // Red for non-aligned bonds
+              }
+            }
+            
+            ctx.strokeStyle = bondColor;
             ctx.lineWidth = 3;
             
             // Use the exact same rendering logic as the main drawing function
@@ -5434,7 +5485,7 @@ const HexGridWithToolbar = () => {
               padding: '2px 6px', 
               borderRadius: '4px' 
             }}>
-              {snapAlignment.vertexMappings.size} snapped
+              {snapAlignment.alignedBonds || 0}/{snapAlignment.totalBonds || 0} bonds aligned
             </div>
           )}
         </div>
