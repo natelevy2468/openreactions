@@ -573,15 +573,136 @@ export const getRingInteriorDirection = (segment, ringInfo, allRings) => {
   };
 };
 
+/**
+ * Detects 3-membered rings (cyclopropane)
+ */
+export const detectThreeMemberedRings = (vertices, segments, vertexAtoms) => {
+  if (!vertices || vertices.length === 0 || !segments || segments.length === 0) {
+    return [];
+  }
+  
+  try {
+    const graph = buildGraphFromSegments(vertices, segments);
+    return findRingsOfSize(graph, 3);
+  } catch (error) {
+    console.warn('3-membered ring detection failed:', error);
+    return [];
+  }
+};
+
+/**
+ * Detects 4-membered rings (cyclobutane)  
+ */
+export const detectFourMemberedRings = (vertices, segments, vertexAtoms) => {
+  if (!vertices || vertices.length === 0 || !segments || segments.length === 0) {
+    return [];
+  }
+  
+  try {
+    const graph = buildGraphFromSegments(vertices, segments);
+    return findRingsOfSize(graph, 4);
+  } catch (error) {
+    console.warn('4-membered ring detection failed:', error);
+    return [];
+  }
+};
+
+/**
+ * Detects 5-membered rings (cyclopentane)
+ */
+export const detectFiveMemberedRings = (vertices, segments, vertexAtoms) => {
+  if (!vertices || vertices.length === 0 || !segments || segments.length === 0) {
+    return [];
+  }
+  
+  try {
+    const graph = buildGraphFromSegments(vertices, segments);
+    return findRingsOfSize(graph, 5);
+  } catch (error) {
+    console.warn('5-membered ring detection failed:', error);
+    return [];
+  }
+};
+
+/**
+ * Enhanced ring detection that finds rings of all sizes (3, 4, 5, and 6 membered)
+ */
+export const detectAllRings = (vertices, segments, vertexAtoms) => {
+  const allRings = [];
+  
+  // Detect rings of different sizes
+  const threeMemberedRings = detectThreeMemberedRings(vertices, segments, vertexAtoms);
+  const fourMemberedRings = detectFourMemberedRings(vertices, segments, vertexAtoms);
+  const fiveMemberedRings = detectFiveMemberedRings(vertices, segments, vertexAtoms);
+  const sixMemberedRings = detectSixMemberedRings(vertices, segments, vertexAtoms);
+  
+  // Add all rings with size information
+  threeMemberedRings.forEach(ring => allRings.push({ vertices: ring, size: 3 }));
+  fourMemberedRings.forEach(ring => allRings.push({ vertices: ring, size: 4 }));
+  fiveMemberedRings.forEach(ring => allRings.push({ vertices: ring, size: 5 }));
+  sixMemberedRings.forEach(ring => allRings.push({ vertices: ring, size: 6 }));
+  
+  return allRings;
+};
+
+/**
+ * Enhanced aromaticity check that handles different ring sizes
+ */
+export const isRingAromaticEnhanced = (ringVertices, segments, ringSize) => {
+  // Simplified aromaticity check based on ring size
+  let doubleBondCount = 0;
+  let singleBondCount = 0;
+  
+  // For each pair of vertices in the ring, check bond order
+  for (let i = 0; i < ringVertices.length; i++) {
+    const currentVertex = ringVertices[i];
+    const nextVertex = ringVertices[(i + 1) % ringVertices.length];
+    
+    // Find the segment connecting these vertices
+    for (const segment of segments) {
+      const v1Key = `${segment.x1.toFixed(2)},${segment.y1.toFixed(2)}`;
+      const v2Key = `${segment.x2.toFixed(2)},${segment.y2.toFixed(2)}`;
+      
+      if ((v1Key === currentVertex && v2Key === nextVertex) || 
+          (v1Key === nextVertex && v2Key === currentVertex)) {
+        if (segment.bondOrder === 2) {
+          doubleBondCount++;
+        } else if (segment.bondOrder === 1) {
+          singleBondCount++;
+        }
+        break;
+      }
+    }
+  }
+  
+  // Aromaticity rules by ring size:
+  // 6-membered: 3 double bonds and 3 single bonds (benzene)
+  // 5-membered: Not typically aromatic in simple cases (furan, pyrrole need heteroatoms)
+  // 4-membered: Not aromatic (antiaromatic)
+  // 3-membered: Not aromatic
+  if (ringSize === 6) {
+    return doubleBondCount === 3 && singleBondCount === 3;
+  } else if (ringSize === 5) {
+    // For 5-membered rings, aromaticity is rare without heteroatoms
+    // We could implement more complex rules here if needed
+    return false;
+  } else {
+    // 3 and 4-membered rings are not aromatic
+    return false;
+  }
+};
+
 export const getRingInfo = (vertices, segments, vertexAtoms) => {
-  const rings = detectSixMemberedRings(vertices, segments, vertexAtoms);
+  // Use enhanced detection that finds all ring sizes
+  const allRings = detectAllRings(vertices, segments, vertexAtoms);
   
   return {
-    totalRings: rings.length,
-    rings: rings.map((ring, index) => ({
+    totalRings: allRings.length,
+    rings: allRings.map((ring, index) => ({
       id: index,
-      vertices: ring,
-      isAromatic: isRingAromatic(ring, segments),
+      vertices: ring.vertices,
+      size: ring.size,
+      isAromatic: isRingAromaticEnhanced(ring.vertices, segments, ring.size),
     })),
   };
 };

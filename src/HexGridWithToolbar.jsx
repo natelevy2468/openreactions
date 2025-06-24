@@ -543,23 +543,91 @@ const HexGridWithToolbar = () => {
     };
 
     setHistory(prevHistory => {
-      // If we're not at the end of history, truncate everything after current position
+      // If we're not at the end of history, truncate everything after current position  
       const newHistory = prevHistory.slice(0, historyIndex + 1);
       // Add new state
       newHistory.push(currentState);
       // Limit history to 50 states to prevent memory issues
       if (newHistory.length > 50) {
         newHistory.shift();
-        return newHistory;
       }
       return newHistory;
     });
 
-    setHistoryIndex(prevIndex => {
-      const newIndex = Math.min(prevIndex + 1, 49); // Cap at 49 (0-indexed)
-      return newIndex;
-    });
-  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, verticesWith3Bonds, bondPreviews, historyIndex]);
+    setHistoryIndex(prevIndex => Math.min(prevIndex + 1, 49));
+  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, verticesWith3Bonds, bondPreviews]);
+
+  // Check ALL vertices for fourth bond eligibility whenever structure changes
+  useEffect(() => {
+    const checkAllVerticesForFourthBond = () => {
+      const hasAnyDoubleBonds = (vertex) => {
+        for (const seg of segments) {
+          if (seg.bondOrder >= 2) { // Double or triple bonds
+            if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
+                (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
+              return true;
+            }
+          }
+        }
+        return false;
+      };
+
+      const countSingleBonds = (vertex) => {
+        let count = 0;
+        for (const seg of segments) {
+          if (seg.bondOrder === 1) { // Only count single bonds
+            if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
+                (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
+              count++;
+            }
+          }
+        }
+        return count;
+      };
+
+      // Check all vertices (both on-grid and off-grid)
+      const qualifyingVertices = [];
+      vertices.forEach(vertex => {
+        // Check if vertex has exactly 3 single bonds and no double/triple bonds
+        if (!hasAnyDoubleBonds(vertex) && countSingleBonds(vertex) === 3) {
+          qualifyingVertices.push({
+            x: vertex.x,
+            y: vertex.y,
+            key: `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`
+          });
+        }
+      });
+
+      // Update state only if there are changes
+      setVerticesWith3Bonds(prev => {
+        // Check if the arrays are different
+        if (prev.length !== qualifyingVertices.length) {
+          return qualifyingVertices;
+        }
+        
+        // Check if all vertices are the same
+        const prevKeys = new Set(prev.map(v => v.key));
+        const newKeys = new Set(qualifyingVertices.map(v => v.key));
+        
+        for (const key of newKeys) {
+          if (!prevKeys.has(key)) {
+            return qualifyingVertices;
+          }
+        }
+        
+        for (const key of prevKeys) {
+          if (!newKeys.has(key)) {
+            return qualifyingVertices;
+          }
+        }
+        
+        return prev; // No changes needed
+      });
+    };
+
+    // Run the check whenever vertices or segments change
+    checkAllVerticesForFourthBond();
+  }, [vertices, segments]);
 
   // Undo the last action
   const undo = useCallback(() => {
@@ -619,8 +687,8 @@ const HexGridWithToolbar = () => {
   const calculateGridAlignment = useCallback((pastedVertices, clickX, clickY) => {
     if (!pastedVertices || pastedVertices.length === 0 || !clipboard || !clipboard.segments) return null;
     
-    // Don't try to align cyclopentane to hexagonal grid - pentagon won't fit properly
-    if (selectedPreset === 'cyclopentane') {
+    // Don't try to align small ring presets to hexagonal grid - they won't fit properly
+    if (selectedPreset === 'cyclopentane' || selectedPreset === 'cyclobutane' || selectedPreset === 'cyclopropane') {
       return null;
     }
     
@@ -3520,62 +3588,163 @@ const HexGridWithToolbar = () => {
     };
   }, [hexRadius, calculateBondDirection]);
 
-  // Toggle benzene preset selection
-  const toggleBenzenePreset = useCallback(() => {
-    if (selectedPreset === 'benzene') {
-      // Deselect benzene preset
+  // Generate cyclobutane preset data
+  const generateCyclobutanePreset = useCallback(() => {
+    const cyclobutaneVertices = [];
+    const cyclobutaneSegments = [];
+    const radius = hexRadius * 0.6; // Smaller than cyclopentane for 4-membered ring
+    
+    // Create 4 vertices in a regular square pattern
+    for (let i = 0; i < 4; i++) {
+      const angle = (i * 90 - 45) * Math.PI / 180; // Start from top-right (-45°), 90° intervals for square
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle);
+      
+      cyclobutaneVertices.push({
+        x: x,
+        y: y,
+        isOffGrid: true // Cyclobutane vertices are off-grid
+      });
+    }
+    
+    // Create 4 segments connecting the vertices in a ring with all single bonds
+    for (let i = 0; i < 4; i++) {
+      const nextIndex = (i + 1) % 4;
+      const vertex1 = cyclobutaneVertices[i];
+      const vertex2 = cyclobutaneVertices[nextIndex];
+      
+      // Calculate bond direction
+      const direction = calculateBondDirection(vertex1.x, vertex1.y, vertex2.x, vertex2.y);
+      
+      cyclobutaneSegments.push({
+        vertex1Index: i,
+        vertex2Index: nextIndex,
+        x1: vertex1.x,
+        y1: vertex1.y,
+        x2: vertex2.x,
+        y2: vertex2.y,
+        bondOrder: 1, // All single bonds
+        bondType: null,
+        bondDirection: 1,
+        direction: direction,
+        flipSmallerLine: false
+      });
+    }
+    
+    return {
+      vertices: cyclobutaneVertices,
+      segments: cyclobutaneSegments,
+      arrows: []
+    };
+  }, [hexRadius, calculateBondDirection]);
+
+  // Generate cyclopropane preset data
+  const generateCyclopropanePreset = useCallback(() => {
+    const cyclopropaneVertices = [];
+    const cyclopropaneSegments = [];
+    const radius = hexRadius * 0.45; // Even smaller for 3-membered ring
+    
+    // Create 3 vertices in a regular triangle pattern
+    for (let i = 0; i < 3; i++) {
+      const angle = (i * 120 - 90) * Math.PI / 180; // Start from top (-90°), 120° intervals for triangle
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle);
+      
+      cyclopropaneVertices.push({
+        x: x,
+        y: y,
+        isOffGrid: true // Cyclopropane vertices are off-grid
+      });
+    }
+    
+    // Create 3 segments connecting the vertices in a ring with all single bonds
+    for (let i = 0; i < 3; i++) {
+      const nextIndex = (i + 1) % 3;
+      const vertex1 = cyclopropaneVertices[i];
+      const vertex2 = cyclopropaneVertices[nextIndex];
+      
+      // Calculate bond direction
+      const direction = calculateBondDirection(vertex1.x, vertex1.y, vertex2.x, vertex2.y);
+      
+      cyclopropaneSegments.push({
+        vertex1Index: i,
+        vertex2Index: nextIndex,
+        x1: vertex1.x,
+        y1: vertex1.y,
+        x2: vertex2.x,
+        y2: vertex2.y,
+        bondOrder: 1, // All single bonds
+        bondType: null,
+        bondDirection: 1,
+        direction: direction,
+        flipSmallerLine: false
+      });
+    }
+    
+    return {
+      vertices: cyclopropaneVertices,
+      segments: cyclopropaneSegments,
+      arrows: []
+    };
+  }, [hexRadius, calculateBondDirection]);
+
+  // Generic function to select a preset (integrates with mode system)
+  const selectPreset = useCallback((presetName, presetData) => {
+    if (selectedPreset === presetName) {
+      // Deselect current preset - return to draw mode
       setSelectedPreset(null);
       setIsPasteMode(false);
       setClipboard(null);
       setSnapAlignment(null);
+      setMode('draw'); // Return to draw mode
     } else {
-      // Select benzene preset
-      setSelectedPreset('benzene');
-      const benzeneData = generateBenzenePreset();
-      setClipboard(benzeneData);
+      // Deselect any other preset first
+      if (selectedPreset) {
+        setSelectedPreset(null);
+        setIsPasteMode(false);
+        setClipboard(null);
+        setSnapAlignment(null);
+      }
+      
+      // Select new preset
+      setSelectedPreset(presetName);
+      setClipboard(presetData);
       setIsPasteMode(true);
       setSnapAlignment(null);
+      setMode('preset'); // Set mode to preset
       clearSelection(); // Clear any existing selection
     }
-  }, [selectedPreset, generateBenzenePreset, clearSelection]);
+  }, [selectedPreset, clearSelection]);
+
+  // Toggle benzene preset selection
+  const toggleBenzenePreset = useCallback(() => {
+    const benzeneData = generateBenzenePreset();
+    selectPreset('benzene', benzeneData);
+  }, [selectPreset, generateBenzenePreset]);
 
   // Toggle cyclohexane preset selection
   const toggleCyclohexanePreset = useCallback(() => {
-    if (selectedPreset === 'cyclohexane') {
-      // Deselect cyclohexane preset
-      setSelectedPreset(null);
-      setIsPasteMode(false);
-      setClipboard(null);
-      setSnapAlignment(null);
-    } else {
-      // Select cyclohexane preset
-      setSelectedPreset('cyclohexane');
-      const cyclohexaneData = generateCyclohexanePreset();
-      setClipboard(cyclohexaneData);
-      setIsPasteMode(true);
-      setSnapAlignment(null);
-      clearSelection(); // Clear any existing selection
-    }
-  }, [selectedPreset, generateCyclohexanePreset, clearSelection]);
+    const cyclohexaneData = generateCyclohexanePreset();
+    selectPreset('cyclohexane', cyclohexaneData);
+  }, [selectPreset, generateCyclohexanePreset]);
 
   // Toggle cyclopentane preset selection
   const toggleCyclopentanePreset = useCallback(() => {
-    if (selectedPreset === 'cyclopentane') {
-      // Deselect cyclopentane preset
-      setSelectedPreset(null);
-      setIsPasteMode(false);
-      setClipboard(null);
-      setSnapAlignment(null);
-    } else {
-      // Select cyclopentane preset
-      setSelectedPreset('cyclopentane');
-      const cyclopentaneData = generateCyclopentanePreset();
-      setClipboard(cyclopentaneData);
-      setIsPasteMode(true);
-      setSnapAlignment(null);
-      clearSelection(); // Clear any existing selection
-    }
-  }, [selectedPreset, generateCyclopentanePreset, clearSelection]);
+    const cyclopentaneData = generateCyclopentanePreset();
+    selectPreset('cyclopentane', cyclopentaneData);
+  }, [selectPreset, generateCyclopentanePreset]);
+
+  // Toggle cyclobutane preset selection
+  const toggleCyclobutanePreset = useCallback(() => {
+    const cyclobutaneData = generateCyclobutanePreset();
+    selectPreset('cyclobutane', cyclobutaneData);
+  }, [selectPreset, generateCyclobutanePreset]);
+
+  // Toggle cyclopropane preset selection
+  const toggleCyclopropanePreset = useCallback(() => {
+    const cyclopropaneData = generateCyclopropanePreset();
+    selectPreset('cyclopropane', cyclopropaneData);
+  }, [selectPreset, generateCyclopropanePreset]);
 
   // Paste clipboard contents at given position
   const pasteAtPosition = useCallback((x, y) => {
@@ -3605,13 +3774,41 @@ const HexGridWithToolbar = () => {
     );
   }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState, selectedPreset]);
 
-  // Helper function to change mode and clear selection
+  // Set mode (draw/erase/arrow/text/etc.) - must be defined before setModeAndClearSelection
+  const selectMode = (m) => {
+    // Close any open menus and inputs
+    setShowMenu(false);
+    setShowAtomInput(false);
+    
+    // Clear any drawing-in-progress states
+    setCurvedArrowStartPoint(null);
+    setArrowPreview(null);
+    
+    // Clear selection state
+    setIsSelecting(false);
+    setSelectionStart({ x: 0, y: 0 });
+    setSelectionEnd({ x: 0, y: 0 });
+    
+    // Clear hover states when switching modes
+    setHoverVertex(null);
+    setHoverSegmentIndex(null);
+    
+    // Clear preset states when switching to any non-preset mode
+    if (selectedPreset) {
+      setSelectedPreset(null);
+      setIsPasteMode(false);
+      setClipboard(null);
+      setSnapAlignment(null);
+    }
+    
+    // Update mode
+    setMode(m);
+  };
+
+  // Legacy function - replaced by selectMode
   const setModeAndClearSelection = useCallback((newMode) => {
-    setMode(newMode);
-    clearSelection();
-    setIsPasteMode(false); // Also cancel paste mode
-    setSelectedPreset(null); // Deselect any active preset
-  }, [clearSelection]);
+    selectMode(newMode);
+  }, []);
 
   // Update selection when selection box changes
   useEffect(() => {
@@ -3725,29 +3922,6 @@ const HexGridWithToolbar = () => {
     }
     
     return false;
-  };
-
-  // Set mode (draw/erase/arrow/text/etc.)
-  const selectMode = (m) => {
-    // Close any open menus and inputs
-    setShowMenu(false);
-    setShowAtomInput(false);
-    
-    // Clear any drawing-in-progress states
-    setCurvedArrowStartPoint(null);
-    setArrowPreview(null);
-    
-    // Clear selection state
-    setIsSelecting(false);
-    setSelectionStart({ x: 0, y: 0 });
-    setSelectionEnd({ x: 0, y: 0 });
-    
-    // Clear hover states when switching modes
-    setHoverVertex(null);
-    setHoverSegmentIndex(null);
-    
-    // Update mode
-    setMode(m);
   };
 
   // Handle atom input submission when user presses Enter or clicks outside
@@ -4105,7 +4279,7 @@ const HexGridWithToolbar = () => {
           const distSeg = Math.sqrt(dx * dx + dy * dy);
           if (distSeg <= lineThreshold && seg.bondOrder > 0) {
             bondRemoved = true;
-            // Remember the segment we're removing for checking 3-bond vertices
+            // Remember the segment we're removing for checking orphaned vertices
             removedSegment = {...seg};
             // Clear both bondOrder and bondType when erasing, but preserve direction
             const direction = seg.direction || calculateBondDirection(seg.x1, seg.y1, seg.x2, seg.y2);
@@ -4125,12 +4299,77 @@ const HexGridWithToolbar = () => {
       if (bondRemoved) {
         // Capture state before erasing bond
         captureState();
+        
+        // Check if we need to remove orphaned off-grid vertices
+        const verticesToCheck = [
+          { x: removedSegment.x1, y: removedSegment.y1 },
+          { x: removedSegment.x2, y: removedSegment.y2 }
+        ];
+        
+        // Count bonds at each vertex after removing this bond
+        const getConnectedBondCount = (vx, vy, segmentsToCheck) => {
+          return segmentsToCheck.filter(seg => 
+            seg.bondOrder > 0 && (
+              (Math.abs(seg.x1 - vx) < 0.01 && Math.abs(seg.y1 - vy) < 0.01) ||
+              (Math.abs(seg.x2 - vx) < 0.01 && Math.abs(seg.y2 - vy) < 0.01)
+            )
+          ).length;
+        };
+        
+        // Find vertices that should be removed (off-grid vertices with no remaining bonds)
+        const verticesToRemove = [];
+        verticesToCheck.forEach(checkVertex => {
+          const vertex = vertices.find(v => 
+            Math.abs(v.x - checkVertex.x) < 0.01 && Math.abs(v.y - checkVertex.y) < 0.01
+          );
+          
+          if (vertex && vertex.isOffGrid === true) {
+            const remainingBonds = getConnectedBondCount(checkVertex.x, checkVertex.y, newSegments);
+            if (remainingBonds === 0) {
+              verticesToRemove.push(vertex);
+            }
+          }
+        });
+        
+        // Update segments
         setSegments(newSegments);
+        
+        // Remove orphaned off-grid vertices
+        if (verticesToRemove.length > 0) {
+          setVertices(prevVertices => 
+            prevVertices.filter(v => !verticesToRemove.some(removeV => 
+              Math.abs(v.x - removeV.x) < 0.01 && Math.abs(v.y - removeV.y) < 0.01
+            ))
+          );
+          
+          // Also remove any atom labels for removed vertices
+          setVertexAtoms(prevAtoms => {
+            const newAtoms = { ...prevAtoms };
+            verticesToRemove.forEach(vertex => {
+              const key = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+              delete newAtoms[key];
+            });
+            return newAtoms;
+          });
+          
+          // Remove from free floating vertices set
+          setFreeFloatingVertices(prevSet => {
+            const newSet = new Set(prevSet);
+            verticesToRemove.forEach(vertex => {
+              const key = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+              newSet.delete(key);
+            });
+            return newSet;
+          });
+        }
         
         // Run ring detection after bond changes
         setTimeout(detectRings, 0);
         // Clear the 3-bond indicator
         setVerticesWith3Bonds([]);
+        // Clear bond previews to force regeneration
+        setBondPreviews([]);
+        setHoverBondPreview(null);
         return;
       }
       // If no bond, erase atom
@@ -5317,7 +5556,16 @@ const HexGridWithToolbar = () => {
         {/* Draw/Erase Buttons as icon buttons side by side */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0 }}>
           <button
-            onClick={() => setModeAndClearSelection('draw')}
+            onClick={() => {
+              // Explicitly clear any active preset when selecting draw mode
+              if (selectedPreset) {
+                setSelectedPreset(null);
+                setIsPasteMode(false);
+                setClipboard(null);
+                setSnapAlignment(null);
+              }
+              setModeAndClearSelection('draw');
+            }}
             style={{
               flex: 1,
               aspectRatio: '1/1',
@@ -6093,32 +6341,114 @@ const HexGridWithToolbar = () => {
               </svg>
             </button>
 
-            {/* Placeholder preset buttons */}
-            {[4, 5, 6].map(i => (
-              <div
-                key={i}
-                style={{
-                  width: '95px',
-                  height: '95px',
-                  backgroundColor: '#23395d',
-                  border: 'none',
-                  borderRadius: '8px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: '#888',
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  cursor: 'pointer',
-                  transition: 'background 0.2s',
-                  flexShrink: 0,
-                }}
-                onMouseEnter={(e) => e.target.style.backgroundColor = '#2a4470'}
-                onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
-              >
-                {i}
-              </div>
-            ))}
+            {/* Cyclobutane preset button */}
+            <button
+              onClick={toggleCyclobutanePreset}
+              style={{
+                width: '95px',
+                height: '95px',
+                backgroundColor: selectedPreset === 'cyclobutane' ? 'rgb(54,98,227)' : '#23395d',
+                border: 'none',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                flexShrink: 0,
+                outline: 'none',
+                padding: '8px',
+              }}
+              onMouseEnter={(e) => {
+                if (selectedPreset !== 'cyclobutane') {
+                  e.target.style.backgroundColor = '#2a4470';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedPreset !== 'cyclobutane') {
+                  e.target.style.backgroundColor = '#23395d';
+                }
+              }}
+              title="Cyclobutane Ring"
+            >
+              {/* Cyclobutane ring SVG preview */}
+              <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+                {/* Cyclobutane ring structure with all single bonds */}
+                <g transform="translate(60, 60)">
+                  {/* All single bonds in square pattern */}
+                  <line x1="25" y1="-25" x2="25" y2="25" stroke="#fff" strokeWidth="3"/>
+                  <line x1="25" y1="25" x2="-25" y2="25" stroke="#fff" strokeWidth="3"/>
+                  <line x1="-25" y1="25" x2="-25" y2="-25" stroke="#fff" strokeWidth="3"/>
+                  <line x1="-25" y1="-25" x2="25" y2="-25" stroke="#fff" strokeWidth="3"/>
+                </g>
+              </svg>
+            </button>
+
+            {/* Cyclopropane preset button */}
+            <button
+              onClick={toggleCyclopropanePreset}
+              style={{
+                width: '95px',
+                height: '95px',
+                backgroundColor: selectedPreset === 'cyclopropane' ? 'rgb(54,98,227)' : '#23395d',
+                border: 'none',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                flexShrink: 0,
+                outline: 'none',
+                padding: '8px',
+              }}
+              onMouseEnter={(e) => {
+                if (selectedPreset !== 'cyclopropane') {
+                  e.target.style.backgroundColor = '#2a4470';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedPreset !== 'cyclopropane') {
+                  e.target.style.backgroundColor = '#23395d';
+                }
+              }}
+              title="Cyclopropane Ring"
+            >
+              {/* Cyclopropane ring SVG preview */}
+              <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+                {/* Cyclopropane ring structure with all single bonds */}
+                <g transform="translate(60, 60)">
+                  {/* All single bonds in triangle pattern */}
+                  <line x1="0" y1="-23" x2="20" y2="11.5" stroke="#fff" strokeWidth="3"/>
+                  <line x1="20" y1="11.5" x2="-20" y2="11.5" stroke="#fff" strokeWidth="3"/>
+                  <line x1="-20" y1="11.5" x2="0" y2="-23" stroke="#fff" strokeWidth="3"/>
+                </g>
+              </svg>
+            </button>
+
+            {/* Placeholder preset button */}
+            <div
+              style={{
+                width: '95px',
+                height: '95px',
+                backgroundColor: '#23395d',
+                border: 'none',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#888',
+                fontSize: '16px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#2a4470'}
+              onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
+            >
+              6
+            </div>
           </div>
         </div>
         
@@ -6419,7 +6749,7 @@ const HexGridWithToolbar = () => {
             )}
           </div>
           <div style={{ fontSize: '12px', opacity: '0.9' }}>
-            {selectedPreset === 'cyclopentane' ? 'No grid snap (pentagon shape)' : 
+            {(selectedPreset === 'cyclopentane' || selectedPreset === 'cyclobutane' || selectedPreset === 'cyclopropane') ? 'No grid snap (small ring)' : 
              selectedPreset ? 'Click to place multiple' : 'Press G to toggle'}
           </div>
           {snapAlignment && showSnapPreview && !selectedPreset && (
