@@ -15,7 +15,7 @@ import { handleMouseMove as handleMouseMoveUtil, handleMouseDown as handleMouseD
 import { createEscapeKeyHandler, createGeneralEscapeHandler, createFourthBondKeyHandler, createCopyPasteKeyHandler, createUndoKeyHandler } from './handlers/KeyboardHandlers';
 import { handleArrowMouseMove, handleArrowClick } from './handlers/ArrowHandlers';
 import { formatAtomText } from './utils/TextUtils.jsx';
-import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview } from './utils/GridBreakingUtils.js';
+import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview, isVertexInLinearSystem, getLinearAxis } from './utils/GridBreakingUtils.js';
 
 const HexGridWithToolbar = () => {
   const canvasRef = useRef(null);
@@ -900,16 +900,15 @@ const HexGridWithToolbar = () => {
       }
     });
 
-    // Draw bond previews for off-grid vertices
+    // Draw bond previews for off-grid vertices (solid gray lines like grid)
     ctx.save();
-    ctx.strokeStyle = '#bbb'; // Slightly darker gray than grid lines
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 6]); // Dashed line pattern
+    ctx.lineWidth = 1.5; // Same thickness as grid lines
     
     bondPreviews.forEach(preview => {
       if (preview.isVisible) {
         const isHovered = hoverBondPreview?.id === preview.id;
-        ctx.strokeStyle = isHovered ? '#888' : '#bbb';
+        // Use same colors as grid lines: light gray normally, darker when hovered
+        ctx.strokeStyle = isHovered ? '#888' : '#e0e0e0';
         
         const sx1 = preview.x1 + offset.x;
         const sy1 = preview.y1 + offset.y;
@@ -923,7 +922,6 @@ const HexGridWithToolbar = () => {
       }
     });
     
-    ctx.setLineDash([]); // Reset dash pattern
     ctx.restore();
 
     // Draw bonds (single + double)
@@ -1578,6 +1576,36 @@ const HexGridWithToolbar = () => {
               ctx.stroke();
             }
           }
+        } else if (seg.bondOrder === 3) {
+          // Triple bond rendering
+          const dx = sx2 - sx1;
+          const dy = sy2 - sy1;
+          const length = Math.hypot(dx, dy);
+          const ux = dx / length;
+          const uy = dy / length;
+          const perpX = -uy;
+          const perpY = ux;
+          
+          // Triple bonds have three lines: center and two offset by 6 pixels
+          const offset = 6;
+          
+          // Center line
+          ctx.beginPath();
+          ctx.moveTo(sx1, sy1);
+          ctx.lineTo(sx2, sy2);
+          ctx.stroke();
+          
+          // Top line
+          ctx.beginPath();
+          ctx.moveTo(sx1 + perpX * offset, sy1 + perpY * offset);
+          ctx.lineTo(sx2 + perpX * offset, sy2 + perpY * offset);
+          ctx.stroke();
+          
+          // Bottom line
+          ctx.beginPath();
+          ctx.moveTo(sx1 - perpX * offset, sy1 - perpY * offset);
+          ctx.lineTo(sx2 - perpX * offset, sy2 - perpY * offset);
+          ctx.stroke();
         }
       }
     });
@@ -3789,7 +3817,7 @@ const HexGridWithToolbar = () => {
       hexRadius,
       {
         tolerance: 8, // Slightly more tolerance than the default 5
-        suppressionRadiusMultiplier: 1.5,
+        suppressionRadiusMultiplier: 1.0, // Reduced to match bond option radius (blue circle)
         bondOptionRadiusMultiplier: 1.0,
         overlapMergeThreshold: 0.8
       }
@@ -3821,8 +3849,42 @@ const HexGridWithToolbar = () => {
       return; // Exit early, paste is handled elsewhere
     }
 
-    // Handle bond preview clicks first (highest priority)
-    if (bondPreviews.length > 0) {
+    // Handle vertex clicks first (highest priority) - only in draw and stereochemistry modes
+    const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
+    if (isDrawOrStereochemistryMode) {
+      let nearestVertex = null;
+      let minV = vertexThreshold;
+      for (let v of vertices) {
+        const dist = distanceToVertex(x, y, v.x, v.y);
+        if (dist <= minV) {
+          minV = dist;
+          nearestVertex = v;
+        }
+      }
+      if (nearestVertex) {
+        const key = `${nearestVertex.x.toFixed(2)},${nearestVertex.y.toFixed(2)}`;
+        setMenuVertexKey(key);
+        
+        // Position the input box at the vertex position
+        setAtomInputPosition({ x: nearestVertex.x + offset.x, y: nearestVertex.y + offset.y });
+        
+        // Set initial value if there's an existing atom
+        const existingAtom = vertexAtoms[key];
+        if (existingAtom) {
+          const symbol = existingAtom.symbol || existingAtom;
+          setAtomInputValue(symbol);
+        } else {
+          setAtomInputValue('');
+        }
+        
+        // Show the input box instead of menu
+        setShowAtomInput(true);
+        return; // Exit early, vertex click handled
+      }
+    }
+
+    // Handle bond preview clicks (lower priority than vertices)
+    if (bondPreviews.length > 0 && isDrawOrStereochemistryMode) {
       for (const preview of bondPreviews) {
         if (isPointOnBondPreview(x, y, preview, offset)) {
           // Capture state before creating bond
@@ -3907,20 +3969,19 @@ const HexGridWithToolbar = () => {
           });
         }
         
-        setSegments(prevSegments => [
-          ...prevSegments,
-          {
-            x1: fourthBondSource.x,
-            y1: fourthBondSource.y,
-            x2: endX,
-            y2: endY,
-            bondOrder: 1, // Single bond
-            bondType: bondType, // Apply stereochemistry if in stereochemistry mode
-            bondDirection: 1, // Default direction
-            direction: direction, // Calculate direction
-            flipSmallerLine: false // Default to false
-          }
-        ]);
+        const newBond = {
+          x1: fourthBondSource.x,
+          y1: fourthBondSource.y,
+          x2: endX,
+          y2: endY,
+          bondOrder: 1, // Single bond
+          bondType: bondType, // Apply stereochemistry if in stereochemistry mode
+          bondDirection: 1, // Default direction
+          direction: direction, // Calculate direction
+          flipSmallerLine: false // Default to false
+        };
+        
+        setSegments(prevSegments => [...prevSegments, newBond]);
         
         // Fourth bond created successfully - no automatic atom input
         
@@ -3941,7 +4002,6 @@ const HexGridWithToolbar = () => {
     
     // Check if we clicked on a blue circle indicator (3-bond vertex)
     // Allow clicking on indicator in both draw and stereochemistry modes
-    const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
     const indicatorVertex = isPointInIndicator(x, y);
     if (indicatorVertex && isDrawOrStereochemistryMode) {
       // Enter fourth bond mode with this vertex as source
@@ -4127,37 +4187,8 @@ const HexGridWithToolbar = () => {
       setShowAtomInput(true);
       return;
     } else if (mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') {
-      // Allow bond creation and atom selection in draw and stereochemistry modes
-      // Snap to nearest vertex or segment
-      let nearestVertex = null;
-      let minV = vertexThreshold;
-      for (let v of vertices) {
-        const dist = distanceToVertex(x, y, v.x, v.y);
-        if (dist <= minV) {
-          minV = dist;
-          nearestVertex = v;
-        }
-      }
-      if (nearestVertex) {
-        const key = `${nearestVertex.x.toFixed(2)},${nearestVertex.y.toFixed(2)}`;
-        setMenuVertexKey(key);
-        
-        // Position the input box at the vertex position
-        setAtomInputPosition({ x: nearestVertex.x + offset.x, y: nearestVertex.y + offset.y });
-        
-        // Set initial value if there's an existing atom
-        const existingAtom = vertexAtoms[key];
-        if (existingAtom) {
-          const symbol = existingAtom.symbol || existingAtom;
-          setAtomInputValue(symbol);
-        } else {
-          setAtomInputValue('');
-        }
-        
-        // Show the input box instead of menu
-        setShowAtomInput(true);
-        return;
-      }
+      // Allow bond creation in draw and stereochemistry modes
+      // (Vertex detection has been moved to the top for higher priority)
       let closestIdx = null;
       let minDist = lineThreshold;
       segments.forEach((seg, idx) => {
@@ -4190,7 +4221,7 @@ const HexGridWithToolbar = () => {
             // Normal draw mode - cycle through bond orders with no special bond type
             updatedSegments = segments.map((seg, idx) => {
               if (idx === closestIdx) {
-                const newBondOrder = seg.bondOrder === 0 ? 1 : seg.bondOrder === 1 ? 2 : 0;
+                const newBondOrder = seg.bondOrder === 0 ? 1 : seg.bondOrder === 1 ? 2 : seg.bondOrder === 2 ? 3 : 0;
                 const direction = seg.direction || calculateBondDirection(seg.x1, seg.y1, seg.x2, seg.y2);
                 
                 // Calculate upperVertex and lowerVertex for double bonds
@@ -4201,7 +4232,7 @@ const HexGridWithToolbar = () => {
                   lowerVertex = vertices.lowerVertex;
                 }
                 
-                return { 
+                const updatedSegment = { 
                   ...seg, 
                   bondOrder: newBondOrder,
                   bondType: null, // Clear any special bond type when using normal draw mode
@@ -4210,6 +4241,95 @@ const HexGridWithToolbar = () => {
                   lowerVertex: lowerVertex, // Only set for double bonds
                   flipSmallerLine: false // Default to false for all bonds
                 };
+                
+                // If this is becoming a triple bond, check bond context before applying linear geometry
+                if (newBondOrder === 3) {
+                  // Check if either vertex has existing bonds to orient the triple bond linearly
+                  const v1 = { x: seg.x1, y: seg.y1 };
+                  const v2 = { x: seg.x2, y: seg.y2 };
+                  
+                  const v1Bonds = segments.filter((s, idx) => 
+                    idx !== closestIdx && s.bondOrder > 0 &&
+                    ((Math.abs(s.x1 - v1.x) < 0.01 && Math.abs(s.y1 - v1.y) < 0.01) ||
+                     (Math.abs(s.x2 - v1.x) < 0.01 && Math.abs(s.y2 - v1.y) < 0.01))
+                  );
+                  
+                  const v2Bonds = segments.filter((s, idx) => 
+                    idx !== closestIdx && s.bondOrder > 0 &&
+                    ((Math.abs(s.x1 - v2.x) < 0.01 && Math.abs(s.y1 - v2.y) < 0.01) ||
+                     (Math.abs(s.x2 - v2.x) < 0.01 && Math.abs(s.y2 - v2.y) < 0.01))
+                  );
+                  
+                  // If BOTH vertices have existing bonds, skip linear geometry (keep existing structure)
+                  const bothVerticesHaveBonds = v1Bonds.length > 0 && v2Bonds.length > 0;
+                  
+                  // Only apply linear geometry if not both vertices have bonds
+                  if (!bothVerticesHaveBonds && (v1Bonds.length > 0 || v2Bonds.length > 0)) {
+                    let anchorVertex, otherVertex, anchorBonds;
+                    
+                    if (v1Bonds.length > 0) {
+                      anchorVertex = v1;
+                      otherVertex = v2;
+                      anchorBonds = v1Bonds;
+                    } else {
+                      anchorVertex = v2;
+                      otherVertex = v1;
+                      anchorBonds = v2Bonds;
+                    }
+                    
+                    // Calculate the direction of existing bonds from the anchor vertex
+                    const existingBond = anchorBonds[0]; // Use first bond for orientation
+                    let existingBondAngle;
+                    
+                    if (Math.abs(existingBond.x1 - anchorVertex.x) < 0.01 && Math.abs(existingBond.y1 - anchorVertex.y) < 0.01) {
+                      // Anchor is at the start of the existing bond
+                      existingBondAngle = Math.atan2(existingBond.y2 - anchorVertex.y, existingBond.x2 - anchorVertex.x);
+                    } else {
+                      // Anchor is at the end of the existing bond
+                      existingBondAngle = Math.atan2(existingBond.y1 - anchorVertex.y, existingBond.x1 - anchorVertex.x);
+                    }
+                    
+                    // Orient triple bond 180° from the existing bond
+                    const tripleBondAngle = existingBondAngle + Math.PI;
+                    const newOtherX = anchorVertex.x + Math.cos(tripleBondAngle) * hexRadius;
+                    const newOtherY = anchorVertex.y + Math.sin(tripleBondAngle) * hexRadius;
+                    
+                    // Update the segment coordinates for linear orientation
+                    if (anchorVertex === v1) {
+                      updatedSegment.x2 = newOtherX;
+                      updatedSegment.y2 = newOtherY;
+                    } else {
+                      updatedSegment.x1 = newOtherX;
+                      updatedSegment.y1 = newOtherY;
+                    }
+                    
+                                         // Update the direction based on new coordinates
+                     updatedSegment.direction = calculateBondDirection(updatedSegment.x1, updatedSegment.y1, updatedSegment.x2, updatedSegment.y2);
+                     
+                     // Store the vertex update to be applied immediately after segment update
+                     updatedSegment._needsVertexUpdate = {
+                       newOtherX,
+                       newOtherY,
+                       originalX1: seg.x1,
+                       originalY1: seg.y1,
+                       originalX2: seg.x2,
+                       originalY2: seg.y2
+                     };
+                                     } else if (!bothVerticesHaveBonds) {
+                     // No existing bonds and not both vertices have bonds, mark vertices as off-grid
+                     updatedSegment._needsVertexUpdate = {
+                       newOtherX: seg.x2, // Keep original coordinates
+                       newOtherY: seg.y2,
+                       originalX1: seg.x1,
+                       originalY1: seg.y1,
+                       originalX2: seg.x2,
+                       originalY2: seg.y2
+                     };
+                   }
+                   // If both vertices have bonds, do nothing special - keep existing structure
+                }
+                
+                return updatedSegment;
               }
               return seg;
             });
@@ -4221,7 +4341,7 @@ const HexGridWithToolbar = () => {
                 if (seg.bondOrder === 0) {
                   // If no bond exists, create a new stereochemistry bond
                   const direction = seg.direction || calculateBondDirection(seg.x1, seg.y1, seg.x2, seg.y2);
-                  return {
+                  const updatedSegment = {
                     ...seg,
                     bondOrder: 1, // Create a single bond
                     bondType: mode, // Set the stereochemistry type
@@ -4229,6 +4349,18 @@ const HexGridWithToolbar = () => {
                     direction: direction, // Ensure direction is set
                     flipSmallerLine: false // Default to false
                   };
+                  
+                  // Mark both vertices as off-grid when creating new stereochemistry bonds
+                  updatedSegment._needsVertexUpdate = {
+                    newOtherX: seg.x2, // Keep original coordinates
+                    newOtherY: seg.y2,
+                    originalX1: seg.x1,
+                    originalY1: seg.y1,
+                    originalX2: seg.x2,
+                    originalY2: seg.y2
+                  };
+                  
+                  return updatedSegment;
                 } else if (seg.bondOrder === 1) {
                   if (seg.bondType === mode) {
                     // If the same type of stereochemistry already exists, flip the direction
@@ -4344,7 +4476,73 @@ const HexGridWithToolbar = () => {
             }
           }
           
-          return updatedSegments;
+          // Check if any segments need vertex updates (for triple bond linear positioning)
+          const segmentsNeedingVertexUpdate = updatedSegments.filter(seg => seg._needsVertexUpdate);
+          
+          if (segmentsNeedingVertexUpdate.length > 0) {
+            // Apply vertex updates immediately (synchronously) within the same state update cycle
+            setVertices(prevVertices => {
+              let newVertices = [...prevVertices];
+              
+              segmentsNeedingVertexUpdate.forEach(seg => {
+                const update = seg._needsVertexUpdate;
+                
+                // Mark original vertices as off-grid and remove vertices that are being moved
+                newVertices = newVertices.map(vertex => {
+                  const v1Match = Math.abs(vertex.x - update.originalX1) < 0.01 && Math.abs(vertex.y - update.originalY1) < 0.01;
+                  const v2Match = Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01;
+                  const newVertexMatch = Math.abs(vertex.x - update.newOtherX) < 0.01 && Math.abs(vertex.y - update.newOtherY) < 0.01;
+                  
+                  if (v1Match || v2Match || newVertexMatch) {
+                    return { ...vertex, isOffGrid: true };
+                  }
+                  return vertex;
+                }).filter(vertex => {
+                  // Remove vertices that are being repositioned (if they match the old position that's being moved)
+                  // Only remove if the new position is different from the old position
+                  const isBeingMoved = (
+                    (Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01) &&
+                    (Math.abs(update.originalX2 - update.newOtherX) > 0.01 || Math.abs(update.originalY2 - update.newOtherY) > 0.01)
+                  );
+                  return !isBeingMoved;
+                });
+                
+                // Check if we need to add a new vertex at the new position
+                const newVertexExists = newVertices.some(v => 
+                  Math.abs(v.x - update.newOtherX) < 0.01 && Math.abs(v.y - update.newOtherY) < 0.01
+                );
+                
+                                if (!newVertexExists) {
+                  newVertices.push({ x: update.newOtherX, y: update.newOtherY, isOffGrid: true });
+                }
+              });
+              
+              // Remove any duplicate vertices at the same position
+              const seenVertices = new Set();
+              newVertices = newVertices.filter(vertex => {
+                const key = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+                if (seenVertices.has(key)) {
+                  return false; // Remove duplicate
+                }
+                seenVertices.add(key);
+                return true;
+              });
+              
+              return newVertices;
+            });
+            
+            // Clear bond previews immediately to prevent floating previews
+            setBondPreviews([]);
+            setHoverBondPreview(null);
+          }
+          
+          // Clean up the temporary properties
+          const cleanedSegments = updatedSegments.map(seg => {
+            const { _needsVertexUpdate, ...cleanSeg } = seg;
+            return cleanSeg;
+          });
+          
+          return cleanedSegments;
         });
         return;
       }
@@ -4972,8 +5170,8 @@ const HexGridWithToolbar = () => {
     }
     
     // Only clear 3-bond indicators when not in draw or stereochemistry modes
-    const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
-    if (!isDrawOrStereochemistryMode) {
+    const isDrawOrStereochemistryModeForClearing = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
+    if (!isDrawOrStereochemistryModeForClearing) {
       setVerticesWith3Bonds([]);
     }
   }, [mode]);

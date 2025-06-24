@@ -16,15 +16,23 @@
  * @returns {Array} - Array of detected 6-membered rings, each containing the vertices that form the ring
  */
 export const detectSixMemberedRings = (vertices, segments, vertexAtoms) => {
-  const rings = [];
+  // Add safety checks and error handling
+  if (!vertices || vertices.length === 0 || !segments || segments.length === 0) {
+    return [];
+  }
   
-  // Create an adjacency list representation of the graph
-  const graph = buildGraphFromSegments(vertices, segments);
-  
-  // Find all rings of length 6
-  const sixMemberedRings = findRingsOfSize(graph, 6);
-  
-  return sixMemberedRings;
+  try {
+    // Create an adjacency list representation of the graph
+    const graph = buildGraphFromSegments(vertices, segments);
+    
+    // Find all rings of length 6
+    const sixMemberedRings = findRingsOfSize(graph, 6);
+    
+    return sixMemberedRings;
+  } catch (error) {
+    console.warn('Ring detection failed:', error);
+    return []; // Return empty array on error to prevent crashes
+  }
 };
 
 /**
@@ -58,17 +66,23 @@ const buildGraphFromSegments = (vertices, segments) => {
       const v1Key = `${segment.x1.toFixed(2)},${segment.y1.toFixed(2)}`;
       const v2Key = `${segment.x2.toFixed(2)},${segment.y2.toFixed(2)}`;
       
-      // Add bidirectional edges
-      if (graph[v1Key]) {
+      // Add bidirectional edges (with error handling)
+      if (graph[v1Key] && Array.isArray(graph[v1Key])) {
         if (!graph[v1Key].includes(v2Key)) {
           graph[v1Key].push(v2Key);
         }
+      } else {
+        // If vertex doesn't exist in graph, skip this edge
+        console.warn(`Ring detection: Skipping edge to missing vertex: ${v1Key}`);
       }
       
-      if (graph[v2Key]) {
+      if (graph[v2Key] && Array.isArray(graph[v2Key])) {
         if (!graph[v2Key].includes(v1Key)) {
           graph[v2Key].push(v1Key);
         }
+      } else {
+        // If vertex doesn't exist in graph, skip this edge
+        console.warn(`Ring detection: Skipping edge to missing vertex: ${v2Key}`);
       }
     }
   });
@@ -121,8 +135,13 @@ const findCyclesOfLength = (graph, startVertex, currentVertex, length, path, glo
   const foundCycles = [];
   localVisited.add(currentVertex);
   
-  // Check each neighbor
-  for (const neighbor of graph[currentVertex]) {
+  // Check each neighbor (with error handling for invalid graph structure)
+  const neighbors = graph[currentVertex];
+  if (!neighbors || !Array.isArray(neighbors)) {
+    return [];
+  }
+  
+  for (const neighbor of neighbors) {
     // Found a cycle back to the start
     if (neighbor === startVertex && path.length === length) {
       foundCycles.push([...path]);

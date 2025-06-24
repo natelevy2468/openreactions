@@ -126,6 +126,13 @@ export const analyzeOffGridReason = (vertex, segments, tolerance = 0.01) => {
       analysis.reasons.push('linear_geometry');
     }
   }
+  
+  // Check for triple bonds
+  const hasTripleBond = connectedBonds.some(bond => bond.bondOrder === 3);
+  if (hasTripleBond) {
+    analysis.reasons.push('triple_bond');
+    analysis.reasons.push('linear_geometry');
+  }
 
   // Check for specific structural reasons
   if (connectedBonds.length === 4) {
@@ -149,7 +156,7 @@ export const analyzeOffGridReason = (vertex, segments, tolerance = 0.01) => {
  */
 export const calculateGridBreakingZones = (offGridVertices, hexRadius, options = {}) => {
   const {
-    suppressionRadiusMultiplier = 1.5, // How far to hide grid lines
+    suppressionRadiusMultiplier = 1.0, // How far to hide grid lines (reduced to match bond options)
     bondOptionRadiusMultiplier = 1.0,   // How far to show bond options
     overlapMergeThreshold = 0.8         // When to merge overlapping zones
   } = options;
@@ -162,8 +169,8 @@ export const calculateGridBreakingZones = (offGridVertices, hexRadius, options =
     let bondOptionMultiplier = bondOptionRadiusMultiplier;
     
     if (analysis.reasons?.includes('fourth_bond')) {
-      // Fourth bonds need larger suppression zones
-      suppressionMultiplier *= 1.2;
+      // Fourth bonds need slightly larger suppression zones (reduced from 1.2 to 1.1)
+      suppressionMultiplier *= 1.1;
       bondOptionMultiplier *= 1.1;
     }
     
@@ -206,8 +213,16 @@ const calculateZonePriority = (vertex, analysis) => {
     priority += 2; // Fourth bonds are very important
   }
   
+  if (analysis.reasons?.includes('triple_bond')) {
+    priority += 2.5; // Triple bonds require linear geometry
+  }
+  
   if (analysis.reasons?.includes('tetrahedral_geometry')) {
     priority += 1.5; // Tetrahedral centers need space
+  }
+  
+  if (analysis.reasons?.includes('linear_geometry')) {
+    priority += 1.5; // Linear systems need specific alignment
   }
   
   if (analysis.reasons?.includes('potential_ring_strain')) {
@@ -474,26 +489,37 @@ export const generateBondPreviews = (vertices, segments, hexRadius) => {
       return;
     }
     
-    const availableAngles = calculateAvailableAngles(vertex, existingBonds);
-    const previewAngles = selectOptimalAngles(availableAngles, 2); // Maximum 2 previews
-    
-    previewAngles.forEach((angle, index) => {
-      const endX = vertex.x + Math.cos(angle) * hexRadius;
-      const endY = vertex.y + Math.sin(angle) * hexRadius;
-      
-      previews.push({
-        id: `${vertex.x.toFixed(2)}-${vertex.y.toFixed(2)}-${index}`,
-        x1: vertex.x,
-        y1: vertex.y,
-        x2: endX,
-        y2: endY,
-        sourceVertexKey: `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`,
-        sourceVertexIndex: vertexIndex,
-        angle: angle,
-        length: hexRadius,
-        isVisible: true
+    // Check if this vertex is part of a linear system first
+    if (isVertexInLinearSystem(vertex, segments)) {
+      // Generate linear preview (single 180° preview)
+      const linearPreviews = generateLinearBondPreview(vertex, segments, hexRadius);
+      linearPreviews.forEach(preview => {
+        preview.sourceVertexIndex = vertexIndex;
+        previews.push(preview);
       });
-    });
+    } else {
+      // Generate normal 120° previews
+      const availableAngles = calculateAvailableAngles(vertex, existingBonds);
+      const previewAngles = selectOptimalAngles(availableAngles, 2); // Maximum 2 previews
+      
+      previewAngles.forEach((angle, index) => {
+        const endX = vertex.x + Math.cos(angle) * hexRadius;
+        const endY = vertex.y + Math.sin(angle) * hexRadius;
+        
+        previews.push({
+          id: `${vertex.x.toFixed(2)}-${vertex.y.toFixed(2)}-${index}`,
+          x1: vertex.x,
+          y1: vertex.y,
+          x2: endX,
+          y2: endY,
+          sourceVertexKey: `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`,
+          sourceVertexIndex: vertexIndex,
+          angle: angle,
+          length: hexRadius,
+          isVisible: true
+        });
+      });
+    }
   });
   
   return previews;
@@ -638,4 +664,179 @@ export const isPointOnBondPreview = (x, y, preview, offset, tolerance = 15) => {
   const distance = Math.sqrt(dx * dx + dy * dy);
   
   return distance <= tolerance;
+};
+
+/**
+ * Checks if a vertex is part of a linear system (connected to triple bonds or aligned bonds)
+ * @param {Object} vertex - The vertex to check
+ * @param {Array} segments - Array of all segments
+ * @returns {boolean} True if the vertex is in a linear system
+ */
+export const isVertexInLinearSystem = (vertex, segments) => {
+  const connectedBonds = getConnectedBonds(vertex, segments);
+  
+  // Check if vertex is connected to any triple bonds
+  const hasTripleBond = connectedBonds.some(bond => bond.bondOrder === 3);
+  if (hasTripleBond) {
+    return true;
+  }
+  
+  // Check if vertex has exactly 2 bonds that are 180° apart (linear arrangement)
+  if (connectedBonds.length === 2) {
+    const angles = connectedBonds.map(bond => {
+      // Determine which end of the bond is connected to our vertex
+      let otherX, otherY;
+      if (Math.abs(bond.x1 - vertex.x) < 0.01 && Math.abs(bond.y1 - vertex.y) < 0.01) {
+        otherX = bond.x2;
+        otherY = bond.y2;
+      } else {
+        otherX = bond.x1;
+        otherY = bond.y1;
+      }
+      
+      // Calculate angle from vertex to the other end
+      return Math.atan2(otherY - vertex.y, otherX - vertex.x);
+    });
+    
+    // Calculate angle difference
+    let angleDiff = Math.abs(angles[0] - angles[1]);
+    if (angleDiff > Math.PI) {
+      angleDiff = 2 * Math.PI - angleDiff;
+    }
+    
+    // Check if angles are approximately 180° apart (linear)
+    const isLinear = Math.abs(angleDiff - Math.PI) < 0.1; // ~5.7° tolerance
+    return isLinear;
+  }
+  
+  return false;
+};
+
+/**
+ * Gets the linear axis direction for a vertex in a linear system
+ * @param {Object} vertex - The vertex to analyze
+ * @param {Array} segments - Array of all segments
+ * @returns {number|null} Angle in radians of the linear axis, or null if not linear
+ */
+export const getLinearAxis = (vertex, segments) => {
+  const connectedBonds = getConnectedBonds(vertex, segments);
+  
+  if (connectedBonds.length === 0) {
+    return null;
+  }
+  
+  // If connected to a triple bond, use its direction
+  const tripleBond = connectedBonds.find(bond => bond.bondOrder === 3);
+  if (tripleBond) {
+    // Calculate angle from vertex to the other end of the triple bond
+    let otherX, otherY;
+    if (Math.abs(tripleBond.x1 - vertex.x) < 0.01 && Math.abs(tripleBond.y1 - vertex.y) < 0.01) {
+      otherX = tripleBond.x2;
+      otherY = tripleBond.y2;
+    } else {
+      otherX = tripleBond.x1;
+      otherY = tripleBond.y1;
+    }
+    
+    return Math.atan2(otherY - vertex.y, otherX - vertex.x);
+  }
+  
+  // If vertex has exactly 2 bonds that are linear, return their axis
+  if (connectedBonds.length === 2) {
+    const angles = connectedBonds.map(bond => {
+      let otherX, otherY;
+      if (Math.abs(bond.x1 - vertex.x) < 0.01 && Math.abs(bond.y1 - vertex.y) < 0.01) {
+        otherX = bond.x2;
+        otherY = bond.y2;
+      } else {
+        otherX = bond.x1;
+        otherY = bond.y1;
+      }
+      
+      return Math.atan2(otherY - vertex.y, otherX - vertex.x);
+    });
+    
+    // Check if they're linear
+    let angleDiff = Math.abs(angles[0] - angles[1]);
+    if (angleDiff > Math.PI) {
+      angleDiff = 2 * Math.PI - angleDiff;
+    }
+    
+    if (Math.abs(angleDiff - Math.PI) < 0.1) {
+      // Return the angle of the first bond (the axis direction)
+      return angles[0];
+    }
+  }
+  
+  // If there's only one bond and it's part of a linear chain, use its direction
+  if (connectedBonds.length === 1) {
+    const bond = connectedBonds[0];
+    let otherX, otherY;
+    if (Math.abs(bond.x1 - vertex.x) < 0.01 && Math.abs(bond.y1 - vertex.y) < 0.01) {
+      otherX = bond.x2;
+      otherY = bond.y2;
+    } else {
+      otherX = bond.x1;
+      otherY = bond.y1;
+    }
+    
+    return Math.atan2(otherY - vertex.y, otherX - vertex.x);
+  }
+  
+  return null;
+};
+
+/**
+ * Generates bond preview for a linear vertex (single 180° preview)
+ * @param {Object} vertex - The vertex to generate preview for
+ * @param {Array} segments - Array of all segments
+ * @param {number} hexRadius - Standard bond length
+ * @returns {Array} Array containing single linear bond preview
+ */
+export const generateLinearBondPreview = (vertex, segments, hexRadius) => {
+  const previews = [];
+  const linearAxis = getLinearAxis(vertex, segments);
+  
+  if (linearAxis === null) {
+    return previews;
+  }
+  
+  const connectedBonds = getConnectedBonds(vertex, segments);
+  
+  // If vertex already has 2 or more bonds, don't show preview
+  if (connectedBonds.length >= 2) {
+    return previews;
+  }
+  
+  // Calculate the 180° opposite direction
+  let previewAngle;
+  if (connectedBonds.length === 1) {
+    // Place preview 180° from the existing bond
+    previewAngle = linearAxis + Math.PI;
+  } else {
+    // No bonds yet, just use the linear axis direction
+    previewAngle = linearAxis;
+  }
+  
+  // Normalize angle to [0, 2π)
+  while (previewAngle < 0) previewAngle += 2 * Math.PI;
+  while (previewAngle >= 2 * Math.PI) previewAngle -= 2 * Math.PI;
+  
+  const endX = vertex.x + Math.cos(previewAngle) * hexRadius;
+  const endY = vertex.y + Math.sin(previewAngle) * hexRadius;
+  
+  previews.push({
+    id: `${vertex.x.toFixed(2)}-${vertex.y.toFixed(2)}-linear`,
+    x1: vertex.x,
+    y1: vertex.y,
+    x2: endX,
+    y2: endY,
+    sourceVertexKey: `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`,
+    angle: previewAngle,
+    length: hexRadius,
+    isVisible: true,
+    isLinear: true
+  });
+  
+  return previews;
 }; 
