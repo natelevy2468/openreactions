@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import { detectSixMemberedRings, isSegmentInRing, getRingInteriorDirection, isSpecialRingBond, getRingInfo } from './ringDetection';
 import { determineVertexTypes, isTopOfHex, getType, getIfTop } from './vertexDetection';
 import { drawArrowOnCanvas, drawEquilArrowOnCanvas, drawCurvedArrowOnCanvas, calculateCurvedArrowPeak } from './rendering/ArrowRenderer';
@@ -15,6 +15,7 @@ import { handleMouseMove as handleMouseMoveUtil, handleMouseDown as handleMouseD
 import { createEscapeKeyHandler, createGeneralEscapeHandler, createFourthBondKeyHandler, createCopyPasteKeyHandler, createUndoKeyHandler } from './handlers/KeyboardHandlers';
 import { handleArrowMouseMove, handleArrowClick } from './handlers/ArrowHandlers';
 import { formatAtomText } from './utils/TextUtils.jsx';
+import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview } from './utils/GridBreakingUtils.js';
 
 const HexGridWithToolbar = () => {
   const canvasRef = useRef(null);
@@ -75,8 +76,21 @@ const HexGridWithToolbar = () => {
   // Preset menu state
   const [isPresetMenuExpanded, setIsPresetMenuExpanded] = useState(false);
   const [presetMenuVisualState, setPresetMenuVisualState] = useState(false); // Controls visual appearance (border radius, etc.)
+  const [selectedPreset, setSelectedPreset] = useState(null); // Track which preset is currently selected ('benzene', 'cyclohexane', etc.)
   // Ring detection state (invisible to user)
   const [detectedRings, setDetectedRings] = useState([]);
+  // Grid breaking state
+  const [gridBreakingAnalysis, setGridBreakingAnalysis] = useState({
+    offGridVertices: [],
+    breakingZones: [],
+    totalOffGrid: 0,
+    totalZones: 0,
+    gridBreakingActive: false
+  });
+  const [gridBreakingEnabled, setGridBreakingEnabled] = useState(false);
+  // Bond preview state for off-grid vertices
+  const [bondPreviews, setBondPreviews] = useState([]);
+  const [hoverBondPreview, setHoverBondPreview] = useState(null);
   const lineThreshold = 15;
   const vertexThreshold = 15; // click tolerance for vertices
   const hexRadius = 60;
@@ -243,7 +257,7 @@ const HexGridWithToolbar = () => {
   const [historyIndex, setHistoryIndex] = useState(-1);
 
   // Generate unique segments and vertices based on view size
-  const generateGrid = useCallback((width, height) => {
+  const generateGrid = useCallback((width, height, existingVertices = [], existingVertexAtoms = {}, existingSegments = []) => {
     const newSegments = [];
     const newVertices = [];
     const seenSeg = new Set();
@@ -252,6 +266,44 @@ const HexGridWithToolbar = () => {
     const hexWidth = Math.sqrt(3) * r;
     const hSpacing = hexWidth;
     const vSpacing = 1.5 * r;
+
+    // Helper function to check if a vertex has real bonds
+    const hasRealBonds = (vertex) => {
+      return existingSegments.some(seg => 
+        seg.bondOrder > 0 && (
+          (Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) ||
+          (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)
+        )
+      );
+    };
+
+    // First, add any existing off-grid vertices and vertices with bonds/atoms
+    const preservedVertices = [];
+    existingVertices.forEach(vertex => {
+      if (vertex.isOffGrid === true) {
+        preservedVertices.push(vertex);
+        const vk = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+        seenVert.add(vk);
+      } else {
+        // Also preserve on-grid vertices that have atoms or bonds
+        const vertexKey = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+        if (existingVertexAtoms[vertexKey] || hasRealBonds(vertex)) {
+          preservedVertices.push(vertex);
+          const vk = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+          seenVert.add(vk);
+        }
+      }
+    });
+
+    // Create simple breaking zones around off-grid vertices
+    const breakingZones = [];
+    const offGridVertices = preservedVertices.filter(v => v.isOffGrid === true);
+    offGridVertices.forEach(vertex => {
+      breakingZones.push({
+        center: { x: vertex.x, y: vertex.y },
+        suppressionRadius: hexRadius * 1.5 // Same multiplier as used in the analysis
+      });
+    });
 
     const cols = Math.ceil((width + hexWidth * 2) / hSpacing) + 1; // extra margin
     const rows = Math.ceil((height + r * 2) / vSpacing) + 1;
@@ -268,8 +320,16 @@ const HexGridWithToolbar = () => {
           verts.push({ x: vx, y: vy });
           const vk = `${vx.toFixed(2)},${vy.toFixed(2)}`;
           if (!seenVert.has(vk)) {
-            seenVert.add(vk);
-            newVertices.push({ x: vx, y: vy });
+            // Check if this vertex would be in a breaking zone
+            const inBreakingZone = breakingZones.some(zone => {
+              const distance = Math.sqrt((vx - zone.center.x) ** 2 + (vy - zone.center.y) ** 2);
+              return distance <= zone.suppressionRadius;
+            });
+            
+            if (!inBreakingZone) {
+              seenVert.add(vk);
+              newVertices.push({ x: vx, y: vy, isOffGrid: false }); // Grid vertices are always on-grid
+            }
           }
         }
         for (let i = 0; i < 6; i++) {
@@ -286,23 +346,49 @@ const HexGridWithToolbar = () => {
             [x1b, y1b, x2b, y2b] = [x2b, y2b, x1b, y1b];
           }
           if (!seenSeg.has(key)) {
-            seenSeg.add(key);
-            const direction = calculateBondDirection(x1b, y1b, x2b, y2b);
-            newSegments.push({ 
-              x1: x1b, 
-              y1: y1b, 
-              x2: x2b, 
-              y2: y2b, 
-              bondOrder: 0, 
-              bondType: null,
-              direction: direction,
-              flipSmallerLine: false
-            });
+            // Check if both vertices of this segment exist (weren't filtered out by breaking zones)
+            const v1Key = `${x1b.toFixed(2)},${y1b.toFixed(2)}`;
+            const v2Key = `${x2b.toFixed(2)},${y2b.toFixed(2)}`;
+            const v1Exists = seenVert.has(v1Key);
+            const v2Exists = seenVert.has(v2Key);
+
+            if (v1Exists && v2Exists) {
+              // Check if segment center would be in a breaking zone
+              const segmentCenterX = (x1b + x2b) / 2;
+              const segmentCenterY = (y1b + y2b) / 2;
+              const inBreakingZone = breakingZones.some(zone => {
+                const distance = Math.sqrt((segmentCenterX - zone.center.x) ** 2 + (segmentCenterY - zone.center.y) ** 2);
+                return distance <= zone.suppressionRadius;
+              });
+
+              if (!inBreakingZone) {
+                seenSeg.add(key);
+                const direction = calculateBondDirection(x1b, y1b, x2b, y2b);
+                newSegments.push({ 
+                  x1: x1b, 
+                  y1: y1b, 
+                  x2: x2b, 
+                  y2: y2b, 
+                  bondOrder: 0, 
+                  bondType: null,
+                  direction: direction,
+                  flipSmallerLine: false
+                });
+              }
+            }
           }
         }
       }
     }
-    return { newSegments, newVertices };
+
+    // Add preserved vertices to the final result
+    const finalVertices = [...preservedVertices, ...newVertices];
+    
+    // Add existing real bonds (bondOrder > 0) to the segments
+    const realBonds = existingSegments.filter(seg => seg.bondOrder > 0);
+    const finalSegments = [...realBonds, ...newSegments];
+    
+    return { newSegments: finalSegments, newVertices: finalVertices };
   }, [calculateBondDirection, calculateDoubleBondVertices]);
 
   // Build spatial index of grid vertices for fast lookup
@@ -452,7 +538,8 @@ const HexGridWithToolbar = () => {
       arrows: JSON.parse(JSON.stringify(arrows)),
       freeFloatingVertices: new Set(freeFloatingVertices),
       detectedRings: JSON.parse(JSON.stringify(detectedRings)),
-      verticesWith3Bonds: JSON.parse(JSON.stringify(verticesWith3Bonds))
+      verticesWith3Bonds: JSON.parse(JSON.stringify(verticesWith3Bonds)),
+      bondPreviews: JSON.parse(JSON.stringify(bondPreviews))
     };
 
     setHistory(prevHistory => {
@@ -472,7 +559,7 @@ const HexGridWithToolbar = () => {
       const newIndex = Math.min(prevIndex + 1, 49); // Cap at 49 (0-indexed)
       return newIndex;
     });
-  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, verticesWith3Bonds, historyIndex]);
+  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, verticesWith3Bonds, bondPreviews, historyIndex]);
 
   // Undo the last action
   const undo = useCallback(() => {
@@ -490,6 +577,8 @@ const HexGridWithToolbar = () => {
     setFreeFloatingVertices(previousState.freeFloatingVertices);
     setDetectedRings(previousState.detectedRings);
     setVerticesWith3Bonds(previousState.verticesWith3Bonds);
+    setBondPreviews(previousState.bondPreviews || []);
+    setHoverBondPreview(null); // Clear hover state on undo
 
     // Update history index
     setHistoryIndex(prev => prev - 1);
@@ -529,6 +618,11 @@ const HexGridWithToolbar = () => {
   // Calculate best alignment for pasted molecule to grid based on bond alignment
   const calculateGridAlignment = useCallback((pastedVertices, clickX, clickY) => {
     if (!pastedVertices || pastedVertices.length === 0 || !clipboard || !clipboard.segments) return null;
+    
+    // Don't try to align cyclopentane to hexagonal grid - pentagon won't fit properly
+    if (selectedPreset === 'cyclopentane') {
+      return null;
+    }
     
     // Cache recent calculations to avoid duplicate work
     const cacheKey = `${clickX.toFixed(0)},${clickY.toFixed(0)},${pastedVertices.length}`;
@@ -626,7 +720,7 @@ const HexGridWithToolbar = () => {
     // Cache the result
     calculateGridAlignment.cache = { key: cacheKey, result: bestAlignment };
     return bestAlignment;
-  }, [findClosestGridVertex, offset, countBondsAtVertexForSnapping, clipboard, findMatchingGridLine]);
+  }, [findClosestGridVertex, offset, countBondsAtVertexForSnapping, clipboard, findMatchingGridLine, selectedPreset]);
 
   // Update grid index when vertices change
   useEffect(() => {
@@ -653,7 +747,7 @@ const HexGridWithToolbar = () => {
     // Build a set of vertex positions where atoms exist
     const atomPositions = new Set(Object.keys(vertexAtoms));
 
-    // Draw hex grid lines in even lighter gray, skip around atoms
+    // Draw hex grid lines in even lighter gray, skip around atoms and in grid breaking zones
     ctx.lineWidth = 1.5; // slightly thicker
     segments.forEach((seg, i) => {
       // If a vertex is hovered, do not show any segment as hovered
@@ -677,7 +771,19 @@ const HexGridWithToolbar = () => {
         const dist = Math.sqrt((projX-vx)**2 + (projY-vy)**2);
         if (dist < 20) { maskAtom = { x: vx, y: vy }; break; }
       }
-      if (seg.bondOrder === 0) {
+      
+      // Check if this grid line should be suppressed due to grid breaking zones
+      let inBreakingZone = false;
+      if (seg.bondOrder === 0 && gridBreakingAnalysis.gridBreakingActive) {
+        const midX = (seg.x1 + seg.x2) / 2;
+        const midY = (seg.y1 + seg.y2) / 2;
+        const zone = isInBreakingZone(midX, midY, gridBreakingAnalysis.breakingZones, 'suppression');
+        if (zone) {
+          inBreakingZone = true;
+        }
+      }
+      
+      if (seg.bondOrder === 0 && !inBreakingZone) {
         const sx1 = seg.x1 + offset.x;
         const sy1 = seg.y1 + offset.y;
         const sx2 = seg.x2 + offset.x;
@@ -793,6 +899,32 @@ const HexGridWithToolbar = () => {
         ctx.restore();
       }
     });
+
+    // Draw bond previews for off-grid vertices
+    ctx.save();
+    ctx.strokeStyle = '#bbb'; // Slightly darker gray than grid lines
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 6]); // Dashed line pattern
+    
+    bondPreviews.forEach(preview => {
+      if (preview.isVisible) {
+        const isHovered = hoverBondPreview?.id === preview.id;
+        ctx.strokeStyle = isHovered ? '#888' : '#bbb';
+        
+        const sx1 = preview.x1 + offset.x;
+        const sy1 = preview.y1 + offset.y;
+        const sx2 = preview.x2 + offset.x;
+        const sy2 = preview.y2 + offset.y;
+        
+        ctx.beginPath();
+        ctx.moveTo(sx1, sy1);
+        ctx.lineTo(sx2, sy2);
+        ctx.stroke();
+      }
+    });
+    
+    ctx.setLineDash([]); // Reset dash pattern
+    ctx.restore();
 
     // Draw bonds (single + double)
     ctx.strokeStyle = '#000000';
@@ -2846,7 +2978,7 @@ const HexGridWithToolbar = () => {
                 ctx.stroke();
               }
             } else if (segment.bondOrder === 2) {
-              // Double bond - use exact same logic as main rendering
+              // Double bond - use the exact same sophisticated logic as main rendering
               const dx = x2 - x1;
               const dy = y2 - y1;
               const len = Math.sqrt(dx * dx + dy * dy);
@@ -2855,99 +2987,135 @@ const HexGridWithToolbar = () => {
               const perpY = dirMainNorm[0];
               
               // Use exact same offset calculations as main rendering
-              const offset = 5;
+              const bondOffset = 5;
               const ext = 6;
               
-              // Check connections in the clipboard AND existing bonds at target location
-              let v1Connections = clipboard.segments.filter(s => 
-                s !== segment && s.bondOrder > 0 && 
-                (s.vertex1Index === segment.vertex1Index || s.vertex2Index === segment.vertex1Index)
-              ).length;
-              let v2Connections = clipboard.segments.filter(s => 
-                s !== segment && s.bondOrder > 0 && 
-                (s.vertex1Index === segment.vertex2Index || s.vertex2Index === segment.vertex2Index)
-              ).length;
-              
-              // If using grid snapping, also count existing bonds at the target vertices
-              if (snapAlignment && showSnapPreview) {
-                const v1Target = snapAlignment.vertexMappings.get(segment.vertex1Index);
-                const v2Target = snapAlignment.vertexMappings.get(segment.vertex2Index);
-                
-                if (v1Target) {
-                  v1Connections += countBondsAtVertexForSnapping(v1Target);
-                }
-                if (v2Target) {
-                  v2Connections += countBondsAtVertexForSnapping(v2Target);
-                }
+              // Count neighboring bonds in clipboard
+              function getOtherBondsInClipboard(vx, vy, excludeSegment) {
+                return clipboard.segments.filter((s, idx) => 
+                  s !== excludeSegment && 
+                  s.bondOrder > 0 && 
+                  ((Math.abs(s.x1 - vx) < 0.01 && Math.abs(s.y1 - vy) < 0.01) ||
+                   (Math.abs(s.x2 - vx) < 0.01 && Math.abs(s.y2 - vy) < 0.01))
+                );
               }
               
-              const noBondsAtBothEnds = v1Connections === 0 && v2Connections === 0;
+              const v1 = clipboard.vertices[segment.vertex1Index];
+              const v2 = clipboard.vertices[segment.vertex2Index];
+              const bondsAtStart = getOtherBondsInClipboard(v1.x, v1.y, segment);
+              const bondsAtEnd = getOtherBondsInClipboard(v2.x, v2.y, segment);
+              
+              // Calculate orientation based on neighboring bonds (same logic as main rendering)
+              let counts = { left: 0, right: 0 };
+              
+              function getBondDirectionVector(bond, fromX, fromY) {
+                let toX, toY;
+                if (Math.abs(bond.x1 - fromX) < 0.01 && Math.abs(bond.y1 - fromY) < 0.01) {
+                  toX = bond.x2;
+                  toY = bond.y2;
+                } else {
+                  toX = bond.x1;
+                  toY = bond.y1;
+                }
+                const dx = toX - fromX;
+                const dy = toY - fromY;
+                const len = Math.hypot(dx, dy);
+                return len === 0 ? [0, 0] : [dx / len, dy / len];
+              }
+              
+              [...bondsAtStart, ...bondsAtEnd].forEach(bond => {
+                const isStart = bondsAtStart.includes(bond);
+                const dir = getBondDirectionVector(bond, isStart ? v1.x : v2.x, isStart ? v1.y : v2.y);
+                const cross = perpX * dir[1] - perpY * dir[0];
+                if (cross < 0) counts.left++;
+                else if (cross > 0) counts.right++;
+              });
+              
+              let shouldFlipPerpendicular = counts.right > counts.left;
+              
+                             // For benzene rings, detect if this is a ring and orient toward interior
+               const isBenzeneRing = clipboard.vertices.length === 6 && clipboard.segments.length === 6;
+              
+                             // For benzene rings, use standard perpendicular vector; for others, apply flipping logic
+               let finalPerpX, finalPerpY;
+               if (isBenzeneRing) {
+                 finalPerpX = perpX;
+                 finalPerpY = perpY;
+               } else {
+                 finalPerpX = shouldFlipPerpendicular ? -perpX : perpX;
+                 finalPerpY = shouldFlipPerpendicular ? -perpY : perpY;
+               }
+              
+              // Calculate shortening
+              const hasNeighborsAtStart = bondsAtStart.length > 0;
+              const hasNeighborsAtEnd = bondsAtEnd.length > 0;
+              const shortenStart = hasNeighborsAtStart ? 8 : 0;
+              const shortenEnd = hasNeighborsAtEnd ? 8 : 0;
+              
+                             let shorterLineOnPositiveSide = counts.left > counts.right;
+               if (isBenzeneRing && segment.bondOrder === 2) {
+                 // For benzene, put shorter line on whichever side faces the center
+                 const midX = (v1.x + v2.x) / 2;
+                 const midY = (v1.y + v2.y) / 2;
+                 const towardCenter = [-midX, -midY];
+                 const toCenterLen = Math.sqrt(towardCenter[0] * towardCenter[0] + towardCenter[1] * towardCenter[1]);
+                 if (toCenterLen > 0) {
+                   towardCenter[0] /= toCenterLen;
+                   towardCenter[1] /= toCenterLen;
+                 }
+                 const dot = perpX * towardCenter[0] + perpY * towardCenter[1];
+                 shorterLineOnPositiveSide = dot > 0; // Put shorter line on positive side if perpendicular points toward center
+               }
+              
+              // Determine if both vertices have no other bonds attached
+              const noBondsAtBothEnds = bondsAtStart.length === 0 && bondsAtEnd.length === 0;
               const shorten = noBondsAtBothEnds ? -2 : -3;
               const ux = dx / len;
               const uy = dy / len;
               
-              // Determine if either vertex is unconnected
-              const upperVertexUnconnected = segment.upperVertex ? 
-                clipboard.segments.filter(s => 
-                  s !== segment && s.bondOrder > 0 && 
-                  ((Math.abs(s.x1 - segment.upperVertex.x) < 0.01 && Math.abs(s.y1 - segment.upperVertex.y) < 0.01) ||
-                   (Math.abs(s.x2 - segment.upperVertex.x) < 0.01 && Math.abs(s.y2 - segment.upperVertex.y) < 0.01))
-                ).length === 0 : false;
-              
-              const lowerVertexUnconnected = segment.lowerVertex ? 
-                clipboard.segments.filter(s => 
-                  s !== segment && s.bondOrder > 0 && 
-                  ((Math.abs(s.x1 - segment.lowerVertex.x) < 0.01 && Math.abs(s.y1 - segment.lowerVertex.y) < 0.01) ||
-                   (Math.abs(s.x2 - segment.lowerVertex.x) < 0.01 && Math.abs(s.y2 - segment.lowerVertex.y) < 0.01))
-                ).length === 0 : false;
-              
-              ctx.strokeStyle = '#888';
+              ctx.strokeStyle = bondColor;
               ctx.lineWidth = 3;
               
-              if (upperVertexUnconnected || lowerVertexUnconnected) {
+              if (noBondsAtBothEnds) {
                 // Two equal parallel lines, both offset from center
                 ctx.beginPath();
-                ctx.moveTo(x1 - perpX * offset - ux * (ext + shorten), y1 - perpY * offset - uy * (ext + shorten));
-                ctx.lineTo(x2 - perpX * offset + ux * (ext + shorten), y2 - perpY * offset + uy * (ext + shorten));
+                ctx.moveTo(x1 - finalPerpX * bondOffset - ux * (ext + shorten), y1 - finalPerpY * bondOffset - uy * (ext + shorten));
+                ctx.lineTo(x2 - finalPerpX * bondOffset + ux * (ext + shorten), y2 - finalPerpY * bondOffset + uy * (ext + shorten));
                 ctx.stroke();
                 
                 ctx.beginPath();
-                ctx.moveTo(x1 + perpX * offset - ux * (ext + shorten), y1 + perpY * offset - uy * (ext + shorten));
-                ctx.lineTo(x2 + perpX * offset + ux * (ext + shorten), y2 + perpY * offset + uy * (ext + shorten));
+                ctx.moveTo(x1 + finalPerpX * bondOffset - ux * (ext + shorten), y1 + finalPerpY * bondOffset - uy * (ext + shorten));
+                ctx.lineTo(x2 + finalPerpX * bondOffset + ux * (ext + shorten), y2 + finalPerpY * bondOffset + uy * (ext + shorten));
                 ctx.stroke();
               } else {
-                // Use the more complex rendering logic for connected double bonds
-                // This would require implementing the full orientation logic
-                // For now, use simplified version but with correct offsets
-                const offsetMultiplier = 2;
-              
-              if (segment.flipSmallerLine) {
-                // One full line, one shorter line
-                ctx.beginPath();
-                  ctx.moveTo(x1 - ux * (ext + shorten - 3), y1 - uy * (ext + shorten - 3));
-                  ctx.lineTo(x2 + ux * (ext + shorten - 3), y2 + uy * (ext + shorten - 3));
-                ctx.stroke();
+                const longerLineShorten = 3;
                 
-                  // Shorter line
-                  const shortenStart = v1Connections > 0 ? 8 : 0;
-                  const shortenEnd = v2Connections > 0 ? 8 : 0;
-                ctx.beginPath();
-                  ctx.moveTo(x1 + perpX * offset * offsetMultiplier - ux * (ext + shorten - shortenStart), 
-                            y1 + perpY * offset * offsetMultiplier - uy * (ext + shorten - shortenStart));
-                  ctx.lineTo(x2 + perpX * offset * offsetMultiplier + ux * (ext + shorten - shortenEnd), 
-                            y2 + perpY * offset * offsetMultiplier + uy * (ext + shorten - shortenEnd));
-                ctx.stroke();
-              } else {
-                  // Two equal lines offset to opposite sides
-                ctx.beginPath();
-                  ctx.moveTo(x1 - perpX * offset - ux * (ext + shorten - 3), y1 - perpY * offset - uy * (ext + shorten - 3));
-                  ctx.lineTo(x2 - perpX * offset + ux * (ext + shorten - 3), y2 - perpY * offset + uy * (ext + shorten - 3));
-                ctx.stroke();
-                
-                ctx.beginPath();
-                  ctx.moveTo(x1 + perpX * offset - ux * (ext + shorten - 3), y1 + perpY * offset - uy * (ext + shorten - 3));
-                  ctx.lineTo(x2 + perpX * offset + ux * (ext + shorten - 3), y2 + perpY * offset + uy * (ext + shorten - 3));
-                ctx.stroke();
+                if (shorterLineOnPositiveSide) {
+                  // Shorter line on positive side, longer line aligned with center
+                  // Longer line (aligned with grid)
+                  ctx.beginPath();
+                  ctx.moveTo(x1 - ux * (ext + shorten - longerLineShorten), y1 - uy * (ext + shorten - longerLineShorten));
+                  ctx.lineTo(x2 + ux * (ext + shorten - longerLineShorten), y2 + uy * (ext + shorten - longerLineShorten));
+                  ctx.stroke();
+                  
+                  // Shorter line (positive side offset)
+                  ctx.beginPath();
+                  ctx.moveTo(x1 + finalPerpX * bondOffset * 2 - ux * (ext + shorten - shortenStart), y1 + finalPerpY * bondOffset * 2 - uy * (ext + shorten - shortenStart));
+                  ctx.lineTo(x2 + finalPerpX * bondOffset * 2 + ux * (ext + shorten - shortenEnd), y2 + finalPerpY * bondOffset * 2 + uy * (ext + shorten - shortenEnd));
+                  ctx.stroke();
+                } else {
+                  // Shorter line on negative side, longer line aligned with center
+                  // Shorter line (negative side offset)
+                  ctx.beginPath();
+                  ctx.moveTo(x1 - finalPerpX * bondOffset * 2 - ux * (ext + shorten - shortenStart), y1 - finalPerpY * bondOffset * 2 - uy * (ext + shorten - shortenStart));
+                  ctx.lineTo(x2 - finalPerpX * bondOffset * 2 + ux * (ext + shorten - shortenEnd), y2 - finalPerpY * bondOffset * 2 + uy * (ext + shorten - shortenEnd));
+                  ctx.stroke();
+                  
+                  // Longer line (aligned with grid)
+                  ctx.beginPath();
+                  ctx.moveTo(x1 - ux * (ext + shorten - longerLineShorten), y1 - uy * (ext + shorten - longerLineShorten));
+                  ctx.lineTo(x2 + ux * (ext + shorten - longerLineShorten), y2 + uy * (ext + shorten - longerLineShorten));
+                  ctx.stroke();
                 }
               }
             } else if (segment.bondOrder === 3) {
@@ -3062,7 +3230,41 @@ const HexGridWithToolbar = () => {
         
         ctx.restore();
       }
-  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, countBondsAtVertexForSnapping, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition, snapAlignment, showSnapPreview]);
+
+    // Debug visualization: Draw grid breaking zones (when enabled)
+    if (gridBreakingEnabled && gridBreakingAnalysis.gridBreakingActive) {
+      ctx.save();
+      gridBreakingAnalysis.breakingZones.forEach(zone => {
+        const centerX = zone.center.x + offset.x;
+        const centerY = zone.center.y + offset.y;
+        
+        // Draw suppression zone (red, transparent)
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, zone.suppressionRadius, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.1)';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.3)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([5, 5]);
+        ctx.stroke();
+        
+        // Draw bond option zone (blue, transparent)
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, zone.bondOptionRadius, 0, 2 * Math.PI);
+        ctx.strokeStyle = 'rgba(0, 100, 255, 0.4)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        
+        // Mark center with a small dot
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, 3, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(255, 0, 0, 0.8)';
+        ctx.fill();
+      });
+      ctx.restore();
+    }
+  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, countBondsAtVertexForSnapping, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition, snapAlignment, showSnapPreview, gridBreakingEnabled, gridBreakingAnalysis]);
 
   // Check if a point is inside a blue circle indicator
   const isPointInIndicator = useCallback((x, y) => {
@@ -3116,15 +3318,237 @@ const HexGridWithToolbar = () => {
       setIsPasteMode,
       clearSelection
     );
+    setSelectedPreset(null); // Deselect any active preset when copying regular selection
   }, [selectedSegments, selectedVertices, selectedArrows, segments, vertices, vertexAtoms, vertexTypes, arrows, clearSelection]);
   
 
   
-  // Cancel paste mode
+    // Cancel paste mode
   const cancelPasteMode = useCallback(() => {
     cancelPasteModeUtil(setIsPasteMode, setSnapAlignment);
+    setSelectedPreset(null); // Deselect any active preset
   }, []);
-  
+
+  // Generate benzene preset data
+  const generateBenzenePreset = useCallback(() => {
+    const benzeneVertices = [];
+    const benzeneSegments = [];
+    const radius = hexRadius; // Use same radius as grid hexagons
+    
+    // Create 6 vertices in a regular hexagon pattern
+    for (let i = 0; i < 6; i++) {
+      const angle = (i * 60 - 90) * Math.PI / 180; // Start from top (-90°)
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle);
+      
+      benzeneVertices.push({
+        x: x,
+        y: y
+        // No atom label - carbons are implied at vertices
+      });
+    }
+    
+    // Create 6 segments connecting the vertices in a ring with alternating double bonds
+    for (let i = 0; i < 6; i++) {
+      const nextIndex = (i + 1) % 6;
+      const vertex1 = benzeneVertices[i];
+      const vertex2 = benzeneVertices[nextIndex];
+      
+      // Calculate bond direction
+      const direction = calculateBondDirection(vertex1.x, vertex1.y, vertex2.x, vertex2.y);
+      
+      // Alternate between single and double bonds (every other bond is double)
+      const bondOrder = (i % 2 === 0) ? 2 : 1;
+      
+      // Calculate upperVertex and lowerVertex for double bonds
+      let upperVertex, lowerVertex;
+      if (bondOrder === 2) {
+        const vertices = calculateDoubleBondVertices(vertex1.x, vertex1.y, vertex2.x, vertex2.y, direction);
+        upperVertex = vertices.upperVertex;
+        lowerVertex = vertices.lowerVertex;
+      }
+      
+      benzeneSegments.push({
+        vertex1Index: i,
+        vertex2Index: nextIndex,
+        x1: vertex1.x,
+        y1: vertex1.y,
+        x2: vertex2.x,
+        y2: vertex2.y,
+        bondOrder: bondOrder,
+        bondType: null,
+        bondDirection: 1,
+        direction: direction,
+        upperVertex: upperVertex,
+        lowerVertex: lowerVertex,
+        flipSmallerLine: false
+      });
+    }
+    
+    return {
+      vertices: benzeneVertices,
+      segments: benzeneSegments,
+      arrows: []
+    };
+  }, [hexRadius, calculateBondDirection, calculateDoubleBondVertices]);
+
+  // Generate cyclohexane preset data
+  const generateCyclohexanePreset = useCallback(() => {
+    const cyclohexaneVertices = [];
+    const cyclohexaneSegments = [];
+    const radius = hexRadius; // Use same radius as grid hexagons
+    
+    // Create 6 vertices in a regular hexagon pattern
+    for (let i = 0; i < 6; i++) {
+      const angle = (i * 60 - 90) * Math.PI / 180; // Start from top (-90°)
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle);
+      
+      cyclohexaneVertices.push({
+        x: x,
+        y: y,
+        isOffGrid: true // Cyclohexane vertices are off-grid
+      });
+    }
+    
+    // Create 6 segments connecting the vertices in a ring with all single bonds
+    for (let i = 0; i < 6; i++) {
+      const nextIndex = (i + 1) % 6;
+      const vertex1 = cyclohexaneVertices[i];
+      const vertex2 = cyclohexaneVertices[nextIndex];
+      
+      // Calculate bond direction
+      const direction = calculateBondDirection(vertex1.x, vertex1.y, vertex2.x, vertex2.y);
+      
+      cyclohexaneSegments.push({
+        vertex1Index: i,
+        vertex2Index: nextIndex,
+        x1: vertex1.x,
+        y1: vertex1.y,
+        x2: vertex2.x,
+        y2: vertex2.y,
+        bondOrder: 1, // All single bonds
+        bondType: null,
+        bondDirection: 1,
+        direction: direction,
+        flipSmallerLine: false
+      });
+    }
+    
+    return {
+      vertices: cyclohexaneVertices,
+      segments: cyclohexaneSegments,
+      arrows: []
+    };
+  }, [hexRadius, calculateBondDirection]);
+
+  // Generate cyclopentane preset data
+  const generateCyclopentanePreset = useCallback(() => {
+    const cyclopentaneVertices = [];
+    const cyclopentaneSegments = [];
+    const radius = hexRadius * 0.8; // Slightly smaller than hexagons
+    
+    // Create 5 vertices in a regular pentagon pattern
+    for (let i = 0; i < 5; i++) {
+      const angle = (i * 72 - 90) * Math.PI / 180; // Start from top (-90°), 72° intervals for pentagon
+      const x = radius * Math.cos(angle);
+      const y = radius * Math.sin(angle);
+      
+      cyclopentaneVertices.push({
+        x: x,
+        y: y,
+        isOffGrid: true // Cyclopentane vertices are off-grid
+      });
+    }
+    
+    // Create 5 segments connecting the vertices in a ring with all single bonds
+    for (let i = 0; i < 5; i++) {
+      const nextIndex = (i + 1) % 5;
+      const vertex1 = cyclopentaneVertices[i];
+      const vertex2 = cyclopentaneVertices[nextIndex];
+      
+      // Calculate bond direction
+      const direction = calculateBondDirection(vertex1.x, vertex1.y, vertex2.x, vertex2.y);
+      
+      cyclopentaneSegments.push({
+        vertex1Index: i,
+        vertex2Index: nextIndex,
+        x1: vertex1.x,
+        y1: vertex1.y,
+        x2: vertex2.x,
+        y2: vertex2.y,
+        bondOrder: 1, // All single bonds
+        bondType: null,
+        bondDirection: 1,
+        direction: direction,
+        flipSmallerLine: false
+      });
+    }
+    
+    return {
+      vertices: cyclopentaneVertices,
+      segments: cyclopentaneSegments,
+      arrows: []
+    };
+  }, [hexRadius, calculateBondDirection]);
+
+  // Toggle benzene preset selection
+  const toggleBenzenePreset = useCallback(() => {
+    if (selectedPreset === 'benzene') {
+      // Deselect benzene preset
+      setSelectedPreset(null);
+      setIsPasteMode(false);
+      setClipboard(null);
+      setSnapAlignment(null);
+    } else {
+      // Select benzene preset
+      setSelectedPreset('benzene');
+      const benzeneData = generateBenzenePreset();
+      setClipboard(benzeneData);
+      setIsPasteMode(true);
+      setSnapAlignment(null);
+      clearSelection(); // Clear any existing selection
+    }
+  }, [selectedPreset, generateBenzenePreset, clearSelection]);
+
+  // Toggle cyclohexane preset selection
+  const toggleCyclohexanePreset = useCallback(() => {
+    if (selectedPreset === 'cyclohexane') {
+      // Deselect cyclohexane preset
+      setSelectedPreset(null);
+      setIsPasteMode(false);
+      setClipboard(null);
+      setSnapAlignment(null);
+    } else {
+      // Select cyclohexane preset
+      setSelectedPreset('cyclohexane');
+      const cyclohexaneData = generateCyclohexanePreset();
+      setClipboard(cyclohexaneData);
+      setIsPasteMode(true);
+      setSnapAlignment(null);
+      clearSelection(); // Clear any existing selection
+    }
+  }, [selectedPreset, generateCyclohexanePreset, clearSelection]);
+
+  // Toggle cyclopentane preset selection
+  const toggleCyclopentanePreset = useCallback(() => {
+    if (selectedPreset === 'cyclopentane') {
+      // Deselect cyclopentane preset
+      setSelectedPreset(null);
+      setIsPasteMode(false);
+      setClipboard(null);
+      setSnapAlignment(null);
+    } else {
+      // Select cyclopentane preset
+      setSelectedPreset('cyclopentane');
+      const cyclopentaneData = generateCyclopentanePreset();
+      setClipboard(cyclopentaneData);
+      setIsPasteMode(true);
+      setSnapAlignment(null);
+      clearSelection(); // Clear any existing selection
+    }
+  }, [selectedPreset, generateCyclopentanePreset, clearSelection]);
+
   // Paste clipboard contents at given position
   const pasteAtPosition = useCallback((x, y) => {
     // Capture state before pasting
@@ -3148,16 +3572,17 @@ const HexGridWithToolbar = () => {
       setVertexTypes,
       setSegments,
       setArrows,
-      setIsPasteMode,
+      selectedPreset ? (() => {}) : setIsPasteMode, // Don't exit paste mode for presets
       setSnapAlignment
     );
-  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState]);
+  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState, selectedPreset]);
 
   // Helper function to change mode and clear selection
   const setModeAndClearSelection = useCallback((newMode) => {
     setMode(newMode);
     clearSelection();
     setIsPasteMode(false); // Also cancel paste mode
+    setSelectedPreset(null); // Deselect any active preset
   }, [clearSelection]);
 
   // Update selection when selection box changes
@@ -3344,6 +3769,41 @@ const HexGridWithToolbar = () => {
     }
   }, [vertices, segments, vertexAtoms]);
 
+  // Function to analyze grid breaking whenever molecules change
+  const analyzeGridBreakingState = useCallback(() => {
+    if (vertices.length === 0) {
+      setGridBreakingAnalysis({
+        offGridVertices: [],
+        breakingZones: [],
+        totalOffGrid: 0,
+        totalZones: 0,
+        gridBreakingActive: false
+      });
+      return;
+    }
+
+    const analysis = analyzeGridBreaking(
+      vertices, 
+      segments, 
+      findClosestGridVertex, 
+      hexRadius,
+      {
+        tolerance: 8, // Slightly more tolerance than the default 5
+        suppressionRadiusMultiplier: 1.5,
+        bondOptionRadiusMultiplier: 1.0,
+        overlapMergeThreshold: 0.8
+      }
+    );
+
+    setGridBreakingAnalysis(analysis);
+
+    // Generate bond previews for off-grid vertices
+    const previews = generateBondPreviews(vertices, segments, hexRadius);
+    setBondPreviews(previews);
+
+    // Debug logging removed to prevent performance issues
+  }, [vertices, segments, findClosestGridVertex]);
+
   // Handle clicks for draw vs erase
   const handleClick = useCallback(event => {
     if (isDragging) return;
@@ -3356,10 +3816,56 @@ const HexGridWithToolbar = () => {
     // Capture state before any action (will be added to history if action proceeds)
     let shouldCaptureState = false;
     
-    // Handle paste mode click - should work in any mode
+    // Don't handle clicks in paste mode - paste is handled on mouse down
     if (isPasteMode) {
-      pasteAtPosition(x, y);
-      return; // Exit early after pasting
+      return; // Exit early, paste is handled elsewhere
+    }
+
+    // Handle bond preview clicks first (highest priority)
+    if (bondPreviews.length > 0) {
+      for (const preview of bondPreviews) {
+        if (isPointOnBondPreview(x, y, preview, offset)) {
+          // Capture state before creating bond
+          captureState();
+          
+          // Create new bond
+          const newBond = {
+            x1: preview.x1,
+            y1: preview.y1,
+            x2: preview.x2,
+            y2: preview.y2,
+            bondOrder: 1,
+            bondType: null,
+            bondDirection: 1,
+            direction: calculateBondDirection(preview.x1, preview.y1, preview.x2, preview.y2),
+            flipSmallerLine: false
+          };
+          
+          // Create new off-grid vertex at the end of the bond
+          const newVertex = {
+            x: preview.x2,
+            y: preview.y2,
+            isOffGrid: true
+          };
+          
+          // Check if vertex already exists at this position
+          const vertexExists = vertices.some(
+            v => Math.abs(v.x - preview.x2) < 0.01 && Math.abs(v.y - preview.y2) < 0.01
+          );
+          
+          // Update state
+          setSegments(prevSegments => [...prevSegments, newBond]);
+          
+          if (!vertexExists) {
+            setVertices(prevVertices => [...prevVertices, newVertex]);
+          }
+          
+          // Run ring detection after adding bond/vertex
+          setTimeout(detectRings, 0);
+          
+          return; // Exit early, bond preview click handled
+        }
+      }
     }
 
     // Handle fourth bond mode
@@ -3385,7 +3891,7 @@ const HexGridWithToolbar = () => {
         const direction = calculateBondDirection(fourthBondSource.x, fourthBondSource.y, endX, endY);
         
         // Add the new endpoint as a vertex if it doesn't already exist
-        const newEndpointVertex = { x: endX, y: endY };
+        const newEndpointVertex = { x: endX, y: endY, isOffGrid: true }; // Off-grid vertex
         
         // Check if vertex already exists
         const vertexExists = vertices.some(
@@ -3416,21 +3922,7 @@ const HexGridWithToolbar = () => {
           }
         ]);
         
-        // Create a key for the endpoint vertex
-        const vertexKey = `${endX.toFixed(2)},${endY.toFixed(2)}`;
-        setMenuVertexKey(vertexKey);
-        
-        // Position the atom input at the endpoint
-        setAtomInputPosition({ 
-          x: endX + offset.x, 
-          y: endY + offset.y 
-        });
-        
-        // Clear any existing value in the atom input
-        setAtomInputValue('');
-        
-        // Show the atom input box for the new endpoint
-        setShowAtomInput(true);
+        // Fourth bond created successfully - no automatic atom input
         
         // Exit fourth bond mode
         setFourthBondMode(false);
@@ -3610,7 +4102,7 @@ const HexGridWithToolbar = () => {
       const gridY = y - offset.y;
       
       // Create a new vertex at the exact click position
-      const newVertex = { x: gridX, y: gridY };
+      const newVertex = { x: gridX, y: gridY, isOffGrid: true }; // Off-grid vertex
       
       // Add the new vertex
       setVertices(prevVertices => [...prevVertices, newVertex]);
@@ -4129,6 +4621,17 @@ const HexGridWithToolbar = () => {
 
   // Dragging handlers...
   const handleMouseDown = event => {
+    // Handle paste mode on mouse down
+    if (isPasteMode) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      pasteAtPosition(x, y);
+      return; // Exit early after pasting
+    }
+
     handleMouseDownUtil(
       event,
       canvasRef,
@@ -4164,6 +4667,25 @@ const HexGridWithToolbar = () => {
     );
   };
   const handleMouseMove = event => {
+    // Handle bond preview hover detection
+    const canvas = canvasRef.current;
+    if (canvas && bondPreviews.length > 0) {
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      // Check if mouse is over any bond preview
+      let hoveredPreview = null;
+      for (const preview of bondPreviews) {
+        if (isPointOnBondPreview(x, y, preview, offset)) {
+          hoveredPreview = preview;
+          break;
+        }
+      }
+      
+      setHoverBondPreview(hoveredPreview);
+    }
+    
     handleMouseMoveUtil(
       event,
       canvasRef,
@@ -4214,6 +4736,11 @@ const HexGridWithToolbar = () => {
     );
   };
   const handleMouseUp = event => {
+    // Don't handle mouse up events in paste mode
+    if (isPasteMode) {
+      return;
+    }
+
     handleMouseUpUtil(
       event,
       canvasRef,
@@ -4258,6 +4785,9 @@ const HexGridWithToolbar = () => {
 
 
   const handleArrowClickLocal = (event) => {
+    // Don't handle arrow clicks when in paste mode
+    if (isPasteMode) return;
+    
     // Capture state before creating arrows
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -4283,29 +4813,71 @@ const HexGridWithToolbar = () => {
     );
   };
 
-  // Resize handler
+  // Track if we're updating the grid to prevent infinite loops
+  const [isUpdatingGrid, setIsUpdatingGrid] = useState(false);
+
+  // Initial grid setup and resize handler
   useEffect(() => {
     const canvas = canvasRef.current;
+    if (!canvas) return;
 
     const width = window.innerWidth;
     const height = window.innerHeight;
     canvas.width = width;
     canvas.height = height;
-    const { newSegments, newVertices } = generateGrid(width, height);
-    setSegments(newSegments);
-       setVertices(newVertices);
+    
+    // Only generate initial grid if we don't have vertices yet
+    if (vertices.length === 0 && !isUpdatingGrid) {
+      setIsUpdatingGrid(true);
+      const { newSegments, newVertices } = generateGrid(width, height, [], {}, []);
+      setSegments(newSegments);
+      setVertices(newVertices);
+      setIsUpdatingGrid(false);
+    }
+
     const handleResize = () => {
+      if (isUpdatingGrid) return; // Prevent recursive updates
+      
       const width = window.innerWidth;
       const height = window.innerHeight;
       canvas.width = width;
       canvas.height = height;
-      const { newSegments: s, newVertices: v } = generateGrid(width, height);
+      
+      setIsUpdatingGrid(true);
+      const { newSegments: s, newVertices: v } = generateGrid(width, height, vertices, vertexAtoms, segments);
       setSegments(s);
       setVertices(v);
+      setIsUpdatingGrid(false);
     };
+    
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
-  }, [generateGrid]);
+  }, [generateGrid]); // Only depend on generateGrid, not the data it processes
+
+  // Update grid when off-grid vertices are added or removed
+  const offGridVertexCount = useMemo(() => 
+    vertices.filter(v => v.isOffGrid === true).length, 
+    [vertices]
+  );
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || isUpdatingGrid || vertices.length === 0) return;
+
+    // Only update if there are off-grid vertices
+    if (offGridVertexCount > 0) {
+      setIsUpdatingGrid(true);
+      // Capture current values to avoid dependency issues
+      const currentVertices = vertices;
+      const currentVertexAtoms = vertexAtoms;
+      const currentSegments = segments;
+      
+      const { newSegments, newVertices } = generateGrid(canvas.width, canvas.height, currentVertices, currentVertexAtoms, currentSegments);
+      setSegments(newSegments);
+      setVertices(newVertices);
+      setIsUpdatingGrid(false);
+    }
+  }, [offGridVertexCount]);
 
   // Update vertex types whenever vertices, segments, or atoms change
   useEffect(() => {
@@ -4321,7 +4893,7 @@ const HexGridWithToolbar = () => {
     }
   }, [vertices, history.length, captureState]);
 
-  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow]);
+  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow, bondPreviews, hoverBondPreview]);
 
   // Erase all handler
   const handleEraseAll = () => {
@@ -4330,7 +4902,8 @@ const HexGridWithToolbar = () => {
     
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const { newSegments, newVertices } = generateGrid(canvas.width, canvas.height);
+    // Pass empty arrays for vertices, atoms, and segments since we're erasing everything
+    const { newSegments, newVertices } = generateGrid(canvas.width, canvas.height, [], {}, []);
     setSegments(newSegments);
     setVertices(newVertices);
     setVertexAtoms({});
@@ -4339,6 +4912,8 @@ const HexGridWithToolbar = () => {
     setShowMenu(false);
     setShowAtomInput(false);
     setArrows([]); // Clear all arrows as well
+    setBondPreviews([]); // Clear bond previews
+    setHoverBondPreview(null); // Clear hover state
   };
 
   // Add keyboard handler for ESC key to cancel curved arrow and selection
@@ -4407,6 +4982,18 @@ const HexGridWithToolbar = () => {
   useEffect(() => {
     detectRings();
   }, [segments, vertices, detectRings]);
+
+  // Effect to run grid breaking analysis only when off-grid vertices change or bond structure changes
+  const bondCount = useMemo(() => 
+    segments.filter(seg => seg.bondOrder > 0).length, 
+    [segments]
+  );
+
+  useEffect(() => {
+    if (!isUpdatingGrid) {
+      analyzeGridBreakingState();
+    }
+  }, [offGridVertexCount, bondCount, analyzeGridBreakingState, isUpdatingGrid]);
 
   // Handle keyboard events for the fourth bond mode
   useEffect(() => {
@@ -5154,15 +5741,169 @@ const HexGridWithToolbar = () => {
             flex: 1,
             minWidth: '0', // Allow shrinking during animation
           }}>
+            {/* Preset buttons */}
+            {/* Benzene preset button */}
+            <button
+              onClick={toggleBenzenePreset}
+              style={{
+                width: '95px',
+                height: '95px',
+                backgroundColor: selectedPreset === 'benzene' ? 'rgb(54,98,227)' : '#23395d',
+                border: 'none',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                flexShrink: 0,
+                outline: 'none',
+                padding: '8px',
+              }}
+              onMouseEnter={(e) => {
+                if (selectedPreset !== 'benzene') {
+                  e.target.style.backgroundColor = '#2a4470';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedPreset !== 'benzene') {
+                  e.target.style.backgroundColor = '#23395d';
+                }
+              }}
+              title="Benzene Ring"
+            >
+                                            {/* Benzene ring SVG preview */}
+               <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+                                    {/* Benzene ring structure with alternating single/double bonds */}
+                   <g transform="translate(60, 60)">
+                     {/* Bond 0: Double bond (top-right) */}
+                     <g>
+                       <line x1="0" y1="-40" x2="34.6" y2="-20" stroke="#fff" strokeWidth="3"/>
+                       <line x1="2" y1="-31" x2="28.6" y2="-15" stroke="#fff" strokeWidth="3"/>
+                     </g>
+                     
+                     {/* Bond 1: Single bond (right) */}
+                     <line x1="34.6" y1="-20" x2="34.6" y2="20" stroke="#fff" strokeWidth="3"/>
+                     
+                     {/* Bond 2: Double bond (bottom-right) */}
+                     <g>
+                       <line x1="34.6" y1="20" x2="0" y2="40" stroke="#fff" strokeWidth="3"/>
+                       <line x1="28.6" y1="15" x2="2" y2="31" stroke="#fff" strokeWidth="3"/>
+                     </g>
+                     
+                     {/* Bond 3: Single bond (bottom-left) */}
+                     <line x1="0" y1="40" x2="-34.6" y2="20" stroke="#fff" strokeWidth="3"/>
+                     
+                     {/* Bond 4: Double bond (left) */}
+                     <g>
+                       <line x1="-34.6" y1="20" x2="-34.6" y2="-20" stroke="#fff" strokeWidth="3"/>
+                       <line x1="-26.6" y1="15" x2="-26.6" y2="-15" stroke="#fff" strokeWidth="3"/>
+                     </g>
+                     
+                     {/* Bond 5: Single bond (top-left) */}
+                     <line x1="-34.6" y1="-20" x2="0" y2="-40" stroke="#fff" strokeWidth="3"/>
+                   </g>
+               </svg>
+            </button>
+            
+            {/* Cyclohexane preset button */}
+            <button
+              onClick={toggleCyclohexanePreset}
+              style={{
+                width: '95px',
+                height: '95px',
+                backgroundColor: selectedPreset === 'cyclohexane' ? 'rgb(54,98,227)' : '#23395d',
+                border: 'none',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                flexShrink: 0,
+                outline: 'none',
+                padding: '8px',
+              }}
+              onMouseEnter={(e) => {
+                if (selectedPreset !== 'cyclohexane') {
+                  e.target.style.backgroundColor = '#2a4470';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedPreset !== 'cyclohexane') {
+                  e.target.style.backgroundColor = '#23395d';
+                }
+              }}
+              title="Cyclohexane Ring"
+            >
+              {/* Cyclohexane ring SVG preview */}
+              <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+                {/* Cyclohexane ring structure with all single bonds */}
+                <g transform="translate(60, 60)">
+                  {/* All single bonds in hexagon pattern */}
+                  <line x1="0" y1="-40" x2="34.6" y2="-20" stroke="#fff" strokeWidth="3"/>
+                  <line x1="34.6" y1="-20" x2="34.6" y2="20" stroke="#fff" strokeWidth="3"/>
+                  <line x1="34.6" y1="20" x2="0" y2="40" stroke="#fff" strokeWidth="3"/>
+                  <line x1="0" y1="40" x2="-34.6" y2="20" stroke="#fff" strokeWidth="3"/>
+                  <line x1="-34.6" y1="20" x2="-34.6" y2="-20" stroke="#fff" strokeWidth="3"/>
+                  <line x1="-34.6" y1="-20" x2="0" y2="-40" stroke="#fff" strokeWidth="3"/>
+                </g>
+              </svg>
+            </button>
+            
+            {/* Cyclopentane preset button */}
+            <button
+              onClick={toggleCyclopentanePreset}
+              style={{
+                width: '95px',
+                height: '95px',
+                backgroundColor: selectedPreset === 'cyclopentane' ? 'rgb(54,98,227)' : '#23395d',
+                border: 'none',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                transition: 'background 0.2s',
+                flexShrink: 0,
+                outline: 'none',
+                padding: '8px',
+              }}
+              onMouseEnter={(e) => {
+                if (selectedPreset !== 'cyclopentane') {
+                  e.target.style.backgroundColor = '#2a4470';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (selectedPreset !== 'cyclopentane') {
+                  e.target.style.backgroundColor = '#23395d';
+                }
+              }}
+              title="Cyclopentane Ring"
+            >
+              {/* Cyclopentane ring SVG preview */}
+              <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+                {/* Cyclopentane ring structure with all single bonds */}
+                <g transform="translate(60, 60)">
+                  {/* All single bonds in pentagon pattern */}
+                  <line x1="0" y1="-32" x2="30.4" y2="-9.9" stroke="#fff" strokeWidth="3"/>
+                  <line x1="30.4" y1="-9.9" x2="18.8" y2="25.9" stroke="#fff" strokeWidth="3"/>
+                  <line x1="18.8" y1="25.9" x2="-18.8" y2="25.9" stroke="#fff" strokeWidth="3"/>
+                  <line x1="-18.8" y1="25.9" x2="-30.4" y2="-9.9" stroke="#fff" strokeWidth="3"/>
+                  <line x1="-30.4" y1="-9.9" x2="0" y2="-32" stroke="#fff" strokeWidth="3"/>
+                </g>
+              </svg>
+            </button>
+
             {/* Placeholder preset buttons */}
-            {[1, 2, 3, 4, 5, 6].map(i => (
+            {[4, 5, 6].map(i => (
               <div
                 key={i}
                 style={{
                   width: '95px',
                   height: '95px',
                   backgroundColor: '#23395d',
-                  border: 'none', // Remove border
+                  border: 'none',
                   borderRadius: '8px',
                   display: 'flex',
                   alignItems: 'center',
@@ -5172,7 +5913,7 @@ const HexGridWithToolbar = () => {
                   fontWeight: '600',
                   cursor: 'pointer',
                   transition: 'background 0.2s',
-                  flexShrink: 0, // Maintain button size during animation
+                  flexShrink: 0,
                 }}
                 onMouseEnter={(e) => e.target.style.backgroundColor = '#2a4470'}
                 onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
@@ -5473,12 +6214,17 @@ const HexGridWithToolbar = () => {
           }}
         >
           <div>
-            {showSnapPreview ? 'Grid Snap: ON' : 'Grid Snap: OFF'}
+            {selectedPreset ? (
+              `Preset: ${selectedPreset.charAt(0).toUpperCase() + selectedPreset.slice(1)}`
+            ) : (
+              showSnapPreview ? 'Grid Snap: ON' : 'Grid Snap: OFF'
+            )}
           </div>
           <div style={{ fontSize: '12px', opacity: '0.9' }}>
-            Press G to toggle
+            {selectedPreset === 'cyclopentane' ? 'No grid snap (pentagon shape)' : 
+             selectedPreset ? 'Click to place multiple' : 'Press G to toggle'}
           </div>
-          {snapAlignment && showSnapPreview && (
+          {snapAlignment && showSnapPreview && !selectedPreset && (
             <div style={{ 
               fontSize: '12px', 
               backgroundColor: 'rgba(255,255,255,0.2)', 
@@ -5580,7 +6326,7 @@ const HexGridWithToolbar = () => {
         </>
       )}
       
-      {/* Bottom Right Toolbar - Export and About */}
+      {/* Bottom Right Toolbar - Export, Grid Breaking Debug, and About */}
       <div style={{
         position: 'fixed',
         bottom: '20px',
@@ -5619,6 +6365,44 @@ const HexGridWithToolbar = () => {
           onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
         >
           Export
+        </button>
+        
+        <button
+          onClick={() => {
+            setGridBreakingEnabled(!gridBreakingEnabled);
+          }}
+          style={{
+            width: '80px',
+            height: '36px',
+            backgroundColor: gridBreakingEnabled ? 'rgb(54,98,227)' : '#23395d',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            transition: 'background 0.2s',
+            outline: 'none',
+            padding: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '12px',
+            fontWeight: '600',
+            color: '#fff',
+            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+          }}
+          title={`Grid Breaking Debug: ${gridBreakingEnabled ? 'ON' : 'OFF'} (${gridBreakingAnalysis.totalOffGrid} off-grid vertices)`}
+          onMouseEnter={(e) => {
+            if (!gridBreakingEnabled) {
+              e.target.style.backgroundColor = '#2a4470';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (!gridBreakingEnabled) {
+              e.target.style.backgroundColor = '#23395d';
+            }
+          }}
+        >
+          Debug GB
         </button>
         
         <button

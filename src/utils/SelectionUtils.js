@@ -201,7 +201,8 @@ export const copySelection = (
           y: vertex.y - centerY,
           atom: vertexAtoms[vertexKey] || null,
           type: vertexTypes[vertexKey] || null,
-          isTop: getIfTop(vertex, segments) // Preserve orientation information
+          isTop: getIfTop(vertex, segments), // Preserve orientation information
+          isOffGrid: vertex.isOffGrid !== undefined ? vertex.isOffGrid : false // Preserve off-grid status
         });
       }
     }
@@ -224,7 +225,8 @@ export const copySelection = (
             y: v1.y - centerY,
             atom: vertexAtoms[v1Key] || null,
             type: vertexTypes[v1Key] || null,
-            isTop: getIfTop(v1, segments) // Preserve orientation information
+            isTop: getIfTop(v1, segments), // Preserve orientation information
+            isOffGrid: v1.isOffGrid !== undefined ? v1.isOffGrid : false // Preserve off-grid status
           });
         }
       }
@@ -238,7 +240,8 @@ export const copySelection = (
             y: v2.y - centerY,
             atom: vertexAtoms[v2Key] || null,
             type: vertexTypes[v2Key] || null,
-            isTop: getIfTop(v2, segments) // Preserve orientation information
+            isTop: getIfTop(v2, segments), // Preserve orientation information
+            isOffGrid: v2.isOffGrid !== undefined ? v2.isOffGrid : false // Preserve off-grid status
           });
         }
       }
@@ -389,7 +392,8 @@ export const pasteAtPosition = (
       // Create new vertex at pasted position
       const newVertex = {
         x: offsetX + clipVertex.x,
-        y: offsetY + clipVertex.y
+        y: offsetY + clipVertex.y,
+        isOffGrid: clipVertex.isOffGrid !== undefined ? clipVertex.isOffGrid : true // Preserve isOffGrid from clipboard, default to true for pasted vertices
       };
       
       newVertices.push(newVertex);
