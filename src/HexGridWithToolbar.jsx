@@ -5532,6 +5532,15 @@ const HexGridWithToolbar = () => {
       overflow: 'hidden',
       zIndex: 0
     }}>
+      <style>{`
+        .toolbar-button {
+          transition: all 0.15s ease-out;
+        }
+        
+        .toolbar-button:hover {
+          transform: scale(1.02);
+        }
+      `}</style>
       {/* Toolbar */}
       <div style={{
         width: 'min(240px, 25vw)',
@@ -5592,6 +5601,7 @@ const HexGridWithToolbar = () => {
               }
               setModeAndClearSelection('draw');
             }}
+            className="toolbar-button"
             style={{
               flex: 1,
               aspectRatio: '1/1',
@@ -5602,16 +5612,29 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'draw' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'draw') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'draw') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Draw Mode"
           >
             {/* Pencil SVG */}
-            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
               <path d="M12 20h9" />
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
             </svg>
@@ -5621,6 +5644,7 @@ const HexGridWithToolbar = () => {
               const newMode = mode === 'mouse' ? 'draw' : 'mouse';
               setModeAndClearSelection(newMode);
             }}
+            className="toolbar-button"
             style={{
               flex: 1,
               aspectRatio: '1/1',
@@ -5631,16 +5655,29 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'mouse' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'mouse') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'mouse') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Mouse Mode"
           >
             {/* Mouse cursor SVG - bigger with handle */}
-            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none">
+            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
               <path d="M6 3L12 17L14.5 12.5L19 10.5L6 3Z" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round"/>
               <rect x="16.3" y="16" width="3.5" height="7" rx="1.5" fill="#fff" stroke="#fff" strokeWidth="0.5" transform="rotate(316 12.75 18.5)"/>
             </svg>
@@ -5650,6 +5687,7 @@ const HexGridWithToolbar = () => {
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0, marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))' }}>
           <button
             onClick={() => setModeAndClearSelection('erase')}
+            className="toolbar-button"
             style={{
               flex: 1,
               aspectRatio: '1/1',
@@ -5660,16 +5698,29 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'erase' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'erase') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'erase') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Erase Mode"
           >
             {/* Minimalist Eraser: Rotated rectangle, bifurcated */}
-            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none">
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
               <g transform="rotate(45 13 13)">
                 <rect x="6" y="10" width="14" height="6" rx="1.5" fill="#fff" stroke="#fff" strokeWidth="1.5"/>
                 <line x1="13" y1="10" x2="13" y2="16" stroke="#23395d" strokeWidth="1.5"/>
@@ -5681,6 +5732,7 @@ const HexGridWithToolbar = () => {
               const newMode = mode === 'text' ? 'draw' : 'text';
               setModeAndClearSelection(newMode);
             }}
+            className="toolbar-button"
             style={{
               flex: 1,
               aspectRatio: '1/1',
@@ -5691,16 +5743,29 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'text' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'text') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'text') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Text Mode"
           >
             {/* Text "T" SVG - bigger and Times New Roman font */}
-            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none">
+            <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
               <text x="5" y="18" fill="#fff" style={{ font: 'bold 20px "Times New Roman", serif' }}>T</text>
             </svg>
           </button>
@@ -5713,6 +5778,7 @@ const HexGridWithToolbar = () => {
               const newMode = mode === 'plus' ? 'draw' : 'plus';
               setModeAndClearSelection(newMode);
             }}
+            className="toolbar-button"
             style={{
               flex: 1,
               aspectRatio: '1/1',
@@ -5723,16 +5789,29 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'plus' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'plus') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'plus') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Add Positive Charge"
           >
             {/* Plus sign in circle SVG */}
-            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none">
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
               <circle cx="13" cy="13" r="9" stroke="#fff" strokeWidth="2.2" fill="none" />
               <g stroke="#fff" strokeWidth="2.2" strokeLinecap="round">
                 <line x1="13" y1="8.5" x2="13" y2="17.5" />
@@ -5745,6 +5824,7 @@ const HexGridWithToolbar = () => {
               const newMode = mode === 'minus' ? 'draw' : 'minus';
               setModeAndClearSelection(newMode);
             }}
+            className="toolbar-button"
             style={{
               flex: 1,
               aspectRatio: '1/1',
@@ -5755,16 +5835,29 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'minus' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'minus') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'minus') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Add Negative Charge"
           >
             {/* Minus sign in circle SVG */}
-            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none">
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
               <circle cx="13" cy="13" r="9" stroke="#fff" strokeWidth="2.2" fill="none" />
               <line x1="8.5" y1="13" x2="17.5" y2="13" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
             </svg>
@@ -5774,6 +5867,7 @@ const HexGridWithToolbar = () => {
               const newMode = mode === 'lone' ? 'draw' : 'lone';
               setModeAndClearSelection(newMode);
             }}
+            className="toolbar-button"
             style={{
               flex: 1,
               aspectRatio: '1/1',
@@ -5784,16 +5878,29 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(320px, 33.33vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'lone' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'lone') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'lone') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Add Lone Pair"
           >
             {/* Two dots SVG */}
-            <svg width="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" height="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" viewBox="0 0 22 22" fill="none">
+            <svg width="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" height="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" viewBox="0 0 22 22" fill="none" style={{ pointerEvents: 'none' }}>
               <circle cx="7" cy="11" r="2.6" fill="#fff" />
               <circle cx="15" cy="11" r="2.6" fill="#fff" />
             </svg>
@@ -5814,6 +5921,7 @@ const HexGridWithToolbar = () => {
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(6px, calc(min(280px, 25vw) * 0.025))' }}>
           <button
             onClick={() => setModeAndClearSelection('arrow')}
+            className="toolbar-button"
             style={{
               flex: 1,
               height: 'min(44px, 7vh)',
@@ -5824,20 +5932,34 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'arrow' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'arrow') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'arrow') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Arrow"
           >
-            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               <line x1="6" y1="13" x2="32" y2="13" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
               <polygon points="32,7 44,13 32,19" fill="white" />
             </svg>
           </button>
           <button
             onClick={() => setModeAndClearSelection('equil')}
+            className="toolbar-button"
             style={{
               flex: 1,
               height: 'min(44px, 7vh)',
@@ -5848,14 +5970,27 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'equil' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'equil') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'equil') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Equilibrium Arrow"
           >
-            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Top arrow: left to right */}
               <line x1="8" y1="10" x2="34" y2="10" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
               <polygon points="34,5 44,10 34,15" fill="white" />
@@ -5875,114 +6010,198 @@ const HexGridWithToolbar = () => {
           {/* Arrow 1: CCW Shallow (Top Left) */}
           <button
             onClick={() => setModeAndClearSelection('curve2')}
+            className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve2' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'curve2' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+            }}
+            onMouseEnter={(e) => {
+              if (mode !== 'curve2') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'curve2') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
             }}
             title="Counterclockwise semicircle (top left)"
           ><ArrowCCWSemicircleTopLeft /></button>
           {/* Arrow 2: CW Semicircle (Top Center) */}
           <button
             onClick={() => setModeAndClearSelection('curve1')}
+            className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve1' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'curve1' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+            }}
+            onMouseEnter={(e) => {
+              if (mode !== 'curve1') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'curve1') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
             }}
             title="Clockwise semicircle (top center)"
           ><ArrowCWSemicircleTopCenter /></button>
           {/* Arrow 3: CW Quarter-circle (Top Right) */}
           <button
             onClick={() => setModeAndClearSelection('curve0')}
+            className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve0' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'curve0' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+            }}
+            onMouseEnter={(e) => {
+              if (mode !== 'curve0') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'curve0') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
             }}
             title="Clockwise quarter (top right)"
           ><ArrowCWQuarterTopRight /></button>
           {/* Arrow 4: CCW Semicircle (Bottom Left) */}
           <button
             onClick={() => setModeAndClearSelection('curve5')}
+            className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve5' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'curve5' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+            }}
+            onMouseEnter={(e) => {
+              if (mode !== 'curve5') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'curve5') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
             }}
             title="Counterclockwise semicircle (bottom left)"
           ><ArrowCCWSemicircleBottomLeft /></button>
           {/* Arrow 5: CW Semicircle (Bottom Center) */}
           <button
             onClick={() => setModeAndClearSelection('curve4')}
+            className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve4' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'curve4' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'curve4') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'curve4') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Clockwise semicircle (bottom center)"
           ><ArrowCWSemicircleBottomCenter /></button>
           {/* Arrow 6: CW Quarter-circle (Bottom Right) */}
           <button
             onClick={() => setModeAndClearSelection('curve3')}
+            className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
               backgroundColor: mode === 'curve3' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'curve3' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+            }}
+            onMouseEnter={(e) => {
+              if (mode !== 'curve3') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'curve3') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
             }}
             title="Clockwise quarter (bottom right)"
           ><ArrowCWQuarterBottomRight /></button>
@@ -6001,6 +6220,7 @@ const HexGridWithToolbar = () => {
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(6px, calc(min(280px, 25vw) * 0.025))' }}>
           <button
             onClick={() => setModeAndClearSelection('wedge')}
+            className="toolbar-button"
             style={{
               flex: 1,
               height: 'min(44px, 7vh)',
@@ -6011,19 +6231,33 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'wedge' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'wedge') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'wedge') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Wedge Bond"
           >
-            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               <polygon points="6,13 38,6 38,20" fill="white" />
             </svg>
           </button>
           <button
             onClick={() => setModeAndClearSelection('dash')}
+            className="toolbar-button"
             style={{
               flex: 1,
               height: 'min(44px, 7vh)',
@@ -6034,14 +6268,27 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'dash' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'dash') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'dash') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Dash Bond"
           >
-            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Updated dash bond icon to better reflect actual appearance with perpendicular lines that get progressively wider */}
               <g transform="translate(6, 13)">
                 <line x1="0" y1="0" x2="32" y2="0" stroke="#fff" strokeWidth="1" strokeOpacity="0.0" />
@@ -6056,6 +6303,7 @@ const HexGridWithToolbar = () => {
           </button>
           <button
             onClick={() => setModeAndClearSelection('ambiguous')}
+            className="toolbar-button"
             style={{
               flex: 1,
               height: 'min(44px, 7vh)',
@@ -6066,14 +6314,27 @@ const HexGridWithToolbar = () => {
               border: 'none',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-              transition: 'background 0.2s',
+              boxShadow: mode === 'ambiguous' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
               outline: 'none',
               padding: 0,
             }}
+            onMouseEnter={(e) => {
+              if (mode !== 'ambiguous') {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'ambiguous') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
             title="Ambiguous Bond"
           >
-            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               <path
                 d= " M 4 13 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0"
                 stroke="white"
@@ -6090,6 +6351,7 @@ const HexGridWithToolbar = () => {
         <button
           onClick={undo}
           disabled={historyIndex <= 0}
+          className="toolbar-button"
           style={{
             width: '100%',
             padding: 'calc(min(280px, 25vw) * 0.019) 0',
@@ -6098,18 +6360,31 @@ const HexGridWithToolbar = () => {
             border: 'none',
             borderRadius: 'calc(min(280px, 25vw) * 0.025)',
             cursor: historyIndex <= 0 ? 'not-allowed' : 'pointer',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            boxShadow: historyIndex <= 0 ? 
+              '0 2px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.05)' :
+              '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)',
             fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
             fontWeight: 700,
             marginTop: 0,
             marginBottom: 'max(6px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))',
             outline: 'none',
-            transition: 'background 0.2s, color 0.2s',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
             opacity: historyIndex <= 0 ? 0.6 : 1,
+          }}
+          onMouseEnter={(e) => {
+            if (historyIndex > 0) {
+              e.target.style.backgroundColor = '#2a4470';
+              e.target.style.boxShadow = '0 6px 16px rgba(35,57,93,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (historyIndex > 0) {
+              e.target.style.backgroundColor = '#23395d';
+              e.target.style.boxShadow = '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)';
+            }
           }}
           title={`Undo${historyIndex <= 0 ? ' (No actions to undo)' : ''}`}
         >
@@ -6126,6 +6401,7 @@ const HexGridWithToolbar = () => {
             handleEraseAll(); 
             clearSelection(); 
           }}
+          className="toolbar-button"
           style={{
             width: '100%',
             padding: 'calc(min(280px, 25vw) * 0.019) 0',
@@ -6134,17 +6410,24 @@ const HexGridWithToolbar = () => {
             border: 'none',
             borderRadius: 'calc(min(280px, 25vw) * 0.025)',
             cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            boxShadow: '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)',
             fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
             fontWeight: 700,
             marginTop: 0,
             marginBottom: 'max(6px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))',
             outline: 'none',
-            transition: 'background 0.2s',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
             gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+          }}
+          onMouseEnter={(e) => {
+            e.target.style.backgroundColor = '#2a4470';
+            e.target.style.boxShadow = '0 6px 16px rgba(35,57,93,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.backgroundColor = '#23395d';
+            e.target.style.boxShadow = '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)';
           }}
         >
           {/* Taller Trash Can SVG */}
@@ -6217,6 +6500,7 @@ const HexGridWithToolbar = () => {
             {/* Benzene preset button */}
             <button
               onClick={toggleBenzenePreset}
+              className="toolbar-button"
               style={{
                 width: '95px',
                 height: '95px',
@@ -6227,7 +6511,9 @@ const HexGridWithToolbar = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
-                transition: 'background 0.2s',
+                boxShadow: selectedPreset === 'benzene' ? 
+                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
                 flexShrink: 0,
                 outline: 'none',
                 padding: '8px',
@@ -6235,17 +6521,19 @@ const HexGridWithToolbar = () => {
               onMouseEnter={(e) => {
                 if (selectedPreset !== 'benzene') {
                   e.target.style.backgroundColor = '#2a4470';
+                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
                 }
               }}
               onMouseLeave={(e) => {
                 if (selectedPreset !== 'benzene') {
                   e.target.style.backgroundColor = '#23395d';
+                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
                 }
               }}
               title="Benzene Ring"
             >
                                             {/* Benzene ring SVG preview */}
-               <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+               <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
                                     {/* Benzene ring structure with alternating single/double bonds */}
                    <g transform="translate(60, 60)">
                      {/* Bond 0: Double bond (top-right) */}
@@ -6281,6 +6569,7 @@ const HexGridWithToolbar = () => {
             {/* Cyclohexane preset button */}
             <button
               onClick={toggleCyclohexanePreset}
+              className="toolbar-button"
               style={{
                 width: '95px',
                 height: '95px',
@@ -6291,7 +6580,9 @@ const HexGridWithToolbar = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
-                transition: 'background 0.2s',
+                boxShadow: selectedPreset === 'cyclohexane' ? 
+                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
                 flexShrink: 0,
                 outline: 'none',
                 padding: '8px',
@@ -6299,17 +6590,19 @@ const HexGridWithToolbar = () => {
               onMouseEnter={(e) => {
                 if (selectedPreset !== 'cyclohexane') {
                   e.target.style.backgroundColor = '#2a4470';
+                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
                 }
               }}
               onMouseLeave={(e) => {
                 if (selectedPreset !== 'cyclohexane') {
                   e.target.style.backgroundColor = '#23395d';
+                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
                 }
               }}
               title="Cyclohexane Ring"
             >
               {/* Cyclohexane ring SVG preview */}
-              <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+              <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
                 {/* Cyclohexane ring structure with all single bonds */}
                 <g transform="translate(60, 60)">
                   {/* All single bonds in hexagon pattern */}
@@ -6326,6 +6619,7 @@ const HexGridWithToolbar = () => {
             {/* Cyclopentane preset button */}
             <button
               onClick={toggleCyclopentanePreset}
+              className="toolbar-button"
               style={{
                 width: '95px',
                 height: '95px',
@@ -6336,7 +6630,9 @@ const HexGridWithToolbar = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
-                transition: 'background 0.2s',
+                boxShadow: selectedPreset === 'cyclopentane' ? 
+                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
                 flexShrink: 0,
                 outline: 'none',
                 padding: '8px',
@@ -6344,17 +6640,19 @@ const HexGridWithToolbar = () => {
               onMouseEnter={(e) => {
                 if (selectedPreset !== 'cyclopentane') {
                   e.target.style.backgroundColor = '#2a4470';
+                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
                 }
               }}
               onMouseLeave={(e) => {
                 if (selectedPreset !== 'cyclopentane') {
                   e.target.style.backgroundColor = '#23395d';
+                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
                 }
               }}
               title="Cyclopentane Ring"
             >
               {/* Cyclopentane ring SVG preview */}
-              <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+              <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
                 {/* Cyclopentane ring structure with all single bonds */}
                 <g transform="translate(60, 60)">
                   {/* All single bonds in pentagon pattern */}
@@ -6370,6 +6668,7 @@ const HexGridWithToolbar = () => {
             {/* Cyclobutane preset button */}
             <button
               onClick={toggleCyclobutanePreset}
+              className="toolbar-button"
               style={{
                 width: '95px',
                 height: '95px',
@@ -6380,7 +6679,9 @@ const HexGridWithToolbar = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
-                transition: 'background 0.2s',
+                boxShadow: selectedPreset === 'cyclobutane' ? 
+                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
                 flexShrink: 0,
                 outline: 'none',
                 padding: '8px',
@@ -6388,17 +6689,19 @@ const HexGridWithToolbar = () => {
               onMouseEnter={(e) => {
                 if (selectedPreset !== 'cyclobutane') {
                   e.target.style.backgroundColor = '#2a4470';
+                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
                 }
               }}
               onMouseLeave={(e) => {
                 if (selectedPreset !== 'cyclobutane') {
                   e.target.style.backgroundColor = '#23395d';
+                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
                 }
               }}
               title="Cyclobutane Ring"
             >
               {/* Cyclobutane ring SVG preview */}
-              <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+              <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
                 {/* Cyclobutane ring structure with all single bonds */}
                 <g transform="translate(60, 60)">
                   {/* All single bonds in square pattern */}
@@ -6413,6 +6716,7 @@ const HexGridWithToolbar = () => {
             {/* Cyclopropane preset button */}
             <button
               onClick={toggleCyclopropanePreset}
+              className="toolbar-button"
               style={{
                 width: '95px',
                 height: '95px',
@@ -6423,7 +6727,9 @@ const HexGridWithToolbar = () => {
                 alignItems: 'center',
                 justifyContent: 'center',
                 cursor: 'pointer',
-                transition: 'background 0.2s',
+                boxShadow: selectedPreset === 'cyclopropane' ? 
+                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
                 flexShrink: 0,
                 outline: 'none',
                 padding: '8px',
@@ -6431,17 +6737,19 @@ const HexGridWithToolbar = () => {
               onMouseEnter={(e) => {
                 if (selectedPreset !== 'cyclopropane') {
                   e.target.style.backgroundColor = '#2a4470';
+                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
                 }
               }}
               onMouseLeave={(e) => {
                 if (selectedPreset !== 'cyclopropane') {
                   e.target.style.backgroundColor = '#23395d';
+                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
                 }
               }}
               title="Cyclopropane Ring"
             >
               {/* Cyclopropane ring SVG preview */}
-              <svg width="70" height="70" viewBox="0 0 120 120" fill="none">
+              <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
                 {/* Cyclopropane ring structure with all single bonds */}
                 <g transform="translate(60, 60)">
                   {/* All single bonds in triangle pattern */}
@@ -6453,7 +6761,8 @@ const HexGridWithToolbar = () => {
             </button>
 
             {/* Placeholder preset button */}
-            <div
+            <button
+              className="toolbar-button"
               style={{
                 width: '95px',
                 height: '95px',
@@ -6467,14 +6776,23 @@ const HexGridWithToolbar = () => {
                 fontSize: '16px',
                 fontWeight: '600',
                 cursor: 'pointer',
-                transition: 'background 0.2s',
+                boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
                 flexShrink: 0,
+                outline: 'none',
+                padding: '8px',
               }}
-              onMouseEnter={(e) => e.target.style.backgroundColor = '#2a4470'}
-              onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
+              onMouseEnter={(e) => {
+                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }}
+              title="Coming Soon"
             >
               6
-            </div>
+            </button>
           </div>
         </div>
         
@@ -6491,6 +6809,7 @@ const HexGridWithToolbar = () => {
             setIsPresetMenuExpanded(true);
           }
         }}
+        className="toolbar-button"
         style={{
           position: 'absolute',
           bottom: '5vh', // Position just above the bottom of the toolbar
@@ -6507,7 +6826,9 @@ const HexGridWithToolbar = () => {
           borderLeft: isPresetMenuExpanded ? 'none' : 'none', // No left border to seamlessly attach (to toolbar or preset menu)
           borderRadius: '0 8px 8px 0', // Always round the right side
           cursor: 'pointer',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.25)',
+          boxShadow: isPresetMenuExpanded ? 
+            '0 6px 20px rgba(54,98,227,0.4), inset 0 1px 0 rgba(255,255,255,0.2)' :
+            '0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
           transition: 'background 0.2s, left 0.5s ease-out', // Smooth background and position transitions
           outline: 'none',
           display: 'flex',
@@ -6515,6 +6836,18 @@ const HexGridWithToolbar = () => {
           justifyContent: 'center',
           padding: '0',
           zIndex: 3,
+        }}
+        onMouseEnter={(e) => {
+          if (!isPresetMenuExpanded) {
+            e.target.style.background = 'linear-gradient(to bottom, rgb(42, 68, 112), rgb(35, 95, 71))';
+            e.target.style.boxShadow = '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.15)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isPresetMenuExpanded) {
+            e.target.style.background = 'linear-gradient(to bottom, rgb(35, 52, 69), rgb(28, 74, 56))';
+            e.target.style.boxShadow = '0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.1)';
+          }
         }}
         title={isPresetMenuExpanded ? "Collapse Presets" : "Expand Presets"}
       >
@@ -6528,6 +6861,7 @@ const HexGridWithToolbar = () => {
           style={{
             transform: isPresetMenuExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
             transition: 'transform 0.2s',
+            pointerEvents: 'none',
           }}
         >
           <path
@@ -6737,7 +7071,7 @@ const HexGridWithToolbar = () => {
             }}
             title="Copy (Cmd/Ctrl+C)"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
               <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
               <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
             </svg>
@@ -6895,6 +7229,7 @@ const HexGridWithToolbar = () => {
             // Export functionality will be implemented later
 
           }}
+          className="toolbar-button"
           style={{
             width: '80px',
             height: '36px',
@@ -6902,8 +7237,7 @@ const HexGridWithToolbar = () => {
             border: 'none',
             borderRadius: '6px',
             cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            transition: 'background 0.2s',
+            boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
             outline: 'none',
             padding: 0,
             display: 'flex',
@@ -6915,8 +7249,14 @@ const HexGridWithToolbar = () => {
             fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
           }}
           title="Export"
-          onMouseEnter={(e) => e.target.style.backgroundColor = '#2a4470'}
-          onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
+          onMouseEnter={(e) => {
+            e.target.style.backgroundColor = '#2a4470';
+            e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.backgroundColor = '#23395d';
+            e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+          }}
         >
           Export
         </button>
@@ -6925,6 +7265,7 @@ const HexGridWithToolbar = () => {
           onClick={() => {
             setGridBreakingEnabled(!gridBreakingEnabled);
           }}
+          className="toolbar-button"
           style={{
             width: '80px',
             height: '36px',
@@ -6932,8 +7273,9 @@ const HexGridWithToolbar = () => {
             border: 'none',
             borderRadius: '6px',
             cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            transition: 'background 0.2s',
+            boxShadow: gridBreakingEnabled ? 
+              '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+              '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
             outline: 'none',
             padding: 0,
             display: 'flex',
@@ -6948,11 +7290,13 @@ const HexGridWithToolbar = () => {
           onMouseEnter={(e) => {
             if (!gridBreakingEnabled) {
               e.target.style.backgroundColor = '#2a4470';
+              e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
             }
           }}
           onMouseLeave={(e) => {
             if (!gridBreakingEnabled) {
               e.target.style.backgroundColor = '#23395d';
+              e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
             }
           }}
         >
@@ -6963,6 +7307,7 @@ const HexGridWithToolbar = () => {
           onClick={() => {
             setShowAboutPopup(true);
           }}
+          className="toolbar-button"
           style={{
             width: '80px',
             height: '36px',
@@ -6970,8 +7315,7 @@ const HexGridWithToolbar = () => {
             border: 'none',
             borderRadius: '6px',
             cursor: 'pointer',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            transition: 'background 0.2s',
+            boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
             outline: 'none',
             padding: 0,
             display: 'flex',
@@ -6983,8 +7327,14 @@ const HexGridWithToolbar = () => {
             fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
           }}
           title="About"
-          onMouseEnter={(e) => e.target.style.backgroundColor = '#2a4470'}
-          onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
+          onMouseEnter={(e) => {
+            e.target.style.backgroundColor = '#2a4470';
+            e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+          }}
+          onMouseLeave={(e) => {
+            e.target.style.backgroundColor = '#23395d';
+            e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+          }}
         >
           About
         </button>
@@ -7019,7 +7369,7 @@ function ArrowCCWSemicircleTopLeft() {
   // manually made
   const angle = -3 * Math.PI / 4;
   return (
-    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <path d="M14 34 A14 14 0 1 1 36 20" stroke="white" 
       strokeWidth="3.5" 
       fill="none" 
@@ -7033,7 +7383,7 @@ function ArrowCWSemicircleTopCenter() {
   // manually made
   const angle = -3 * Math.PI / 4;
   return (
-    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <path d="M12 24 A12 12 0 0 1 36 24" stroke="white"
       strokeWidth="3.5"
       fill="none"
@@ -7047,7 +7397,7 @@ function ArrowCWQuarterTopRight() {
   // manually made
   const angle = -3 * Math.PI / 4;
   return (
-    <svg width="48" height="48" viewBox="0 6 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg width="48" height="48" viewBox="0 6 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <path d="M10 32 A22 22 0 0 1 38 32" stroke="white"
        strokeWidth="3.5"
         fill="none"
@@ -7060,7 +7410,7 @@ function ArrowCWQuarterTopRight() {
 // 4. Counterclockwise Semicircle (Bottom Left)
 function ArrowCCWSemicircleBottomLeft() {
   return (
-    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <g transform="scale(1,-1) translate(0,-45)">
         <path d="M14 34 A14 14 0 1 1 36 20" 
           stroke="white"
@@ -7078,7 +7428,7 @@ function ArrowCWSemicircleBottomCenter() {
   // Arrowhead at (34,10), tangent is -45deg
   const angle = -Math.PI/4;
   return (
-    <svg width="48" height="48" viewBox="0 4 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg width="48" height="48" viewBox="0 4 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       {/* Arc remains the same */}
       <path d="M12 24 A12 12 0 0 0 36 24"
         stroke="white"
@@ -7096,7 +7446,7 @@ function ArrowCWQuarterBottomRight() {
   // Arrowhead at (34,34), tangent is 30deg
   const angle = Math.atan2(12,24); // 26.56deg
   return (
-    <svg width="48" height="48" viewBox="0 15 48 48" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <svg width="48" height="48" viewBox="0 15 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <path d="M10 38 A22 22 0 0 0 38 38"
         stroke="white"
         strokeWidth="3.5"
