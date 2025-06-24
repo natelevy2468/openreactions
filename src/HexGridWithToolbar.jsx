@@ -4552,7 +4552,9 @@ const HexGridWithToolbar = () => {
                        originalX1: seg.x1,
                        originalY1: seg.y1,
                        originalX2: seg.x2,
-                       originalY2: seg.y2
+                       originalY2: seg.y2,
+                       anchorVertex: anchorVertex, // The vertex that stays on-grid
+                       otherVertex: otherVertex    // The vertex that becomes off-grid
                      };
                                      } else if (!bothVerticesHaveBonds) {
                      // No existing bonds and not both vertices have bonds, mark vertices as off-grid
@@ -4726,32 +4728,56 @@ const HexGridWithToolbar = () => {
               segmentsNeedingVertexUpdate.forEach(seg => {
                 const update = seg._needsVertexUpdate;
                 
-                // Mark original vertices as off-grid and remove vertices that are being moved
-                newVertices = newVertices.map(vertex => {
-                  const v1Match = Math.abs(vertex.x - update.originalX1) < 0.01 && Math.abs(vertex.y - update.originalY1) < 0.01;
-                  const v2Match = Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01;
-                  const newVertexMatch = Math.abs(vertex.x - update.newOtherX) < 0.01 && Math.abs(vertex.y - update.newOtherY) < 0.01;
-                  
-                  if (v1Match || v2Match || newVertexMatch) {
-                    return { ...vertex, isOffGrid: true };
-                  }
-                  return vertex;
-                }).filter(vertex => {
-                  // Remove vertices that are being repositioned (if they match the old position that's being moved)
-                  // Only remove if the new position is different from the old position
-                  const isBeingMoved = (
-                    (Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01) &&
-                    (Math.abs(update.originalX2 - update.newOtherX) > 0.01 || Math.abs(update.originalY2 - update.newOtherY) > 0.01)
-                  );
-                  return !isBeingMoved;
-                });
+                // For triple bond linear positioning, only mark the moved vertex as off-grid
+                if (update.anchorVertex && update.otherVertex) {
+                  // Triple bond case with linear positioning
+                  newVertices = newVertices.map(vertex => {
+                    const anchorMatch = Math.abs(vertex.x - update.anchorVertex.x) < 0.01 && Math.abs(vertex.y - update.anchorVertex.y) < 0.01;
+                    const otherMatch = Math.abs(vertex.x - update.otherVertex.x) < 0.01 && Math.abs(vertex.y - update.otherVertex.y) < 0.01;
+                    const newVertexMatch = Math.abs(vertex.x - update.newOtherX) < 0.01 && Math.abs(vertex.y - update.newOtherY) < 0.01;
+                    
+                    if (anchorMatch) {
+                      // Keep anchor vertex on-grid (don't change isOffGrid status)
+                      return vertex;
+                    } else if (otherMatch || newVertexMatch) {
+                      // Mark moved vertex as off-grid
+                      return { ...vertex, isOffGrid: true };
+                    }
+                    return vertex;
+                  }).filter(vertex => {
+                    // Remove the old position of the moved vertex (if different from new position)
+                    const isOldMovedVertex = Math.abs(vertex.x - update.otherVertex.x) < 0.01 && Math.abs(vertex.y - update.otherVertex.y) < 0.01;
+                    const isPositionChanging = Math.abs(update.otherVertex.x - update.newOtherX) > 0.01 || Math.abs(update.otherVertex.y - update.newOtherY) > 0.01;
+                    return !(isOldMovedVertex && isPositionChanging);
+                  });
+                } else {
+                  // Fallback for other cases (stereochemistry bonds, etc.) - mark all vertices as off-grid
+                  newVertices = newVertices.map(vertex => {
+                    const v1Match = Math.abs(vertex.x - update.originalX1) < 0.01 && Math.abs(vertex.y - update.originalY1) < 0.01;
+                    const v2Match = Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01;
+                    const newVertexMatch = Math.abs(vertex.x - update.newOtherX) < 0.01 && Math.abs(vertex.y - update.newOtherY) < 0.01;
+                    
+                    if (v1Match || v2Match || newVertexMatch) {
+                      return { ...vertex, isOffGrid: true };
+                    }
+                    return vertex;
+                  }).filter(vertex => {
+                    // Remove vertices that are being repositioned (if they match the old position that's being moved)
+                    // Only remove if the new position is different from the old position
+                    const isBeingMoved = (
+                      (Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01) &&
+                      (Math.abs(update.originalX2 - update.newOtherX) > 0.01 || Math.abs(update.originalY2 - update.newOtherY) > 0.01)
+                    );
+                    return !isBeingMoved;
+                  });
+                }
                 
                 // Check if we need to add a new vertex at the new position
                 const newVertexExists = newVertices.some(v => 
                   Math.abs(v.x - update.newOtherX) < 0.01 && Math.abs(v.y - update.newOtherY) < 0.01
                 );
                 
-                                if (!newVertexExists) {
+                if (!newVertexExists) {
                   newVertices.push({ x: update.newOtherX, y: update.newOtherY, isOffGrid: true });
                 }
               });
