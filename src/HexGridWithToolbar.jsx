@@ -560,11 +560,52 @@ const HexGridWithToolbar = () => {
     setHistoryIndex(prevIndex => Math.min(prevIndex + 1, 49));
   }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, verticesWith3Bonds, bondPreviews, epoxideVertices]);
 
+  // Function to check all vertices for fourth bond indicator eligibility
+  const updateFourthBondIndicators = useCallback(() => {
+    const hasAnyDoubleBonds = (vertex) => {
+      for (const seg of segments) {
+        if (seg.bondOrder >= 2) { // Double or triple bonds
+          if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
+              (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    const countSingleBonds = (vertex) => {
+      let count = 0;
+      for (const seg of segments) {
+        if (seg.bondOrder === 1) { // Only count single bonds
+          if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
+              (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
+            count++;
+          }
+        }
+      }
+      return count;
+    };
+    
+    // Find all vertices that qualify for fourth bond indicators
+    const qualifyingVertices = [];
+    vertices.forEach(vertex => {
+      if (!hasAnyDoubleBonds(vertex) && countSingleBonds(vertex) === 3) {
+        qualifyingVertices.push({
+          x: vertex.x,
+          y: vertex.y,
+          key: `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`
+        });
+      }
+    });
+    
+    setVerticesWith3Bonds(qualifyingVertices);
+  }, [vertices, segments]);
+
   // Check ALL vertices for fourth bond eligibility whenever structure changes
   useEffect(() => {
-    // Don't show indicators - they should only appear temporarily when a vertex gets its 3rd bond
-    // and be manually cleared when any other action happens
-  }, [vertices, segments]);
+    updateFourthBondIndicators();
+  }, [vertices, segments, updateFourthBondIndicators]);
 
   // Undo the last action
   const undo = useCallback(() => {
@@ -1839,15 +1880,8 @@ const HexGridWithToolbar = () => {
           ctx.strokeText(segment.text, currentX, vy + baseYOffset + yOffset);
           ctx.shadowBlur = 0;
           
-          // Check if this is an off-grid vertex from small ring attachment
-          const isOffGridSmallRing = epoxideVertices.has(key);
-          
-          // Set color: orange for off-grid small ring vertices, blue for selected, black for normal
-          if (isOffGridSmallRing) {
-            ctx.fillStyle = 'rgb(255, 140, 0)'; // Orange color for off-grid small ring vertices
-          } else {
-            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
-          }
+          // Set color: blue for selected, black for normal
+          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
           
           ctx.fillText(segment.text, currentX, vy + baseYOffset + yOffset);
           
@@ -1972,24 +2006,15 @@ const HexGridWithToolbar = () => {
           ctx.arc(chargeX, chargeY, 8, 0, 2 * Math.PI);
           ctx.fillStyle = '#ffffff'; // Use full hex code for pure white
           ctx.fill();
-          // Add ring around the white circle (orange for off-grid small ring, blue for selected, black for normal)
-          const isOffGridForCharge = epoxideVertices.has(key);
-          if (isOffGridForCharge) {
-            ctx.strokeStyle = 'rgb(255, 140, 0)';
-          } else {
-            ctx.strokeStyle = isSelected ? 'rgb(54,98,227)' : '#000000';
-          }
+          // Add ring around the white circle (blue for selected, black for normal)
+          ctx.strokeStyle = isSelected ? 'rgb(54,98,227)' : '#000000';
           ctx.lineWidth = 1;
           ctx.stroke();
           
           // Draw charge symbol
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          if (isOffGridForCharge) {
-            ctx.fillStyle = 'rgb(255, 140, 0)'; // Orange for off-grid small ring vertices
-          } else {
-            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
-          }
+          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
           
           if (atom.charge > 0) {
             // Plus sign - perfect do not change.
@@ -2006,13 +2031,8 @@ const HexGridWithToolbar = () => {
         if (atom.lonePairs) {
           ctx.save();
           
-          // Check if this is an off-grid vertex from small ring for lone pairs
-          const isOffGridForLonePairs = epoxideVertices.has(key);
-          if (isOffGridForLonePairs) {
-            ctx.fillStyle = 'rgb(255, 140, 0)'; // Orange for off-grid small ring vertices
-          } else {
-            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
-          }
+          // Set color for lone pairs (blue for selected, black for normal)
+          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
           // Define shadow properties but they will be toggled on/off as needed
           ctx.shadowColor = 'rgba(0,0,0,0.85)';
           ctx.shadowBlur = 2;
@@ -2243,12 +2263,8 @@ const HexGridWithToolbar = () => {
             ctx.beginPath();
             ctx.arc(cx, cy, dotR, 0, 2 * Math.PI);
             
-            // Use off-grid color if this is an off-grid small ring vertex
-            if (isOffGridForLonePairs) {
-              ctx.fillStyle = 'rgb(255, 140, 0)'; // Orange for off-grid small ring vertices
-            } else {
-              ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
-            }
+            // Set color for lone pair dots (blue for selected, black for normal)
+            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
             
             ctx.fill();
           }
@@ -4042,7 +4058,8 @@ const HexGridWithToolbar = () => {
       setSegments,
       setArrows,
       selectedPreset ? (() => {}) : setIsPasteMode, // Don't exit paste mode for presets
-      setSnapAlignment
+      setSnapAlignment,
+      selectedPreset // Pass selectedPreset to ensure presets are made of off-grid vertices when not snapping
     );
     
     // Run small ring off-grid vertex detection after pasting (with small delay to ensure state is updated)

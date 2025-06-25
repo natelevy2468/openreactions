@@ -350,7 +350,8 @@ export const pasteAtPosition = (
   setSegments,
   setArrows,
   setIsPasteMode,
-  setSnapAlignment
+  setSnapAlignment,
+  selectedPreset
 ) => {
   if (!clipboard) return;
   
@@ -416,7 +417,13 @@ export const pasteAtPosition = (
       
       // Create new vertex at pasted position
       // For bond snapping with small rings, only vertices not aligned with the target bond should be off-grid
+      // For presets placed without snapping, force all vertices to be off-grid
       let shouldBeOffGrid = clipVertex.isOffGrid !== undefined ? clipVertex.isOffGrid : true;
+      
+      // If this is a preset being placed without snapping, force all vertices to be off-grid
+      if (selectedPreset && !useSnapping) {
+        shouldBeOffGrid = true;
+      }
       
       if (useSnapping && snapAlignment.type === 'bond' && snapAlignment.targetBond) {
         // For bond snapping, check if this vertex is part of the bond alignment
