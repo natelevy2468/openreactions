@@ -156,8 +156,8 @@ export const analyzeOffGridReason = (vertex, segments, tolerance = 0.01) => {
  */
 export const calculateGridBreakingZones = (offGridVertices, hexRadius, options = {}) => {
   const {
-    suppressionRadiusMultiplier = 1.0, // How far to hide grid lines (reduced to match bond options)
-    bondOptionRadiusMultiplier = 1.0,   // How far to show bond options
+    suppressionRadiusMultiplier = 0.5, // How far to hide grid lines (halved for smaller deletion radius)
+    bondOptionRadiusMultiplier = 0.5,   // How far to show bond options (halved to match suppression)
     overlapMergeThreshold = 0.8         // When to merge overlapping zones
   } = options;
 

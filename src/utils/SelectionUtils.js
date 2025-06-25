@@ -354,13 +354,23 @@ export const pasteAtPosition = (
 ) => {
   if (!clipboard) return;
   
-  // Use grid snapping if available and enabled
-  const useSnapping = snapAlignment && showSnapPreview && snapAlignment.snappedCount > 0; // Use snapping if any vertices can snap
+  // Use snapping if available and enabled
+  const useSnapping = snapAlignment && showSnapPreview && (
+    (snapAlignment.snappedCount && snapAlignment.snappedCount > 0) || // Grid snapping
+    snapAlignment.type === 'bond' // Bond snapping
+  );
   let offsetX, offsetY;
   
   if (useSnapping) {
-    offsetX = x - offset.x + snapAlignment.translation.x;
-    offsetY = y - offset.y + snapAlignment.translation.y;
+    if (snapAlignment.type === 'bond') {
+      // For bond alignment, translation is already in world coordinates
+      offsetX = snapAlignment.translation.x;
+      offsetY = snapAlignment.translation.y;
+    } else {
+      // For grid alignment, combine mouse position with translation offset
+      offsetX = x - offset.x + snapAlignment.translation.x;
+      offsetY = y - offset.y + snapAlignment.translation.y;
+    }
   } else {
     offsetX = x - offset.x;
     offsetY = y - offset.y;
@@ -375,7 +385,7 @@ export const pasteAtPosition = (
   clipboard.vertices.forEach((clipVertex, index) => {
     let targetVertex;
     
-    if (useSnapping && snapAlignment.vertexMappings.has(index)) {
+    if (useSnapping && snapAlignment.vertexMappings && snapAlignment.vertexMappings.has(index)) {
       // Use existing grid vertex
       targetVertex = snapAlignment.vertexMappings.get(index);
       newVertexMap.set(index, targetVertex);
@@ -389,11 +399,50 @@ export const pasteAtPosition = (
         newVertexTypes[vertexKey] = clipVertex.type;
       }
     } else {
+      // Apply rotation if this is bond alignment
+      let finalVertex = clipVertex;
+      if (useSnapping && snapAlignment.type === 'bond') {
+        const rotationCenter = snapAlignment.rotationCenter;
+        const cos = Math.cos(snapAlignment.rotation);
+        const sin = Math.sin(snapAlignment.rotation);
+        
+        // Rotate vertex around rotation center
+        finalVertex = {
+          ...clipVertex,
+          x: (clipVertex.x - rotationCenter.x) * cos - (clipVertex.y - rotationCenter.y) * sin + rotationCenter.x,
+          y: (clipVertex.x - rotationCenter.x) * sin + (clipVertex.y - rotationCenter.y) * cos + rotationCenter.y
+        };
+      }
+      
       // Create new vertex at pasted position
+      // For bond snapping with small rings, only vertices not aligned with the target bond should be off-grid
+      let shouldBeOffGrid = clipVertex.isOffGrid !== undefined ? clipVertex.isOffGrid : true;
+      
+      if (useSnapping && snapAlignment.type === 'bond' && snapAlignment.targetBond) {
+        // For bond snapping, check if this vertex is part of the bond alignment
+        // If it aligns with the target bond, it should be on-grid; otherwise off-grid (epoxide)
+        const targetBond = snapAlignment.targetBond;
+        const vertexWorldX = offsetX + finalVertex.x;
+        const vertexWorldY = offsetY + finalVertex.y;
+        
+        // Check if this vertex is close to either end of the target bond
+        const distToStart = Math.sqrt((vertexWorldX - targetBond.x1) ** 2 + (vertexWorldY - targetBond.y1) ** 2);
+        const distToEnd = Math.sqrt((vertexWorldX - targetBond.x2) ** 2 + (vertexWorldY - targetBond.y2) ** 2);
+        const tolerance = 5; // Small tolerance for floating point comparison
+        
+        if (distToStart < tolerance || distToEnd < tolerance) {
+          // This vertex aligns with the target bond, so it should be on-grid
+          shouldBeOffGrid = false;
+        } else {
+          // This vertex doesn't align with the target bond, so it should be off-grid (epoxide)
+          shouldBeOffGrid = true;
+        }
+      }
+      
       const newVertex = {
-        x: offsetX + clipVertex.x,
-        y: offsetY + clipVertex.y,
-        isOffGrid: clipVertex.isOffGrid !== undefined ? clipVertex.isOffGrid : true // Preserve isOffGrid from clipboard, default to true for pasted vertices
+        x: offsetX + finalVertex.x,
+        y: offsetY + finalVertex.y,
+        isOffGrid: shouldBeOffGrid
       };
       
       newVertices.push(newVertex);
@@ -477,6 +526,7 @@ export const pasteAtPosition = (
   
   // Remove overlapping grid lines (bondOrder === 0) where new bonds were placed
   // This mimics the behavior when drawing bonds over grid lines
+  // Also remove the target bond for bond alignment since it becomes part of the ring
   const finalSegments = newSegments.map(segment => {
     if (segment.bondOrder > 0) {
       // This is a real bond - check if there's a grid line at the same position
@@ -507,7 +557,10 @@ export const pasteAtPosition = (
       );
       return !hasOverlappingBond; // Remove grid line if there's an overlapping bond
     }
-    return true; // Keep all real bonds
+    
+    // DON'T remove the target bond for bond alignment - it should remain as part of the structure
+    
+    return true; // Keep all other real bonds
   });
   
   // Update state

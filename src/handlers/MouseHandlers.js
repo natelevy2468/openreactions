@@ -27,6 +27,7 @@ export const handleMouseMove = (
   // Setters
   setPastePreviewPosition,
   calculateGridAlignment,
+  calculateBondAlignment,
   setSnapAlignment,
   setFourthBondPreview,
   setDidDrag,
@@ -56,9 +57,16 @@ export const handleMouseMove = (
   if (isPasteMode && !isDragging) {
     setPastePreviewPosition({ x, y });
     
-    // Calculate grid alignment for aggressive snapping (no throttling for responsiveness)
+    // Calculate alignment for snapping (no throttling for responsiveness)
     if (clipboard && clipboard.vertices && showSnapPreview) {
-      const alignment = calculateGridAlignment(clipboard.vertices, x, y);
+      // Try bond alignment first for small rings
+      let alignment = calculateBondAlignment(clipboard.vertices, x, y);
+      
+      // If no bond alignment found, try grid alignment
+      if (!alignment) {
+        alignment = calculateGridAlignment(clipboard.vertices, x, y);
+      }
+      
       setSnapAlignment(alignment);
     } else {
       setSnapAlignment(null);

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import { detectSixMemberedRings, isSegmentInRing, getRingInteriorDirection, isSpecialRingBond, getRingInfo } from './ringDetection';
+import { detectSixMemberedRings, isSegmentInRing, getRingInteriorDirection, isSpecialRingBond, getRingInfo, detectThreeMemberedRings, detectFourMemberedRings, detectFiveMemberedRings } from './ringDetection';
 import { determineVertexTypes, isTopOfHex, getType, getIfTop } from './vertexDetection';
 import { drawArrowOnCanvas, drawEquilArrowOnCanvas, drawCurvedArrowOnCanvas, calculateCurvedArrowPeak } from './rendering/ArrowRenderer';
 import { 
@@ -88,6 +88,8 @@ const HexGridWithToolbar = () => {
     gridBreakingActive: false
   });
   const [gridBreakingEnabled, setGridBreakingEnabled] = useState(false);
+  // Off-grid vertex tracking (for small rings attached to bonds: cyclopropane/epoxide, cyclobutane, cyclopentane)
+  const [epoxideVertices, setEpoxideVertices] = useState(new Set());
   // Bond preview state for off-grid vertices
   const [bondPreviews, setBondPreviews] = useState([]);
   const [hoverBondPreview, setHoverBondPreview] = useState(null);
@@ -301,7 +303,7 @@ const HexGridWithToolbar = () => {
     offGridVertices.forEach(vertex => {
       breakingZones.push({
         center: { x: vertex.x, y: vertex.y },
-        suppressionRadius: hexRadius * 1.5 // Same multiplier as used in the analysis
+        suppressionRadius: hexRadius * 0.75 // Halved to match the new analysis multiplier (0.55 scaled to match grid generation)
       });
     });
 
@@ -539,7 +541,8 @@ const HexGridWithToolbar = () => {
       freeFloatingVertices: new Set(freeFloatingVertices),
       detectedRings: JSON.parse(JSON.stringify(detectedRings)),
       verticesWith3Bonds: JSON.parse(JSON.stringify(verticesWith3Bonds)),
-      bondPreviews: JSON.parse(JSON.stringify(bondPreviews))
+      bondPreviews: JSON.parse(JSON.stringify(bondPreviews)),
+      epoxideVertices: new Set(epoxideVertices)
     };
 
     setHistory(prevHistory => {
@@ -555,78 +558,12 @@ const HexGridWithToolbar = () => {
     });
 
     setHistoryIndex(prevIndex => Math.min(prevIndex + 1, 49));
-  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, verticesWith3Bonds, bondPreviews]);
+  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, verticesWith3Bonds, bondPreviews, epoxideVertices]);
 
   // Check ALL vertices for fourth bond eligibility whenever structure changes
   useEffect(() => {
-    const checkAllVerticesForFourthBond = () => {
-      const hasAnyDoubleBonds = (vertex) => {
-        for (const seg of segments) {
-          if (seg.bondOrder >= 2) { // Double or triple bonds
-            if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
-                (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
-              return true;
-            }
-          }
-        }
-        return false;
-      };
-
-      const countSingleBonds = (vertex) => {
-        let count = 0;
-        for (const seg of segments) {
-          if (seg.bondOrder === 1) { // Only count single bonds
-            if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
-                (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
-              count++;
-            }
-          }
-        }
-        return count;
-      };
-
-      // Check all vertices (both on-grid and off-grid)
-      const qualifyingVertices = [];
-      vertices.forEach(vertex => {
-        // Check if vertex has exactly 3 single bonds and no double/triple bonds
-        if (!hasAnyDoubleBonds(vertex) && countSingleBonds(vertex) === 3) {
-          qualifyingVertices.push({
-            x: vertex.x,
-            y: vertex.y,
-            key: `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`
-          });
-        }
-      });
-
-      // Update state only if there are changes
-      setVerticesWith3Bonds(prev => {
-        // Check if the arrays are different
-        if (prev.length !== qualifyingVertices.length) {
-          return qualifyingVertices;
-        }
-        
-        // Check if all vertices are the same
-        const prevKeys = new Set(prev.map(v => v.key));
-        const newKeys = new Set(qualifyingVertices.map(v => v.key));
-        
-        for (const key of newKeys) {
-          if (!prevKeys.has(key)) {
-            return qualifyingVertices;
-          }
-        }
-        
-        for (const key of prevKeys) {
-          if (!newKeys.has(key)) {
-            return qualifyingVertices;
-          }
-        }
-        
-        return prev; // No changes needed
-      });
-    };
-
-    // Run the check whenever vertices or segments change
-    checkAllVerticesForFourthBond();
+    // Don't show indicators - they should only appear temporarily when a vertex gets its 3rd bond
+    // and be manually cleared when any other action happens
   }, [vertices, segments]);
 
   // Undo the last action
@@ -646,6 +583,7 @@ const HexGridWithToolbar = () => {
     setDetectedRings(previousState.detectedRings);
     setVerticesWith3Bonds(previousState.verticesWith3Bonds);
     setBondPreviews(previousState.bondPreviews || []);
+    setEpoxideVertices(previousState.epoxideVertices || new Set());
     setHoverBondPreview(null); // Clear hover state on undo
 
     // Update history index
@@ -682,6 +620,129 @@ const HexGridWithToolbar = () => {
     }
     return null;
   }, [segments, offset]);
+
+  // Calculate bond alignment for small rings
+  const calculateBondAlignment = useCallback((pastedVertices, clickX, clickY) => {
+    if (!pastedVertices || pastedVertices.length === 0 || !clipboard || !clipboard.segments) return null;
+    
+    // Only apply to small rings
+    if (!['cyclopropane', 'cyclobutane', 'cyclopentane'].includes(selectedPreset)) {
+      return null;
+    }
+    
+    // Find all single bonds within a reasonable distance
+    const maxDistance = 80; // Maximum distance to consider for snapping
+    const candidateBonds = [];
+    
+    segments.forEach((segment, index) => {
+      if (segment.bondOrder === 1) { // Only single bonds
+        // Calculate distance from mouse position to bond center
+        const bondCenterX = (segment.x1 + segment.x2) / 2 + offset.x;
+        const bondCenterY = (segment.y1 + segment.y2) / 2 + offset.y;
+        const distance = Math.sqrt((clickX - bondCenterX) ** 2 + (clickY - bondCenterY) ** 2);
+        
+        if (distance <= maxDistance) {
+          candidateBonds.push({ segment, index, distance });
+        }
+      }
+    });
+    
+    if (candidateBonds.length === 0) return null;
+    
+    // Sort by distance and take the closest
+    candidateBonds.sort((a, b) => a.distance - b.distance);
+    const targetBond = candidateBonds[0].segment;
+    
+    // Calculate the position and rotation needed to align the ring with this bond
+    let bestAlignment = null;
+    let bestScore = Infinity;
+    
+    clipboard.segments.forEach((ringSegment, edgeIndex) => {
+      const v1 = clipboard.vertices[ringSegment.vertex1Index];
+      const v2 = clipboard.vertices[ringSegment.vertex2Index];
+      
+      if (!v1 || !v2) return;
+      
+      // Calculate ring center in world coordinates (without offset)
+      const ringCenter = clipboard.vertices.reduce((acc, vertex) => ({
+        x: acc.x + vertex.x / clipboard.vertices.length,
+        y: acc.y + vertex.y / clipboard.vertices.length
+      }), { x: 0, y: 0 });
+      
+      // Try both orientations of the ring edge alignment
+      const orientations = [
+        { rv1: v1, rv2: v2 }, // Normal orientation
+        { rv1: v2, rv2: v1 }  // Flipped orientation
+      ];
+      
+      orientations.forEach((orientation, orientationIndex) => {
+        const { rv1, rv2 } = orientation;
+        
+        // Calculate rotation needed to align this ring edge with the target bond
+        const ringEdgeVector = { x: rv2.x - rv1.x, y: rv2.y - rv1.y };
+        const bondVector = { x: targetBond.x2 - targetBond.x1, y: targetBond.y2 - targetBond.y1 };
+        
+        const ringEdgeAngle = Math.atan2(ringEdgeVector.y, ringEdgeVector.x);
+        const bondAngle = Math.atan2(bondVector.y, bondVector.x);
+        const rotationAngle = bondAngle - ringEdgeAngle;
+        
+        // Apply rotation to edge vertices around ring center
+        const cos = Math.cos(rotationAngle);
+        const sin = Math.sin(rotationAngle);
+        
+        const rotatedV1 = {
+          x: (rv1.x - ringCenter.x) * cos - (rv1.y - ringCenter.y) * sin + ringCenter.x,
+          y: (rv1.x - ringCenter.x) * sin + (rv1.y - ringCenter.y) * cos + ringCenter.y
+        };
+        
+        const rotatedV2 = {
+          x: (rv2.x - ringCenter.x) * cos - (rv2.y - ringCenter.y) * sin + ringCenter.x,
+          y: (rv2.x - ringCenter.x) * sin + (rv2.y - ringCenter.y) * cos + ringCenter.y
+        };
+        
+        // Calculate translation needed to align rotated edge with target bond
+        // We want the rotated edge to exactly match the target bond position
+        const translation = {
+          x: targetBond.x1 - rotatedV1.x,
+          y: targetBond.y1 - rotatedV1.y
+        };
+        
+        // Verify that v2 will also align correctly
+        const finalV2X = rotatedV2.x + translation.x;
+        const finalV2Y = rotatedV2.y + translation.y;
+        const alignmentError = Math.sqrt((finalV2X - targetBond.x2) ** 2 + (finalV2Y - targetBond.y2) ** 2);
+        
+        // Score based on how well the edge aligns (smaller error = better score)
+        // Also consider distance from mouse to the ring center after transformation
+        const finalRingCenterX = ringCenter.x + translation.x;
+        const finalRingCenterY = ringCenter.y + translation.y;
+        const mouseToRingCenter = Math.sqrt(
+          ((clickX - offset.x) - finalRingCenterX) ** 2 + 
+          ((clickY - offset.y) - finalRingCenterY) ** 2
+        );
+        
+        const score = alignmentError * 100 + mouseToRingCenter; // Prioritize alignment accuracy
+        
+        if (score < bestScore) {
+          bestScore = score;
+          bestAlignment = {
+            translation: translation,
+            rotation: rotationAngle,
+            rotationCenter: ringCenter,
+            targetBondIndex: candidateBonds[0].index,
+            alignedEdgeIndex: edgeIndex,
+            targetBond: targetBond,
+            score: score,
+            alignmentError: alignmentError,
+            orientation: orientationIndex,
+            type: 'bond' // Mark this as bond alignment
+          };
+        }
+      });
+    });
+    
+    return bestAlignment;
+  }, [segments, offset, clipboard, selectedPreset]);
 
   // Calculate best alignment for pasted molecule to grid based on bond alignment
   const calculateGridAlignment = useCallback((pastedVertices, clickX, clickY) => {
@@ -1777,7 +1838,17 @@ const HexGridWithToolbar = () => {
           // Draw shadow/stroke
           ctx.strokeText(segment.text, currentX, vy + baseYOffset + yOffset);
           ctx.shadowBlur = 0;
-          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          
+          // Check if this is an off-grid vertex from small ring attachment
+          const isOffGridSmallRing = epoxideVertices.has(key);
+          
+          // Set color: orange for off-grid small ring vertices, blue for selected, black for normal
+          if (isOffGridSmallRing) {
+            ctx.fillStyle = 'rgb(255, 140, 0)'; // Orange color for off-grid small ring vertices
+          } else {
+            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          }
+          
           ctx.fillText(segment.text, currentX, vy + baseYOffset + yOffset);
           
           // Calculate width and move to next position
@@ -1901,15 +1972,24 @@ const HexGridWithToolbar = () => {
           ctx.arc(chargeX, chargeY, 8, 0, 2 * Math.PI);
           ctx.fillStyle = '#ffffff'; // Use full hex code for pure white
           ctx.fill();
-          // Add ring around the white circle (black or blue when selected)
-          ctx.strokeStyle = isSelected ? 'rgb(54,98,227)' : '#000000';
+          // Add ring around the white circle (orange for off-grid small ring, blue for selected, black for normal)
+          const isOffGridForCharge = epoxideVertices.has(key);
+          if (isOffGridForCharge) {
+            ctx.strokeStyle = 'rgb(255, 140, 0)';
+          } else {
+            ctx.strokeStyle = isSelected ? 'rgb(54,98,227)' : '#000000';
+          }
           ctx.lineWidth = 1;
           ctx.stroke();
           
           // Draw charge symbol
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          if (isOffGridForCharge) {
+            ctx.fillStyle = 'rgb(255, 140, 0)'; // Orange for off-grid small ring vertices
+          } else {
+            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          }
           
           if (atom.charge > 0) {
             // Plus sign - perfect do not change.
@@ -1925,7 +2005,14 @@ const HexGridWithToolbar = () => {
         // Draw lone pairs if present
         if (atom.lonePairs) {
           ctx.save();
-          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          
+          // Check if this is an off-grid vertex from small ring for lone pairs
+          const isOffGridForLonePairs = epoxideVertices.has(key);
+          if (isOffGridForLonePairs) {
+            ctx.fillStyle = 'rgb(255, 140, 0)'; // Orange for off-grid small ring vertices
+          } else {
+            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          }
           // Define shadow properties but they will be toggled on/off as needed
           ctx.shadowColor = 'rgba(0,0,0,0.85)';
           ctx.shadowBlur = 2;
@@ -2155,7 +2242,14 @@ const HexGridWithToolbar = () => {
             ctx.shadowBlur = 2;
             ctx.beginPath();
             ctx.arc(cx, cy, dotR, 0, 2 * Math.PI);
-            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+            
+            // Use off-grid color if this is an off-grid small ring vertex
+            if (isOffGridForLonePairs) {
+              ctx.fillStyle = 'rgb(255, 140, 0)'; // Orange for off-grid small ring vertices
+            } else {
+              ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+            }
+            
             ctx.fill();
           }
           ctx.restore();
@@ -2733,15 +2827,44 @@ const HexGridWithToolbar = () => {
         // Use snapped position if available, otherwise use mouse position
         let previewX, previewY;
         if (snapAlignment && showSnapPreview) {
-          previewX = pastePreviewPosition.x - offset.x + snapAlignment.translation.x;
-          previewY = pastePreviewPosition.y - offset.y + snapAlignment.translation.y;
+          if (snapAlignment.type === 'bond') {
+            // For bond alignment, the translation already accounts for the exact positioning
+            // Don't add mouse position since the translation is absolute
+            previewX = snapAlignment.translation.x;
+            previewY = snapAlignment.translation.y;
+          } else {
+            // For grid alignment, combine mouse position with translation offset
+            previewX = pastePreviewPosition.x - offset.x + snapAlignment.translation.x;
+            previewY = pastePreviewPosition.y - offset.y + snapAlignment.translation.y;
+          }
         } else {
           previewX = pastePreviewPosition.x - offset.x;
           previewY = pastePreviewPosition.y - offset.y;
         }
         
+        // Highlight the target bond for bond alignment
+        if (snapAlignment && showSnapPreview && snapAlignment.type === 'bond' && snapAlignment.targetBond) {
+          ctx.save();
+          ctx.globalAlpha = 0.8;
+          ctx.strokeStyle = '#4CAF50'; // Green for bond snap target
+          ctx.lineWidth = 6; // Thicker highlight
+          
+          const targetBond = snapAlignment.targetBond;
+          const bx1 = targetBond.x1 + offset.x;
+          const by1 = targetBond.y1 + offset.y;
+          const bx2 = targetBond.x2 + offset.x;
+          const by2 = targetBond.y2 + offset.y;
+          
+          ctx.beginPath();
+          ctx.moveTo(bx1, by1);
+          ctx.lineTo(bx2, by2);
+          ctx.stroke();
+          
+          ctx.restore();
+        }
+        
         // Highlight the target grid vertex closest to molecule center
-        if (snapAlignment && showSnapPreview && snapAlignment.vertexMappings.size > 0) {
+        if (snapAlignment && showSnapPreview && snapAlignment.vertexMappings && snapAlignment.vertexMappings.size > 0) {
           ctx.save();
           ctx.globalAlpha = 0.8;
           ctx.fillStyle = '#4CAF50'; // Green for snap target
@@ -2792,8 +2915,26 @@ const HexGridWithToolbar = () => {
         
         // Draw preview vertices with atoms
         clipboard.vertices.forEach((vertex, vertexIndex) => {
-          const vx = previewX + vertex.x;
-          const vy = previewY + vertex.y;
+          let vx, vy;
+          
+          // Apply rotation if this is bond alignment
+          if (snapAlignment && snapAlignment.type === 'bond') {
+            const rotationCenter = snapAlignment.rotationCenter;
+            const cos = Math.cos(snapAlignment.rotation);
+            const sin = Math.sin(snapAlignment.rotation);
+            
+            // Rotate vertex around rotation center
+            const rotatedVertex = {
+              x: (vertex.x - rotationCenter.x) * cos - (vertex.y - rotationCenter.y) * sin + rotationCenter.x,
+              y: (vertex.x - rotationCenter.x) * sin + (vertex.y - rotationCenter.y) * cos + rotationCenter.y
+            };
+            
+            vx = previewX + rotatedVertex.x;
+            vy = previewY + rotatedVertex.y;
+          } else {
+            vx = previewX + vertex.x;
+            vy = previewY + vertex.y;
+          }
           
           // Draw atom label with exact same logic as main rendering
           if (vertex.atom) {
@@ -2934,19 +3075,52 @@ const HexGridWithToolbar = () => {
           const v1 = clipboard.vertices[segment.vertex1Index];
           const v2 = clipboard.vertices[segment.vertex2Index];
           if (v1 && v2) {
-            const x1 = previewX + v1.x + offset.x;
-            const y1 = previewY + v1.y + offset.y;
-            const x2 = previewX + v2.x + offset.x;
-            const y2 = previewY + v2.y + offset.y;
+            let x1, y1, x2, y2;
+            
+            // Apply rotation if this is bond alignment
+            if (snapAlignment && snapAlignment.type === 'bond') {
+              const rotationCenter = snapAlignment.rotationCenter;
+              const cos = Math.cos(snapAlignment.rotation);
+              const sin = Math.sin(snapAlignment.rotation);
+              
+              // Rotate v1 around rotation center
+              const rotatedV1 = {
+                x: (v1.x - rotationCenter.x) * cos - (v1.y - rotationCenter.y) * sin + rotationCenter.x,
+                y: (v1.x - rotationCenter.x) * sin + (v1.y - rotationCenter.y) * cos + rotationCenter.y
+              };
+              
+              // Rotate v2 around rotation center
+              const rotatedV2 = {
+                x: (v2.x - rotationCenter.x) * cos - (v2.y - rotationCenter.y) * sin + rotationCenter.x,
+                y: (v2.x - rotationCenter.x) * sin + (v2.y - rotationCenter.y) * cos + rotationCenter.y
+              };
+              
+              x1 = previewX + rotatedV1.x + offset.x;
+              y1 = previewY + rotatedV1.y + offset.y;
+              x2 = previewX + rotatedV2.x + offset.x;
+              y2 = previewY + rotatedV2.y + offset.y;
+            } else {
+              x1 = previewX + v1.x + offset.x;
+              y1 = previewY + v1.y + offset.y;
+              x2 = previewX + v2.x + offset.x;
+              y2 = previewY + v2.y + offset.y;
+            }
             
             // Check if this bond aligns with a grid line when snapping is enabled
             let bondColor = '#888'; // Default gray
             if (snapAlignment && showSnapPreview && segment.bondOrder > 0) {
-              const matchingGridLine = findMatchingGridLine(x1, y1, x2, y2);
-              if (matchingGridLine) {
-                bondColor = '#4CAF50'; // Green for aligned bonds
+              if (snapAlignment.type === 'bond') {
+                // For bond alignment, highlight the edge that aligns with the target bond
+                const isAlignedEdge = snapAlignment.alignedEdgeIndex === clipboard.segments.indexOf(segment);
+                bondColor = isAlignedEdge ? '#4CAF50' : '#888'; // Green for aligned edge, gray for others
               } else {
-                bondColor = '#F44336'; // Red for non-aligned bonds
+                // For grid alignment, check grid line matching
+                const matchingGridLine = findMatchingGridLine(x1, y1, x2, y2);
+                if (matchingGridLine) {
+                  bondColor = '#4CAF50'; // Green for aligned bonds
+                } else {
+                  bondColor = '#F44336'; // Red for non-aligned bonds
+                }
               }
             }
             
@@ -3360,7 +3534,7 @@ const HexGridWithToolbar = () => {
       });
       ctx.restore();
     }
-  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, countBondsAtVertexForSnapping, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition, snapAlignment, showSnapPreview, gridBreakingEnabled, gridBreakingAnalysis]);
+  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, countBondsAtVertexForSnapping, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition, snapAlignment, showSnapPreview, gridBreakingEnabled, gridBreakingAnalysis, epoxideVertices]);
 
   // Check if a point is inside a blue circle indicator
   const isPointInIndicator = useCallback((x, y) => {
@@ -3542,7 +3716,9 @@ const HexGridWithToolbar = () => {
   const generateCyclopentanePreset = useCallback(() => {
     const cyclopentaneVertices = [];
     const cyclopentaneSegments = [];
-    const radius = hexRadius * 0.8; // Slightly smaller than hexagons
+    // For a regular pentagon with bond length L, circumradius = L / (2 * sin(π/5))
+    // Since hexRadius is our standard bond length, use it as L
+    const radius = hexRadius / (2 * Math.sin(Math.PI / 5)); // ≈ hexRadius * 0.851
     
     // Create 5 vertices in a regular pentagon pattern
     for (let i = 0; i < 5; i++) {
@@ -3553,7 +3729,7 @@ const HexGridWithToolbar = () => {
       cyclopentaneVertices.push({
         x: x,
         y: y,
-        isOffGrid: true // Cyclopentane vertices are off-grid
+        isOffGrid: false // Cyclopentane vertices are treated as on-grid
       });
     }
     
@@ -3592,7 +3768,9 @@ const HexGridWithToolbar = () => {
   const generateCyclobutanePreset = useCallback(() => {
     const cyclobutaneVertices = [];
     const cyclobutaneSegments = [];
-    const radius = hexRadius * 0.6; // Smaller than cyclopentane for 4-membered ring
+    // For a regular square with bond length L, circumradius = L / (2 * sin(π/4)) = L / √2
+    // Since hexRadius is our standard bond length, use it as L
+    const radius = hexRadius / (2 * Math.sin(Math.PI / 4)); // = hexRadius / √2 ≈ hexRadius * 0.707
     
     // Create 4 vertices in a regular square pattern
     for (let i = 0; i < 4; i++) {
@@ -3603,7 +3781,7 @@ const HexGridWithToolbar = () => {
       cyclobutaneVertices.push({
         x: x,
         y: y,
-        isOffGrid: true // Cyclobutane vertices are off-grid
+        isOffGrid: false // Cyclobutane vertices are treated as on-grid
       });
     }
     
@@ -3642,7 +3820,9 @@ const HexGridWithToolbar = () => {
   const generateCyclopropanePreset = useCallback(() => {
     const cyclopropaneVertices = [];
     const cyclopropaneSegments = [];
-    const radius = hexRadius * 0.45; // Even smaller for 3-membered ring
+    // For a regular triangle with bond length L, circumradius = L / (2 * sin(π/3)) = L / √3
+    // Since hexRadius is our standard bond length, use it as L
+    const radius = hexRadius / (2 * Math.sin(Math.PI / 3)); // = hexRadius / √3 ≈ hexRadius * 0.577
     
     // Create 3 vertices in a regular triangle pattern
     for (let i = 0; i < 3; i++) {
@@ -3653,7 +3833,7 @@ const HexGridWithToolbar = () => {
       cyclopropaneVertices.push({
         x: x,
         y: y,
-        isOffGrid: true // Cyclopropane vertices are off-grid
+        isOffGrid: false // Cyclopropane vertices are treated as on-grid
       });
     }
     
@@ -3746,6 +3926,98 @@ const HexGridWithToolbar = () => {
     selectPreset('cyclopropane', cyclopropaneData);
   }, [selectPreset, generateCyclopropanePreset]);
 
+  // Function to detect off-grid vertices in small rings (cyclopropane, cyclobutane, cyclopentane) attached to bonds
+  const detectEpoxideVertices = useCallback(() => {
+    console.log('🔍 Running small ring off-grid vertex detection...');
+    
+    // Find all small rings (3, 4, and 5-membered)
+    const threeMemberedRings = detectThreeMemberedRings(vertices, segments, vertexAtoms);
+    const fourMemberedRings = detectFourMemberedRings(vertices, segments, vertexAtoms);
+    const fiveMemberedRings = detectFiveMemberedRings(vertices, segments, vertexAtoms);
+    
+    console.log('🔺 Found rings:', {
+      cyclopropane: threeMemberedRings.length,
+      cyclobutane: fourMemberedRings.length, 
+      cyclopentane: fiveMemberedRings.length
+    });
+    
+    // Combine all small rings with their types
+    const allSmallRings = [
+      ...threeMemberedRings.map(ring => ({ ring, type: 'cyclopropane', size: 3 })),
+      ...fourMemberedRings.map(ring => ({ ring, type: 'cyclobutane', size: 4 })),
+      ...fiveMemberedRings.map(ring => ({ ring, type: 'cyclopentane', size: 5 }))
+    ];
+    
+    if (allSmallRings.length === 0) {
+      return;
+    }
+    
+    const newEpoxideVertices = new Set();
+    
+    // For each small ring, check if it's attached to an existing bond
+    allSmallRings.forEach(({ ring, type, size }, ringIndex) => {
+      // Check if this ring already has off-grid vertices detected
+      const alreadyHasOffGrid = ring.some(vertexKey => epoxideVertices.has(vertexKey));
+      if (alreadyHasOffGrid) {
+        return; // Skip this ring
+      }
+      
+      const ringVertexKeys = ring;
+      const attachmentBonds = [];
+      
+      // Find bonds that connect ring vertices to external vertices
+      for (const segment of segments) {
+        if (segment.bondOrder > 0) {
+          const seg1Key = `${segment.x1.toFixed(2)},${segment.y1.toFixed(2)}`;
+          const seg2Key = `${segment.x2.toFixed(2)},${segment.y2.toFixed(2)}`;
+          
+          // Check if this bond has one vertex in the ring and one outside
+          const v1InRing = ringVertexKeys.includes(seg1Key);
+          const v2InRing = ringVertexKeys.includes(seg2Key);
+          
+          if ((v1InRing && !v2InRing) || (!v1InRing && v2InRing)) {
+            attachmentBonds.push({
+              ringVertexKey: v1InRing ? seg1Key : seg2Key,
+              externalVertexKey: v1InRing ? seg2Key : seg1Key
+            });
+          }
+        }
+      }
+      
+      if (attachmentBonds.length > 0) {
+        // Get the vertices that are involved in attachment bonds
+        const attachedVertexKeys = new Set(attachmentBonds.map(bond => bond.ringVertexKey));
+        
+        // The off-grid vertices are those NOT involved in attachment bonds
+        const offGridVertexKeys = ringVertexKeys.filter(key => !attachedVertexKeys.has(key));
+        
+        offGridVertexKeys.forEach(offGridKey => {
+          console.log(`🔶 FOUND OFF-GRID VERTEX in ${type}: ${offGridKey}`);
+          newEpoxideVertices.add(offGridKey);
+        });
+        
+        console.log(`🔶 ${type} ring: ${offGridVertexKeys.length} off-grid vertices, ${attachedVertexKeys.size} on-bond vertices`);
+      }
+    });
+    
+    // Update state if we found new off-grid vertices
+    if (newEpoxideVertices.size > 0) {
+      console.log(`🔶 UPDATING STATE: Found ${newEpoxideVertices.size} off-grid vertices in small rings`);
+      setEpoxideVertices(prev => new Set([...prev, ...newEpoxideVertices]));
+      
+      // Update vertex types for the new off-grid vertices
+      setVertexTypes(prev => {
+        const newTypes = { ...prev };
+        newEpoxideVertices.forEach(key => {
+          // Set appropriate type based on the ring it belongs to
+          // For now, we'll use 'epoxide' for all, but this could be made more specific
+          newTypes[key] = 'epoxide';
+        });
+        return newTypes;
+      });
+    }
+  }, [vertices, segments, vertexAtoms, epoxideVertices]);
+
   // Paste clipboard contents at given position
   const pasteAtPosition = useCallback((x, y) => {
     // Capture state before pasting
@@ -3772,7 +4044,10 @@ const HexGridWithToolbar = () => {
       selectedPreset ? (() => {}) : setIsPasteMode, // Don't exit paste mode for presets
       setSnapAlignment
     );
-  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState, selectedPreset]);
+    
+    // Run small ring off-grid vertex detection after pasting (with small delay to ensure state is updated)
+    setTimeout(detectEpoxideVertices, 10);
+  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState, selectedPreset, detectEpoxideVertices]);
 
   // Set mode (draw/erase/arrow/text/etc.) - must be defined before setModeAndClearSelection
   const selectMode = (m) => {
@@ -3965,11 +4240,12 @@ const HexGridWithToolbar = () => {
     setDetectedRings(ringInfo.rings);
     
     // For debugging (can be removed in production)
-
     if (ringInfo.rings.length > 0) {
-      // Rings detected
+      console.log('🔍 Rings detected, running epoxide detection...');
+      // Run epoxide detection after rings are detected
+      setTimeout(detectEpoxideVertices, 0);
     }
-  }, [vertices, segments, vertexAtoms]);
+  }, [vertices, segments, vertexAtoms, detectEpoxideVertices]);
 
   // Function to analyze grid breaking whenever molecules change
   const analyzeGridBreakingState = useCallback(() => {
@@ -3991,8 +4267,8 @@ const HexGridWithToolbar = () => {
       hexRadius,
       {
         tolerance: 8, // Slightly more tolerance than the default 5
-        suppressionRadiusMultiplier: 1.0, // Reduced to match bond option radius (blue circle)
-        bondOptionRadiusMultiplier: 1.0,
+        suppressionRadiusMultiplier: 0.55, // Halved from 1.1 to reduce deletion radius
+        bondOptionRadiusMultiplier: 0.5, // Halved to match suppression zone
         overlapMergeThreshold: 0.8
       }
     );
@@ -4090,7 +4366,65 @@ const HexGridWithToolbar = () => {
           );
           
           // Update state
-          setSegments(prevSegments => [...prevSegments, newBond]);
+          setSegments(prevSegments => {
+            const updatedSegments = [...prevSegments, newBond];
+            
+            // Check for fourth bond indicators after adding the bond
+            const hasAnyDoubleBonds = (vertex) => {
+              for (const seg of updatedSegments) {
+                if (seg.bondOrder >= 2) { // Double or triple bonds
+                  if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
+                      (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
+                    return true;
+                  }
+                }
+              }
+              return false;
+            };
+
+            const countSingleBonds = (vertex) => {
+              let count = 0;
+              for (const seg of updatedSegments) {
+                if (seg.bondOrder === 1) { // Only count single bonds
+                  if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
+                      (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
+                    count++;
+                  }
+                }
+              }
+              return count;
+            };
+            
+            // Check both vertices of the new bond
+            const v1 = { x: newBond.x1, y: newBond.y1 };
+            const v2 = { x: newBond.x2, y: newBond.y2 };
+            
+            const v1Qualifies = !hasAnyDoubleBonds(v1) && countSingleBonds(v1) === 3;
+            const v2Qualifies = !hasAnyDoubleBonds(v2) && countSingleBonds(v2) === 3;
+            
+            if (v1Qualifies || v2Qualifies) {
+              const newVerticesWith3Bonds = [];
+              if (v1Qualifies) {
+                newVerticesWith3Bonds.push({
+                  x: v1.x,
+                  y: v1.y,
+                  key: `${v1.x.toFixed(2)},${v1.y.toFixed(2)}`
+                });
+              }
+              if (v2Qualifies) {
+                newVerticesWith3Bonds.push({
+                  x: v2.x,
+                  y: v2.y,
+                  key: `${v2.x.toFixed(2)},${v2.y.toFixed(2)}`
+                });
+              }
+              setVerticesWith3Bonds(newVerticesWith3Bonds);
+            } else {
+              setVerticesWith3Bonds([]);
+            }
+            
+            return updatedSegments;
+          });
           
           if (!vertexExists) {
             setVertices(prevVertices => [...prevVertices, newVertex]);
@@ -4660,11 +4994,10 @@ const HexGridWithToolbar = () => {
             const v1 = { x: segment.x1, y: segment.y1 };
             const v2 = { x: segment.x2, y: segment.y2 };
             
-            // Create a temporary function to count single bonds for these specific vertices
             // Create functions to check bond conditions
             const hasAnyDoubleBonds = (vertex) => {
               for (const seg of updatedSegments) {
-                if (seg.bondOrder === 2) {
+                if (seg.bondOrder >= 2) { // Double or triple bonds
                   if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
                       (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
                     return true;
@@ -5176,6 +5509,7 @@ const HexGridWithToolbar = () => {
       // Setters
       setPastePreviewPosition,
       calculateGridAlignment,
+      calculateBondAlignment,
       setSnapAlignment,
       setFourthBondPreview,
       setDidDrag,
@@ -5356,7 +5690,7 @@ const HexGridWithToolbar = () => {
     }
   }, [vertices, history.length, captureState]);
 
-  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow, bondPreviews, hoverBondPreview]);
+  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow, bondPreviews, hoverBondPreview, epoxideVertices]);
 
   // Erase all handler
   const handleEraseAll = () => {
@@ -7105,11 +7439,14 @@ const HexGridWithToolbar = () => {
             {selectedPreset ? (
               `Preset: ${selectedPreset.charAt(0).toUpperCase() + selectedPreset.slice(1)}`
             ) : (
-              showSnapPreview ? 'Grid Snap: ON' : 'Grid Snap: OFF'
+              showSnapPreview ? (
+                snapAlignment && snapAlignment.type === 'bond' ? 'Bond Snap: ON' : 'Grid Snap: ON'
+              ) : 'Grid Snap: OFF'
             )}
           </div>
           <div style={{ fontSize: '12px', opacity: '0.9' }}>
-            {(selectedPreset === 'cyclopentane' || selectedPreset === 'cyclobutane' || selectedPreset === 'cyclopropane') ? 'No grid snap (small ring)' : 
+            {(selectedPreset === 'cyclopentane' || selectedPreset === 'cyclobutane' || selectedPreset === 'cyclopropane') ? 
+             (snapAlignment && snapAlignment.type === 'bond' ? 'Snapping to bond' : 'Move near bond to snap') : 
              selectedPreset ? 'Click to place multiple' : 'Press G to toggle'}
           </div>
           {snapAlignment && showSnapPreview && !selectedPreset && (
@@ -7119,7 +7456,8 @@ const HexGridWithToolbar = () => {
               padding: '2px 6px', 
               borderRadius: '4px' 
             }}>
-              {snapAlignment.alignedBonds || 0}/{snapAlignment.totalBonds || 0} bonds aligned
+              {snapAlignment.type === 'bond' ? 'Ring will include bond' : 
+               `${snapAlignment.alignedBonds || 0}/${snapAlignment.totalBonds || 0} bonds aligned`}
             </div>
           )}
         </div>
