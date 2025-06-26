@@ -815,22 +815,22 @@ const HexGridWithToolbar = () => {
       return null;
     }
     
-    // Find all single bonds within a reasonable distance
-    const maxDistance = 80; // Maximum distance to consider for snapping
-    const candidateBonds = [];
-    
-    segments.forEach((segment, index) => {
-      if (segment.bondOrder === 1) { // Only single bonds
-        // Calculate distance from mouse position to bond center
-        const bondCenterX = (segment.x1 + segment.x2) / 2 + offset.x;
-        const bondCenterY = (segment.y1 + segment.y2) / 2 + offset.y;
-        const distance = Math.sqrt((clickX - bondCenterX) ** 2 + (clickY - bondCenterY) ** 2);
-        
-        if (distance <= maxDistance) {
-          candidateBonds.push({ segment, index, distance });
-        }
+      // Find all single and double bonds within a reasonable distance
+  const maxDistance = 80; // Maximum distance to consider for snapping
+  const candidateBonds = [];
+  
+  segments.forEach((segment, index) => {
+    if (segment.bondOrder === 1 || segment.bondOrder === 2) { // Single and double bonds
+      // Calculate distance from mouse position to bond center
+      const bondCenterX = (segment.x1 + segment.x2) / 2 + offset.x;
+      const bondCenterY = (segment.y1 + segment.y2) / 2 + offset.y;
+      const distance = Math.sqrt((clickX - bondCenterX) ** 2 + (clickY - bondCenterY) ** 2);
+      
+      if (distance <= maxDistance) {
+        candidateBonds.push({ segment, index, distance });
       }
-    });
+    }
+  });
     
     if (candidateBonds.length === 0) return null;
     
@@ -1253,7 +1253,7 @@ const HexGridWithToolbar = () => {
         if (isSelected) {
           ctx.strokeStyle = 'rgb(54,98,227)';
         } else if (isHoveredSingleBond) {
-          ctx.strokeStyle = 'rgb(54, 227, 112)'; // Blue highlight for single bonds that can become double bonds
+          ctx.strokeStyle = 'rgb(8, 167, 61)'; // Blue highlight for single bonds that can become double bonds
         } else {
           ctx.strokeStyle = '#000000';
         }
@@ -2684,8 +2684,8 @@ const HexGridWithToolbar = () => {
 
 
 
-    // Draw fourth bond preview if in fourth bond mode or draw mode with source
-    if ((fourthBondMode || (mode === 'draw' && fourthBondSource)) && fourthBondPreview) {
+    // Draw fourth bond preview if in fourth bond mode or draw/stereochemistry mode with source
+    if ((fourthBondMode || ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && fourthBondSource)) && fourthBondPreview) {
       ctx.save();
       
       const sx1 = fourthBondPreview.startX;
@@ -3888,6 +3888,7 @@ const HexGridWithToolbar = () => {
   const cancelPasteMode = useCallback(() => {
     cancelPasteModeUtil(setIsPasteMode, setSnapAlignment);
     setSelectedPreset(null); // Deselect any active preset
+    setMode('draw'); // Return to draw mode when canceling paste
   }, []);
 
   // Generate benzene preset data
@@ -4169,13 +4170,23 @@ const HexGridWithToolbar = () => {
       setSnapAlignment(null);
       setMode('draw'); // Return to draw mode
     } else {
-      // Deselect any other preset first
-      if (selectedPreset) {
-        setSelectedPreset(null);
-        setIsPasteMode(false);
-        setClipboard(null);
-        setSnapAlignment(null);
-      }
+      // Clear any existing selection first (ensures mutual exclusivity)
+      clearSelection();
+      
+      // Clear any drawing-in-progress states
+      setCurvedArrowStartPoint(null);
+      setArrowPreview(null);
+      setFourthBondSource(null);
+      setFourthBondPreview(null);
+      
+      // Clear other UI states
+      setShowMenu(false);
+      setShowAtomInput(false);
+      setIsSelecting(false);
+      setSelectionStart({ x: 0, y: 0 });
+      setSelectionEnd({ x: 0, y: 0 });
+      setHoverVertex(null);
+      setHoverSegmentIndex(null);
       
       // Select new preset
       setSelectedPreset(presetName);
@@ -4183,7 +4194,6 @@ const HexGridWithToolbar = () => {
       setIsPasteMode(true);
       setSnapAlignment(null);
       setMode('preset'); // Set mode to preset
-      clearSelection(); // Clear any existing selection
     }
   }, [selectedPreset, clearSelection]);
 
@@ -4353,8 +4363,8 @@ const HexGridWithToolbar = () => {
     setCurvedArrowStartPoint(null);
     setArrowPreview(null);
     
-    // Clear fourth bond source when switching away from draw or triple mode
-    if (m !== 'draw' && m !== 'triple') {
+    // Clear fourth bond source when switching away from draw, triple, or stereochemistry modes
+    if (m !== 'draw' && m !== 'triple' && m !== 'wedge' && m !== 'dash' && m !== 'ambiguous') {
       setFourthBondSource(null);
       setFourthBondPreview(null);
     }
@@ -4368,13 +4378,11 @@ const HexGridWithToolbar = () => {
     setHoverVertex(null);
     setHoverSegmentIndex(null);
     
-    // Clear preset states when switching to any non-preset mode
-    if (selectedPreset) {
-      setSelectedPreset(null);
-      setIsPasteMode(false);
-      setClipboard(null);
-      setSnapAlignment(null);
-    }
+    // Always clear preset states when switching to any regular mode (ensures mutual exclusivity)
+    setSelectedPreset(null);
+    setIsPasteMode(false);
+    setClipboard(null);
+    setSnapAlignment(null);
     
     // Update mode
     setMode(m);
@@ -4597,8 +4605,8 @@ const HexGridWithToolbar = () => {
       return; // Exit early, paste is handled elsewhere
     }
 
-    // Handle fourth bond confirmation in draw mode (any click confirms the spinning preview)
-    if (mode === 'draw' && fourthBondSource && fourthBondPreview) {
+    // Handle fourth bond confirmation in draw mode and stereochemistry modes (any click confirms the spinning preview)
+    if ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && fourthBondSource && fourthBondPreview) {
       // Capture state before creating fourth bond
       captureState();
       
@@ -4635,19 +4643,20 @@ const HexGridWithToolbar = () => {
         });
       }
       
-      const direction = calculateBondDirection(fourthBondSource.x, fourthBondSource.y, endX, endY);
-      const bondOrder = mode === 'triple' ? 3 : 1; // Triple bond in triple mode, single bond otherwise
-      const newBond = {
-        x1: fourthBondSource.x,
-        y1: fourthBondSource.y,
-        x2: endX,
-        y2: endY,
-        bondOrder: bondOrder,
-        bondType: null,
-        bondDirection: 1,
-        direction: direction,
-        flipSmallerLine: false
-      };
+              const direction = calculateBondDirection(fourthBondSource.x, fourthBondSource.y, endX, endY);
+        const bondOrder = mode === 'triple' ? 3 : 1; // Triple bond in triple mode, single bond otherwise
+        const bondType = ['wedge', 'dash', 'ambiguous'].includes(mode) ? mode : null; // Apply stereochemistry if in stereochemistry mode
+        const newBond = {
+          x1: fourthBondSource.x,
+          y1: fourthBondSource.y,
+          x2: endX,
+          y2: endY,
+          bondOrder: bondOrder,
+          bondType: bondType,
+          bondDirection: 1,
+          direction: direction,
+          flipSmallerLine: false
+        };
       
       setSegments(prevSegments => [...prevSegments, newBond]);
       
@@ -4674,74 +4683,68 @@ const HexGridWithToolbar = () => {
         }
       }
       if (nearestVertex) {
-        // In draw or triple mode, implement freebond functionality with spinnable preview
-        if (mode === 'draw' || mode === 'triple') {
-          // If we don't have a source yet, set this vertex as the source and start spinning preview
-          if (!fourthBondSource) {
-            setFourthBondSource(nearestVertex);
-            setFourthBondMode(true); // Activate fourth bond mode for preview
-            
-            // Generate initial preview pointing toward the click position
-            const sourceScreenX = nearestVertex.x + offset.x;
-            const sourceScreenY = nearestVertex.y + offset.y;
-            const dx = x - sourceScreenX;
-            const dy = y - sourceScreenY;
-            const length = Math.sqrt(dx * dx + dy * dy);
-            
-            // If click is very close to vertex, default to pointing right
-            let endX, endY;
-            if (length < 10) {
-              endX = sourceScreenX + hexRadius;
-              endY = sourceScreenY;
-            } else {
-              // Point toward click position at hexRadius distance
-              const ux = dx / length;
-              const uy = dy / length;
-              endX = sourceScreenX + ux * hexRadius;
-              endY = sourceScreenY + uy * hexRadius;
-            }
-            
-            // Find closest grid vertex for snapping
-            const gridX = endX - offset.x;
-            const gridY = endY - offset.y;
-            const closestGrid = findClosestGridVertex(gridX, gridY, 30);
-            
-            setFourthBondPreview({
-              startX: sourceScreenX,
-              startY: sourceScreenY,
-              endX: endX,
-              endY: endY,
-              snappedToGrid: !!closestGrid,
-              snappedToVertex: !!closestGrid
-            });
-            
-            return; // Exit early, freebond source set
-          }
-          // If we already have a source, any click (including on the same vertex) will be handled
-          // by the fourth bond confirmation logic above, so we don't need to do anything here
-          // Just return to let the confirmation logic handle it
-          return;
-        } else {
-          // In stereochemistry modes, still allow text editing
-          const key = `${nearestVertex.x.toFixed(2)},${nearestVertex.y.toFixed(2)}`;
-          setMenuVertexKey(key);
+        // All modes (draw, triple, and stereochemistry) implement freebond functionality with spinnable preview
+        // If we don't have a source yet, set this vertex as the source and start spinning preview
+        if (!fourthBondSource) {
+          setFourthBondSource(nearestVertex);
+          setFourthBondMode(true); // Activate fourth bond mode for preview
           
-          // Position the input box at the vertex position
-          setAtomInputPosition({ x: nearestVertex.x + offset.x, y: nearestVertex.y + offset.y });
+          // Generate initial preview pointing toward the click position
+          const sourceScreenX = nearestVertex.x + offset.x;
+          const sourceScreenY = nearestVertex.y + offset.y;
+          const dx = x - sourceScreenX;
+          const dy = y - sourceScreenY;
+          const length = Math.sqrt(dx * dx + dy * dy);
           
-          // Set initial value if there's an existing atom
-          const existingAtom = vertexAtoms[key];
-          if (existingAtom) {
-            const symbol = existingAtom.symbol || existingAtom;
-            setAtomInputValue(symbol);
+          // If click is very close to vertex, default to pointing right
+          let endX, endY;
+          if (length < 10) {
+            endX = sourceScreenX + hexRadius;
+            endY = sourceScreenY;
           } else {
-            setAtomInputValue('');
+            // Point toward click position at hexRadius distance
+            const ux = dx / length;
+            const uy = dy / length;
+            endX = sourceScreenX + ux * hexRadius;
+            endY = sourceScreenY + uy * hexRadius;
           }
           
-          // Show the input box instead of menu
-          setShowAtomInput(true);
-          return; // Exit early, vertex click handled
+          // Find closest vertex for snapping with different tolerances for grid vs off-grid vertices
+          const gridX = endX - offset.x;
+          const gridY = endY - offset.y;
+          
+          // First try to find off-grid vertices with tight tolerance (exact clicking)
+          let closestGrid = null;
+          for (const vertex of vertices) {
+            if (vertex.isOffGrid === true) {
+              const distance = Math.sqrt((vertex.x - gridX) ** 2 + (vertex.y - gridY) ** 2);
+              if (distance <= 8) { // Very tight tolerance for off-grid vertices
+                closestGrid = { vertex, distance };
+                break;
+              }
+            }
+          }
+          
+          // If no off-grid vertex found, try grid vertices with normal tolerance
+          if (!closestGrid) {
+            closestGrid = findClosestGridVertex(gridX, gridY, 30);
+          }
+          
+          setFourthBondPreview({
+            startX: sourceScreenX,
+            startY: sourceScreenY,
+            endX: endX,
+            endY: endY,
+            snappedToGrid: !!closestGrid,
+            snappedToVertex: !!closestGrid
+          });
+          
+          return; // Exit early, freebond source set
         }
+        // If we already have a source, any click (including on the same vertex) will be handled
+        // by the fourth bond confirmation logic above, so we don't need to do anything here
+        // Just return to let the confirmation logic handle it
+        return;
       }
     }
 
@@ -4800,8 +4803,8 @@ const HexGridWithToolbar = () => {
       }
     }
 
-    // Handle fourth bond mode (triggered by blue triangle) or draw mode with source
-    if (fourthBondMode || (mode === 'draw' && fourthBondSource)) {
+    // Handle fourth bond mode (triggered by blue triangle) or draw/stereochemistry mode with source
+    if (fourthBondMode || ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && fourthBondSource)) {
       if (fourthBondPreview) {
         // Capture state before creating fourth bond
         captureState();
@@ -5594,14 +5597,14 @@ const HexGridWithToolbar = () => {
         return;
       }
       
-      // If we reach here in draw mode and have a fourth bond source but no preview, clear it
-      if (mode === 'draw' && fourthBondSource) {
+      // If we reach here in draw or stereochemistry mode and have a fourth bond source but no preview, clear it
+      if ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && fourthBondSource) {
         setFourthBondSource(null);
         setFourthBondPreview(null);
       }
       
-      // In draw or triple mode, if clicking on empty space, find closest vertex and start bond preview
-      if ((mode === 'draw' || mode === 'triple') && !fourthBondSource) {
+      // In draw, triple, or stereochemistry mode, if clicking on empty space, find closest vertex and start bond preview
+      if ((mode === 'draw' || mode === 'triple' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && !fourthBondSource) {
         // Find the closest vertex to the click position
         let closestVertex = null;
         let minDistance = Infinity;
@@ -5633,10 +5636,26 @@ const HexGridWithToolbar = () => {
           const endX = sourceScreenX + ux * hexRadius;
           const endY = sourceScreenY + uy * hexRadius;
           
-          // Find closest grid vertex for snapping
+          // Find closest vertex for snapping with different tolerances for grid vs off-grid vertices
           const gridX = endX - offset.x;
           const gridY = endY - offset.y;
-          const closestGrid = findClosestGridVertex(gridX, gridY, 30);
+          
+          // First try to find off-grid vertices with tight tolerance (exact clicking)
+          let closestGrid = null;
+          for (const vertex of vertices) {
+            if (vertex.isOffGrid === true) {
+              const distance = Math.sqrt((vertex.x - gridX) ** 2 + (vertex.y - gridY) ** 2);
+              if (distance <= 8) { // Very tight tolerance for off-grid vertices
+                closestGrid = { vertex, distance };
+                break;
+              }
+            }
+          }
+          
+          // If no off-grid vertex found, try grid vertices with normal tolerance
+          if (!closestGrid) {
+            closestGrid = findClosestGridVertex(gridX, gridY, 30);
+          }
           
           setFourthBondPreview({
             startX: sourceScreenX,
@@ -6387,8 +6406,8 @@ const HexGridWithToolbar = () => {
       setCurvedArrowStartPoint(null);
     }
     
-    // Clear fourth bond state when switching away from draw or triple mode
-    if (mode !== 'draw' && mode !== 'triple') {
+    // Clear fourth bond state when switching away from draw, triple, or stereochemistry modes
+    if (mode !== 'draw' && mode !== 'triple' && mode !== 'wedge' && mode !== 'dash' && mode !== 'ambiguous') {
       setFourthBondSource(null);
       setFourthBondPreview(null);
     }
@@ -6593,16 +6612,7 @@ const HexGridWithToolbar = () => {
         {/* Draw/Erase Buttons as icon buttons side by side */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0 }}>
           <button
-            onClick={() => {
-              // Explicitly clear any active preset when selecting draw mode
-              if (selectedPreset) {
-                setSelectedPreset(null);
-                setIsPasteMode(false);
-                setClipboard(null);
-                setSnapAlignment(null);
-              }
-              setModeAndClearSelection('draw');
-            }}
+            onClick={() => setModeAndClearSelection('draw')}
             className="toolbar-button"
             style={{
               flex: 1,
@@ -8061,7 +8071,15 @@ const HexGridWithToolbar = () => {
             <input
               type="text"
               value={atomInputValue}
-              onChange={(e) => setAtomInputValue(e.target.value)}
+              onChange={(e) => {
+                const newValue = e.target.value;
+                // Auto-capitalize single letters
+                if (newValue.length === 1 && /^[a-zA-Z]$/.test(newValue)) {
+                  setAtomInputValue(newValue.toUpperCase());
+                } else {
+                  setAtomInputValue(newValue);
+                }
+              }}
               onKeyDown={handleAtomInputKeyDown}
               autoFocus
               style={{
