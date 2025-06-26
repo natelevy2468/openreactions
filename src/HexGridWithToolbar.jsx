@@ -1222,8 +1222,8 @@ const HexGridWithToolbar = () => {
     bondPreviews.forEach(preview => {
       if (preview.isVisible) {
         const isHovered = hoverBondPreview?.id === preview.id;
-        // Use consistent highlighting: darker gray and thicker when hovered
-        ctx.strokeStyle = isHovered ? '#888' : '#e0e0e0';
+        // Use white color: lighter when normal, darker when hovered
+        ctx.strokeStyle = isHovered ? '#cccccc' : '#ffffff';
         ctx.lineWidth = isHovered ? 2.5 : 1.5; // Thicker when hovered, same as grid lines
         
         const sx1 = preview.x1 + offset.x;
@@ -4594,6 +4594,8 @@ const HexGridWithToolbar = () => {
   const handleClick = useCallback(event => {
     // Only block clicks if we're dragging the canvas or selecting, not if we're dragging vertices
     if (isDragging && !draggingVertex) return;
+    // Don't handle clicks if a drag just occurred
+    if (didDrag) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -5159,6 +5161,9 @@ const HexGridWithToolbar = () => {
       // (Vertex detection has been moved to the top for higher priority)
       let closestIdx = null;
       let minDist = lineThreshold;
+      let closestBondIdx = null;
+      let minBondDist = lineThreshold;
+      
       segments.forEach((seg, idx) => {
         const A = x - (seg.x1 + offset.x);
         const B = y - (seg.y1 + offset.y);
@@ -5173,11 +5178,24 @@ const HexGridWithToolbar = () => {
         const dx = x - projX;
         const dy = y - projY;
         const distSeg = Math.sqrt(dx * dx + dy * dy);
+        
+        // Track closest segment overall
         if (distSeg < minDist) {
           minDist = distSeg;
           closestIdx = idx;
         }
+        
+        // Track closest actual bond (bondOrder > 0) separately
+        if (seg.bondOrder > 0 && distSeg < minBondDist) {
+          minBondDist = distSeg;
+          closestBondIdx = idx;
+        }
       });
+      
+      // Prioritize actual bonds over grid lines when both are within threshold
+      if (closestBondIdx !== null) {
+        closestIdx = closestBondIdx;
+      }
       if (closestIdx !== null) {
         // Capture state before modifying bonds
         captureState();

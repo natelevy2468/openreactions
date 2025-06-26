@@ -211,9 +211,15 @@ export const handleMouseMove = (
 
   // Handle dragging if active
   if (isDragging) {
-    setDidDrag(true);
     const dx = x - dragStart.x;
     const dy = y - dragStart.y;
+    const dragDistance = Math.sqrt(dx * dx + dy * dy);
+    
+    // Only consider it a drag if moved more than 8 pixels from start position
+    const dragThreshold = 8;
+    if (dragDistance > dragThreshold) {
+      setDidDrag(true);
+    }
     
     // Ensure cursor is 'grabbing' during any drag operation
     canvasRef.current.style.cursor = 'grabbing';
