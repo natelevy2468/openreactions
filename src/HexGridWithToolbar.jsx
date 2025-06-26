@@ -36,7 +36,7 @@ const HexGridWithToolbar = () => {
   const [mode, setMode] = useState('draw'); // modes: 'draw', 'erase', 'arrow', 'equil', 'lone', 'plus', 'minus', 'curve0', ... 'curve5'
   const [hoverVertex, setHoverVertex] = useState(null);
   const [hoverSegmentIndex, setHoverSegmentIndex] = useState(null);
-  const [hoverIndicator, setHoverIndicator] = useState(null); // Track which 4th bond indicator is being hovered
+
   const [hoverCurvedArrow, setHoverCurvedArrow] = useState({ index: -1, part: null }); // Track curved arrow hover state
 
   const [arrowPreview, setArrowPreview] = useState(null);
@@ -59,8 +59,7 @@ const HexGridWithToolbar = () => {
   const [gridVertexIndex, setGridVertexIndex] = useState(new Map());
   const [snapAlignment, setSnapAlignment] = useState(null);
   const [showSnapPreview, setShowSnapPreview] = useState(true); // Allow users to toggle snapping
-  // Track vertices that have exactly 3 bonds (will only show indicator for these)
-  const [verticesWith3Bonds, setVerticesWith3Bonds] = useState([]);
+
   // Fourth bond feature states
   const [fourthBondMode, setFourthBondMode] = useState(false);
   const [fourthBondSource, setFourthBondSource] = useState(null); // Vertex from which the fourth bond starts
@@ -490,7 +489,7 @@ const HexGridWithToolbar = () => {
     return count;
   }, [segments]);
 
-  // Count bonds at vertex but ignore 4th bond indicators for grid snapping
+  // Count bonds at vertex for grid snapping
   const countBondsAtVertexForSnapping = useCallback((vertex) => {
     const vx = vertex.x;
     const vy = vertex.y;
@@ -507,18 +506,8 @@ const HexGridWithToolbar = () => {
       }
     }
     
-    // If this vertex has a 4th bond indicator, treat it as having only 3 bonds
-    // This is because the 4th bond indicator represents a potential 4th bond, not an actual one
-    const hasIndicator = verticesWith3Bonds.some(v => 
-      Math.abs(v.x - vx) < 0.01 && Math.abs(v.y - vy) < 0.01
-    );
-    
-    if (hasIndicator && count >= 3) {
-      return 3; // Cap at 3 bonds for grid snapping purposes
-    }
-    
     return count;
-  }, [segments, verticesWith3Bonds]);
+  }, [segments]);
 
   // Clear all selections
   const clearSelection = useCallback(() => {
@@ -540,7 +529,6 @@ const HexGridWithToolbar = () => {
       arrows: JSON.parse(JSON.stringify(arrows)),
       freeFloatingVertices: new Set(freeFloatingVertices),
       detectedRings: JSON.parse(JSON.stringify(detectedRings)),
-      verticesWith3Bonds: JSON.parse(JSON.stringify(verticesWith3Bonds)),
       bondPreviews: JSON.parse(JSON.stringify(bondPreviews)),
       epoxideVertices: new Set(epoxideVertices)
     };
@@ -558,54 +546,11 @@ const HexGridWithToolbar = () => {
     });
 
     setHistoryIndex(prevIndex => Math.min(prevIndex + 1, 49));
-  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, verticesWith3Bonds, bondPreviews, epoxideVertices]);
+  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, bondPreviews, epoxideVertices]);
 
-  // Function to check all vertices for fourth bond indicator eligibility
-  const updateFourthBondIndicators = useCallback(() => {
-    const hasAnyDoubleBonds = (vertex) => {
-      for (const seg of segments) {
-        if (seg.bondOrder >= 2) { // Double or triple bonds
-          if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
-              (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
-            return true;
-          }
-        }
-      }
-      return false;
-    };
 
-    const countSingleBonds = (vertex) => {
-      let count = 0;
-      for (const seg of segments) {
-        if (seg.bondOrder === 1) { // Only count single bonds
-          if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
-              (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
-            count++;
-          }
-        }
-      }
-      return count;
-    };
-    
-    // Find all vertices that qualify for fourth bond indicators
-    const qualifyingVertices = [];
-    vertices.forEach(vertex => {
-      if (!hasAnyDoubleBonds(vertex) && countSingleBonds(vertex) === 3) {
-        qualifyingVertices.push({
-          x: vertex.x,
-          y: vertex.y,
-          key: `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`
-        });
-      }
-    });
-    
-    setVerticesWith3Bonds(qualifyingVertices);
-  }, [vertices, segments]);
 
-  // Check ALL vertices for fourth bond eligibility whenever structure changes
-  useEffect(() => {
-    updateFourthBondIndicators();
-  }, [vertices, segments, updateFourthBondIndicators]);
+
 
   // Undo the last action
   const undo = useCallback(() => {
@@ -622,7 +567,7 @@ const HexGridWithToolbar = () => {
     setArrows(previousState.arrows);
     setFreeFloatingVertices(previousState.freeFloatingVertices);
     setDetectedRings(previousState.detectedRings);
-    setVerticesWith3Bonds(previousState.verticesWith3Bonds);
+
     setBondPreviews(previousState.bondPreviews || []);
     setEpoxideVertices(previousState.epoxideVertices || new Set());
     setHoverBondPreview(null); // Clear hover state on undo
@@ -2273,79 +2218,7 @@ const HexGridWithToolbar = () => {
       }
     });
 
-    // Draw indicators for vertices with exactly 3 bonds
-    if (verticesWith3Bonds.length > 0) {
-      verticesWith3Bonds.forEach(v => {
-        const vx = v.x + offset.x;
-        const vy = v.y + offset.y;
-        
-        // Draw a blue triangle indicator with plus sign
-        ctx.save();
-        
-        // Position the triangle slightly offset from the vertex
-        const indicatorX = vx + 22; // Moved further right
-        const indicatorY = vy;      // Centered vertically
-        
-        // Check if this indicator is being hovered
-        const isHovered = hoverIndicator && 
-          Math.abs(hoverIndicator.x - v.x) < 0.01 && 
-          Math.abs(hoverIndicator.y - v.y) < 0.01;
-        
-        // Define triangle points (pointing toward the vertex) - made bigger
-        const size = isHovered ? 16 : 14; // Bigger size, even bigger on hover
-        ctx.beginPath();
-        ctx.moveTo(indicatorX + size, indicatorY - size); // Top right
-        ctx.lineTo(indicatorX - size, indicatorY); // Left point (pointing to vertex)
-        ctx.lineTo(indicatorX + size, indicatorY + size); // Bottom right
-        ctx.closePath();
-        
-        // Change color if this is the active fourth-bond source
-        const isActiveSource = fourthBondSource && 
-          Math.abs(fourthBondSource.x - v.x) < 0.01 && 
-          Math.abs(fourthBondSource.y - v.y) < 0.01;
-        
-        // Fill and stroke the triangle with hover effects
-        if (isActiveSource) {
-          ctx.fillStyle = 'rgba(25, 118, 210, 1.0)';
-          ctx.strokeStyle = '#ffff00';
-          ctx.lineWidth = 2;
-        } else if (isHovered) {
-          ctx.fillStyle = 'rgba(25, 98, 180, 1.0)'; // Darker blue on hover
-          ctx.strokeStyle = 'white';
-          ctx.lineWidth = 1.8;
-        } else {
-          ctx.fillStyle = 'rgba(25, 118, 210, 0.85)'; // Normal blue
-          ctx.strokeStyle = 'white';
-          ctx.lineWidth = 1.5;
-        }
-        
-        ctx.fill();
-        ctx.stroke();
-        
-        // Draw plus sign in white - bigger size for larger triangle
-        const plusSize = isHovered ? 10 : 9; // Bigger plus sign, even bigger on hover
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 2.2;
-        ctx.beginPath();
-        // Horizontal line of plus
-        ctx.moveTo(indicatorX + 2, indicatorY);
-        ctx.lineTo(indicatorX + 2 + plusSize, indicatorY);
-        // Vertical line of plus
-        ctx.moveTo(indicatorX + 2 + plusSize/2, indicatorY - plusSize/2);
-        ctx.lineTo(indicatorX + 2 + plusSize/2, indicatorY + plusSize/2);
-        ctx.stroke();
-        
-        // Store the click area for this indicator in the vertex data for hit detection
-        // Increased radius for easier hovering
-        v.indicatorArea = {
-          x: indicatorX,
-          y: indicatorY,
-          radius: isHovered ? 10 : 9
-        };
-        
-        ctx.restore();
-      });
-    }
+
 
     // Draw hover circle if hovering over a vertex
     if (hoverVertex) {
@@ -2501,8 +2374,8 @@ const HexGridWithToolbar = () => {
       });
     }
 
-    // Draw fourth bond preview if in fourth bond mode
-    if (fourthBondMode && fourthBondPreview) {
+    // Draw fourth bond preview if in fourth bond mode or freebond mode
+    if ((fourthBondMode || mode === 'freebond') && fourthBondPreview) {
       ctx.save();
       
       const sx1 = fourthBondPreview.startX;
@@ -3550,24 +3423,9 @@ const HexGridWithToolbar = () => {
       });
       ctx.restore();
     }
-  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, countBondsAtVertexForSnapping, verticesWith3Bonds, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition, snapAlignment, showSnapPreview, gridBreakingEnabled, gridBreakingAnalysis, epoxideVertices]);
+  }, [segments, vertices, vertexAtoms, vertexTypes, offset, hoverVertex, hoverSegmentIndex, arrows, arrowPreview, curvedArrowStartPoint, mode, countBondsAtVertex, countBondsAtVertexForSnapping, fourthBondMode, fourthBondSource, fourthBondPreview, isSelecting, selectionStart, selectionEnd, selectedSegments, selectedVertices, selectedArrows, selectionBounds, isPasteMode, clipboard, pastePreviewPosition, snapAlignment, showSnapPreview, gridBreakingEnabled, gridBreakingAnalysis, epoxideVertices]);
 
-  // Check if a point is inside a blue circle indicator
-  const isPointInIndicator = useCallback((x, y) => {
-    // Check if any indicator was clicked
-    for (const vertex of verticesWith3Bonds) {
-      if (vertex.indicatorArea) {
-        const dx = x - vertex.indicatorArea.x;
-        const dy = y - vertex.indicatorArea.y;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance <= vertex.indicatorArea.radius) {
-          return vertex; // Return the vertex associated with this indicator
-        }
-      }
-    }
-    return null; // No indicator was clicked
-  }, [verticesWith3Bonds]);
+
 
 
 
@@ -4207,11 +4065,7 @@ const HexGridWithToolbar = () => {
       }
     }
     
-    // Check fourth bond indicators
-    if (verticesWith3Bonds.length > 0) {
-      const indicatorVertex = isPointInIndicator(x, y);
-      if (indicatorVertex) return true;
-    }
+    
     
     return false;
   };
@@ -4316,6 +4170,33 @@ const HexGridWithToolbar = () => {
       return; // Exit early, paste is handled elsewhere
     }
 
+    // Handle vertex clicks in freebond mode
+    if (mode === 'freebond') {
+      let nearestVertex = null;
+      let minV = vertexThreshold;
+      for (let v of vertices) {
+        const dist = distanceToVertex(x, y, v.x, v.y);
+        if (dist <= minV) {
+          minV = dist;
+          nearestVertex = v;
+        }
+      }
+      if (nearestVertex) {
+        // If we don't have a source yet, set this vertex as the source and start preview
+        if (!fourthBondSource) {
+          setFourthBondSource(nearestVertex);
+          return; // Exit early, freebond source set
+        }
+        // If we already have a source and we're clicking the same vertex, do nothing
+        if (fourthBondSource && 
+            Math.abs(fourthBondSource.x - nearestVertex.x) < 0.01 && 
+            Math.abs(fourthBondSource.y - nearestVertex.y) < 0.01) {
+          return; // Exit early, clicking same vertex
+        }
+        // If we have a source and click a different vertex, continue to bond creation logic above
+      }
+    }
+
     // Handle vertex clicks first (highest priority) - only in draw and stereochemistry modes
     const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
     if (isDrawOrStereochemistryMode) {
@@ -4386,59 +4267,7 @@ const HexGridWithToolbar = () => {
           setSegments(prevSegments => {
             const updatedSegments = [...prevSegments, newBond];
             
-            // Check for fourth bond indicators after adding the bond
-            const hasAnyDoubleBonds = (vertex) => {
-              for (const seg of updatedSegments) {
-                if (seg.bondOrder >= 2) { // Double or triple bonds
-                  if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
-                      (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
-                    return true;
-                  }
-                }
-              }
-              return false;
-            };
 
-            const countSingleBonds = (vertex) => {
-              let count = 0;
-              for (const seg of updatedSegments) {
-                if (seg.bondOrder === 1) { // Only count single bonds
-                  if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
-                      (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
-                    count++;
-                  }
-                }
-              }
-              return count;
-            };
-            
-            // Check both vertices of the new bond
-            const v1 = { x: newBond.x1, y: newBond.y1 };
-            const v2 = { x: newBond.x2, y: newBond.y2 };
-            
-            const v1Qualifies = !hasAnyDoubleBonds(v1) && countSingleBonds(v1) === 3;
-            const v2Qualifies = !hasAnyDoubleBonds(v2) && countSingleBonds(v2) === 3;
-            
-            if (v1Qualifies || v2Qualifies) {
-              const newVerticesWith3Bonds = [];
-              if (v1Qualifies) {
-                newVerticesWith3Bonds.push({
-                  x: v1.x,
-                  y: v1.y,
-                  key: `${v1.x.toFixed(2)},${v1.y.toFixed(2)}`
-                });
-              }
-              if (v2Qualifies) {
-                newVerticesWith3Bonds.push({
-                  x: v2.x,
-                  y: v2.y,
-                  key: `${v2.x.toFixed(2)},${v2.y.toFixed(2)}`
-                });
-              }
-              setVerticesWith3Bonds(newVerticesWith3Bonds);
-            } else {
-              setVerticesWith3Bonds([]);
-            }
             
             return updatedSegments;
           });
@@ -4455,8 +4284,8 @@ const HexGridWithToolbar = () => {
       }
     }
 
-    // Handle fourth bond mode
-    if (fourthBondMode) {
+    // Handle fourth bond mode (triggered by blue triangle) or freebond mode (triggered by toolbar button)
+    if (fourthBondMode || mode === 'freebond') {
       if (fourthBondPreview) {
         // Capture state before creating fourth bond
         captureState();
@@ -4510,30 +4339,19 @@ const HexGridWithToolbar = () => {
         
         // Fourth bond created successfully - no automatic atom input
         
-        // Exit fourth bond mode
-        setFourthBondMode(false);
+        // Exit fourth bond mode (but stay in freebond mode if that's what we're in)
+        if (fourthBondMode) {
+          setFourthBondMode(false);
+        }
         setFourthBondSource(null);
         setFourthBondPreview(null);
         
-        // Also clear the 3-bond indicators as this vertex now has 4 bonds
-        setVerticesWith3Bonds(prev => 
-          prev.filter(v => 
-            !(Math.abs(v.x - fourthBondSource.x) < 0.01 && Math.abs(v.y - fourthBondSource.y) < 0.01)
-          )
-        );
+
       }
       return; // Exit early
     }
     
-    // Check if we clicked on a blue circle indicator (3-bond vertex)
-    // Allow clicking on indicator in both draw and stereochemistry modes
-    const indicatorVertex = isPointInIndicator(x, y);
-    if (indicatorVertex && isDrawOrStereochemistryMode) {
-      // Enter fourth bond mode with this vertex as source
-      setFourthBondMode(true);
-      setFourthBondSource(indicatorVertex);
-      return; // Exit early
-    }
+
 
     // --- Handle charge/lone pair assignment ---
     if (mode === 'plus' || mode === 'minus' || mode === 'lone') {
@@ -4716,8 +4534,6 @@ const HexGridWithToolbar = () => {
         
         // Run ring detection after bond changes
         setTimeout(detectRings, 0);
-        // Clear the 3-bond indicator
-        setVerticesWith3Bonds([]);
         // Clear bond previews to force regeneration
         setBondPreviews([]);
         setHoverBondPreview(null);
@@ -5011,60 +4827,7 @@ const HexGridWithToolbar = () => {
             const v1 = { x: segment.x1, y: segment.y1 };
             const v2 = { x: segment.x2, y: segment.y2 };
             
-            // Create functions to check bond conditions
-            const hasAnyDoubleBonds = (vertex) => {
-              for (const seg of updatedSegments) {
-                if (seg.bondOrder >= 2) { // Double or triple bonds
-                  if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
-                      (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
-                    return true;
-                  }
-                }
-              }
-              return false;
-            };
 
-            const countSingleBonds = (vertex) => {
-              let count = 0;
-              for (const seg of updatedSegments) {
-                if (seg.bondOrder === 1) { // Only count single bonds
-                  if ((Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01) || 
-                      (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01)) {
-                    count++;
-                  }
-                }
-              }
-              return count;
-            };
-            
-            // Check if either vertex qualifies for a fourth bond indicator:
-            // - Exactly 3 single bonds
-            // - No double bonds
-            const v1Qualifies = !hasAnyDoubleBonds(v1) && countSingleBonds(v1) === 3;
-            const v2Qualifies = !hasAnyDoubleBonds(v2) && countSingleBonds(v2) === 3;
-            
-            // Update the state with vertices that have exactly 3 single bonds and no double bonds
-            if (v1Qualifies || v2Qualifies) {
-              const newVerticesWith3Bonds = [];
-              if (v1Qualifies) {
-                newVerticesWith3Bonds.push({
-                  x: v1.x,
-                  y: v1.y,
-                  key: `${v1.x.toFixed(2)},${v1.y.toFixed(2)}`
-                });
-              }
-              if (v2Qualifies) {
-                newVerticesWith3Bonds.push({
-                  x: v2.x,
-                  y: v2.y,
-                  key: `${v2.x.toFixed(2)},${v2.y.toFixed(2)}`
-                });
-              }
-              setVerticesWith3Bonds(newVerticesWith3Bonds);
-            } else {
-              // If neither vertex qualifies, clear the indicator
-              setVerticesWith3Bonds([]);
-            }
           }
           
           // Check if any segments need vertex updates (for triple bond linear positioning)
@@ -5475,8 +5238,7 @@ const HexGridWithToolbar = () => {
       setDraggingVertex,
       setIsSelecting,
       setSelectionStart,
-      setSelectionEnd,
-      setVerticesWith3Bonds
+      setSelectionEnd
     );
   };
   const handleMouseMove = event => {
@@ -5520,7 +5282,6 @@ const HexGridWithToolbar = () => {
       vertices,
       vertexThreshold,
       lineThreshold,
-      verticesWith3Bonds,
       freeFloatingVertices,
       segments,
       // Setters
@@ -5544,7 +5305,6 @@ const HexGridWithToolbar = () => {
       setHoverCurvedArrow,
       isPointInArrowCircle,
       isPointInCurvedArrowCircle,
-      setHoverIndicator,
       distanceToVertex,
       isPointInVertexBox
     );
@@ -5576,7 +5336,6 @@ const HexGridWithToolbar = () => {
       setDragArrowOffset,
       setHoverVertex,
       setHoverSegmentIndex,
-      setVerticesWith3Bonds,
       setFourthBondMode,
       setFourthBondSource,
       setFourthBondPreview,
@@ -5780,16 +5539,18 @@ const HexGridWithToolbar = () => {
       setCurvedArrowStartPoint(null);
     }
     
+    // Clear fourth bond state when switching away from freebond mode
+    if (mode !== 'freebond') {
+      setFourthBondSource(null);
+      setFourthBondPreview(null);
+    }
+    
     // Reset cursor when mode changes
     if (canvasRef.current) {
       canvasRef.current.style.cursor = 'default';
     }
     
-    // Only clear 3-bond indicators when not in draw or stereochemistry modes
-    const isDrawOrStereochemistryModeForClearing = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
-    if (!isDrawOrStereochemistryModeForClearing) {
-      setVerticesWith3Bonds([]);
-    }
+
   }, [mode]);
 
   // Effect to run ring detection whenever vertices or segments change
@@ -6258,6 +6019,59 @@ const HexGridWithToolbar = () => {
           </button>
         </div>
         
+        {/* Free Bond Button */}
+        <button
+          onClick={() => setModeAndClearSelection('freebond')}
+          className="toolbar-button"
+          style={{
+            width: '100%',
+            height: 'min(44px, 7vh)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            backgroundColor: mode === 'freebond' ? 'rgb(54,98,227)' : '#23395d',
+            border: 'none',
+            borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+            cursor: 'pointer',
+            boxShadow: mode === 'freebond' ? 
+              '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+              '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+            outline: 'none',
+            padding: 0,
+            gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+            fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
+            fontWeight: 600,
+            color: '#fff',
+            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+            marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))',
+          }}
+          onMouseEnter={(e) => {
+            if (mode !== 'freebond') {
+              e.target.style.backgroundColor = '#2a4470';
+              e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (mode !== 'freebond') {
+              e.target.style.backgroundColor = '#23395d';
+              e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+            }
+          }}
+          title="Free Bond"
+        >
+          {/* Free Bond SVG - four lines radiating from center */}
+          <svg width="max(20px, min(28px, calc(min(280px, 25vw) * 0.1)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 28 26" fill="none" style={{ pointerEvents: 'none' }}>
+            {/* Center point */}
+            <circle cx="14" cy="13" r=".5" fill="#fff" />
+            {/* Four radiating lines */}
+            <line x1="14" y1="13" x2="14" y2="5" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
+            <line x1="14" y1="13" x2="22" y2="18" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
+            <line x1="14" y1="13" x2="17" y2="21.5" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
+            <line x1="14" y1="13" x2="6" y2="18" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
+          </svg>
+          Free Bond
+        </button>
+        
         {/* Reactions Section Title */}
         <div style={{
           color: '#888',
@@ -6696,6 +6510,7 @@ const HexGridWithToolbar = () => {
             </svg>
           </button>
         </div>
+        
         <div style={{ flex: 1, minHeight: '10px' }} />
         
         {/* Undo Button */}

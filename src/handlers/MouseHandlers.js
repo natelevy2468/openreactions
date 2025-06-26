@@ -21,7 +21,6 @@ export const handleMouseMove = (
   vertices,
   vertexThreshold,
   lineThreshold,
-  verticesWith3Bonds,
   freeFloatingVertices,
   segments,
   // Setters
@@ -45,7 +44,6 @@ export const handleMouseMove = (
   setHoverCurvedArrow,
   isPointInArrowCircle,
   isPointInCurvedArrowCircle,
-  setHoverIndicator,
   distanceToVertex,
   isPointInVertexBox
 ) => {
@@ -73,8 +71,8 @@ export const handleMouseMove = (
     }
   }
 
-  // Handle fourth bond preview mode
-  if (fourthBondMode && fourthBondSource && !isDragging) {
+  // Handle fourth bond preview mode (triggered by blue triangle) or freebond mode (triggered by toolbar button)
+  if ((fourthBondMode || mode === 'freebond') && fourthBondSource && !isDragging) {
     const sourceX = fourthBondSource.x + offset.x;
     const sourceY = fourthBondSource.y + offset.y;
 
@@ -397,7 +395,7 @@ export const handleMouseMove = (
   }
     
   // Handle hover effects for vertices and segments in various modes
-  if (mode === 'draw' || mode === 'erase' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous' || mode === 'mouse') {
+  if (mode === 'draw' || mode === 'erase' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous' || mode === 'mouse' || mode === 'freebond') {
     // Check if mouse is over an arrow control circle or triangle in mouse mode
     if (mode === 'mouse') {
       const { index: arrowIndex, part: arrowPart } = isPointInArrowCircle(x, y);
@@ -418,7 +416,6 @@ export const handleMouseMove = (
         
         setHoverVertex(null);
         setHoverSegmentIndex(null);
-        setHoverIndicator(null); // Clear indicator hover when over arrow
         return;
       } else {
         // Check curved arrows if no straight arrow was found
@@ -432,7 +429,6 @@ export const handleMouseMove = (
           
           setHoverVertex(null);
           setHoverSegmentIndex(null);
-          setHoverIndicator(null); // Clear indicator hover when over curved arrow
           return;
         } else {
           // Reset cursor if not over any arrow part
@@ -443,38 +439,7 @@ export const handleMouseMove = (
       }
     }
     
-    // Check if mouse is over a fourth bond indicator triangle in draw and stereochemistry modes
-    const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
-    if (isDrawOrStereochemistryMode && verticesWith3Bonds.length > 0) {
-      let foundIndicator = null;
-      
-      // Check each indicator
-      for (const vertex of verticesWith3Bonds) {
-        if (vertex.indicatorArea) {
-          const dx = x - vertex.indicatorArea.x;
-          const dy = y - vertex.indicatorArea.y;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          
-          if (distance <= vertex.indicatorArea.radius) {
-            foundIndicator = vertex;
-            break;
-          }
-        }
-      }
-      
-      // Update hover state
-      if (foundIndicator) {
-        setHoverIndicator(foundIndicator);
-        canvasRef.current.style.cursor = 'pointer'; // Show pointer cursor when hovering over indicator
-        setHoverVertex(null); // Clear vertex hover when over indicator
-        setHoverSegmentIndex(null); // Clear segment hover when over indicator
-        return; // Exit early since we found an indicator
-      } else {
-        setHoverIndicator(null); // Clear indicator hover when not over any
-      }
-    } else {
-      setHoverIndicator(null); // Clear indicator hover when not in appropriate mode
-    }
+
     
     let found = null;
     for (let v of vertices) {
@@ -485,8 +450,8 @@ export const handleMouseMove = (
       }
     }
     
-    // Set hover vertex in draw, erase modes, or for free-floating vertices in mouse mode
-    if (mode === 'draw' || mode === 'erase') {
+    // Set hover vertex in draw, erase, freebond modes, or for free-floating vertices in mouse mode
+    if (mode === 'draw' || mode === 'erase' || mode === 'freebond') {
       setHoverVertex(found);
     } else if (mode === 'mouse') {
       // In mouse mode, check both exact vertex matches and box areas for free-floating vertices
@@ -590,8 +555,7 @@ export const handleMouseDown = (
   setDraggingVertex,
   setIsSelecting,
   setSelectionStart,
-  setSelectionEnd,
-  setVerticesWith3Bonds
+  setSelectionEnd
 ) => {
   const rect = canvasRef.current.getBoundingClientRect();
   const x = event.clientX - rect.left;
@@ -791,11 +755,7 @@ export const handleMouseDown = (
     setDidDrag(false);
   }
   
-  // Clear the 3-bond indicators when mouse is pressed - unless we're in draw or stereochemistry mode
-  const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
-  if (!isDrawOrStereochemistryMode) {
-    setVerticesWith3Bonds([]);
-  }
+
 };
 
 export const handleMouseUp = (
@@ -819,7 +779,6 @@ export const handleMouseUp = (
   setDragArrowOffset,
   setHoverVertex,
   setHoverSegmentIndex,
-  setVerticesWith3Bonds,
   setFourthBondMode,
   setFourthBondSource,
   setFourthBondPreview,
@@ -856,9 +815,6 @@ export const handleMouseUp = (
   if (!isDrawOrStereochemistryMode) {
     setHoverVertex(null);
     setHoverSegmentIndex(null);
-    
-    // Clear 3-bond indicators if not in draw or stereochemistry modes
-    setVerticesWith3Bonds([]);
   } else if (mode !== 'draw') {
     // For stereochemistry modes, clear vertex hover but keep segments hoverable
     setHoverVertex(null);
