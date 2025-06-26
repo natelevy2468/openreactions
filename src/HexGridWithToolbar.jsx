@@ -1524,8 +1524,23 @@ const HexGridWithToolbar = () => {
           const hasNeighborsAtEnd = bondsAtEnd.length > 0;
           
           // Calculate shortening amounts for the smaller line
-          const shortenStart = hasNeighborsAtStart ? 8 : 0;
-          const shortenEnd = hasNeighborsAtEnd ? 8 : 0;
+          let shortenStart = hasNeighborsAtStart ? 8 : 0;
+          let shortenEnd = hasNeighborsAtEnd ? 8 : 0;
+          
+          // Special case: Additional shortening for double bonds inside cyclopropane rings (3-membered rings)
+          if (detectedRings && detectedRings.length > 0 && seg.bondOrder === 2) {
+            const ringInfo = isSegmentInRing(seg, detectedRings);
+            if (ringInfo && ringInfo.inRing) {
+              const ring = ringInfo.ring;
+              const verticesInRing = ring.vertices || ring;
+              // Check if this is a 3-membered ring (cyclopropane/triangle)
+              if (verticesInRing && verticesInRing.length === 3) {
+                // Add 8 pixels of additional shortening on each side for cyclopropane rings
+                shortenStart += 8;
+                shortenEnd += 8;
+              }
+            }
+          }
           
           // Determine which side gets the shorter line
           // By default, the side with fewer bonds gets the shorter line
@@ -1646,15 +1661,30 @@ const HexGridWithToolbar = () => {
           
           // If either vertex is unconnected, draw two parallel lines of equal length, both offset from center
           if (upperVertexUnconnected || lowerVertexUnconnected) {
+            // Additional shortening for cyclopropane rings (equal parallel lines case)
+            let additionalShorten = 0;
+            if (detectedRings && detectedRings.length > 0 && seg.bondOrder === 2) {
+              const ringInfo = isSegmentInRing(seg, detectedRings);
+              if (ringInfo && ringInfo.inRing) {
+                const ring = ringInfo.ring;
+                const verticesInRing = ring.vertices || ring;
+                // Check if this is a 3-membered ring (cyclopropane/triangle)
+                if (verticesInRing && verticesInRing.length === 3) {
+                  // Add 8 pixels of additional shortening for cyclopropane rings
+                  additionalShorten = 8;
+                }
+              }
+            }
+            
             // Two equal parallel lines, both offset from center
             ctx.beginPath();
-            ctx.moveTo(sx1 - finalPerpX * offset - ux * (ext + shorten), sy1 - finalPerpY * offset - uy * (ext + shorten));
-            ctx.lineTo(sx2 - finalPerpX * offset + ux * (ext + shorten), sy2 - finalPerpY * offset + uy * (ext + shorten));
+            ctx.moveTo(sx1 - finalPerpX * offset - ux * (ext + shorten + additionalShorten), sy1 - finalPerpY * offset - uy * (ext + shorten + additionalShorten));
+            ctx.lineTo(sx2 - finalPerpX * offset + ux * (ext + shorten + additionalShorten), sy2 - finalPerpY * offset + uy * (ext + shorten + additionalShorten));
             ctx.stroke();
             
             ctx.beginPath();
-            ctx.moveTo(sx1 + finalPerpX * offset - ux * (ext + shorten), sy1 + finalPerpY * offset - uy * (ext + shorten));
-            ctx.lineTo(sx2 + finalPerpX * offset + ux * (ext + shorten), sy2 + finalPerpY * offset + uy * (ext + shorten));
+            ctx.moveTo(sx1 + finalPerpX * offset - ux * (ext + shorten + additionalShorten), sy1 + finalPerpY * offset - uy * (ext + shorten + additionalShorten));
+            ctx.lineTo(sx2 + finalPerpX * offset + ux * (ext + shorten + additionalShorten), sy2 + finalPerpY * offset + uy * (ext + shorten + additionalShorten));
             ctx.stroke();
           } else {
             // Draw the double bond (two parallel lines with one potentially shorter)
@@ -4568,7 +4598,7 @@ const HexGridWithToolbar = () => {
       const gridY = y - offset.y;
       
       // Create a new vertex at the exact click position
-      const newVertex = { x: gridX, y: gridY, isOffGrid: true }; // Off-grid vertex
+      const newVertex = { x: gridX, y: gridY, isOffGrid: false }; // On-grid vertex
       
       // Add the new vertex
       setVertices(prevVertices => [...prevVertices, newVertex]);
@@ -5545,9 +5575,13 @@ const HexGridWithToolbar = () => {
       setFourthBondPreview(null);
     }
     
-    // Reset cursor when mode changes
+    // Set cursor based on mode
     if (canvasRef.current) {
-      canvasRef.current.style.cursor = 'default';
+      if (mode === 'text' || mode === 'mouse') {
+        canvasRef.current.style.cursor = 'text';
+      } else {
+        canvasRef.current.style.cursor = 'default';
+      }
     }
     
 
@@ -7064,7 +7098,7 @@ const HexGridWithToolbar = () => {
             width: '100vw',
             height: '100vh',
             pointerEvents: 'auto',
-            cursor: isPasteMode ? 'copy' : (mode === 'text' ? 'text' : 'default'),
+            cursor: isPasteMode ? 'copy' : (mode === 'text' || mode === 'mouse' ? 'text' : 'default'),
             display: 'block',
           }}
         />

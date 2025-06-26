@@ -491,7 +491,7 @@ export const getRingInteriorDirection = (segment, ringInfo, allRings) => {
   const ring = ringInfo.ring;
   const verticesInRing = ring.vertices || ring;
   
-  if (!verticesInRing || verticesInRing.length !== 6) {
+  if (!verticesInRing || verticesInRing.length < 3) {
     return { isInteriorOnPositiveSide: false, isInRing: true };
   }
   
