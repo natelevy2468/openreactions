@@ -259,6 +259,9 @@ const HexGridWithToolbar = () => {
   // Undo/Redo history system
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
+  
+  // Prevent duplicate captureState calls within a short time window
+  const [lastCaptureTime, setLastCaptureTime] = useState(0);
 
   // Generate unique segments and vertices based on view size
   const generateGrid = useCallback((width, height, existingVertices = [], existingVertexAtoms = {}, existingSegments = []) => {
@@ -524,6 +527,15 @@ const HexGridWithToolbar = () => {
 
   // Capture current state for undo history
   const captureState = useCallback(() => {
+    const now = Date.now();
+    
+    // Prevent duplicate captures within 100ms (for the same user action)
+    if (now - lastCaptureTime < 100) {
+      return;
+    }
+    
+    setLastCaptureTime(now);
+    
     const currentState = {
       segments: JSON.parse(JSON.stringify(segments)),
       vertices: JSON.parse(JSON.stringify(vertices)),
@@ -549,7 +561,7 @@ const HexGridWithToolbar = () => {
     });
 
     setHistoryIndex(prevIndex => Math.min(prevIndex + 1, 49));
-  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, bondPreviews, epoxideVertices]);
+  }, [segments, vertices, vertexAtoms, vertexTypes, arrows, freeFloatingVertices, detectedRings, bondPreviews, epoxideVertices, lastCaptureTime]);
 
 
 
@@ -1001,8 +1013,16 @@ const HexGridWithToolbar = () => {
           ctx.beginPath();
           ctx.moveTo(sx1, sy1);
           ctx.lineTo(sx2, sy2);
-          // Use consistent grid line color for all modes
-          ctx.strokeStyle = isHovered ? '#888' : '#e0e0e0';
+          
+          if (isHovered && mode === 'draw') {
+            // Draw mode: green semi-transparent line
+            ctx.strokeStyle = 'rgba(76, 175, 80, 0.6)';
+            ctx.lineWidth = 4;
+          } else {
+            // Other modes: use consistent grid line color
+            ctx.strokeStyle = isHovered ? '#888' : '#e0e0e0';
+            ctx.lineWidth = 1.5; // Same thickness as normal grid lines
+          }
           ctx.stroke();
         }
         
@@ -2256,10 +2276,39 @@ const HexGridWithToolbar = () => {
     // Draw hover circle if hovering over a vertex
     if (hoverVertex) {
       ctx.save();
-      ctx.beginPath();
-      ctx.arc(hoverVertex.x + offset.x, hoverVertex.y + offset.y, 12, 0, 2 * Math.PI);
-      ctx.fillStyle = 'rgba(120,120,120,0.25)';
-      ctx.fill();
+      const hx = hoverVertex.x + offset.x;
+      const hy = hoverVertex.y + offset.y;
+      
+      if (mode === 'draw') {
+        // Draw mode: green semi-transparent circle with plus sign
+        ctx.beginPath();
+        ctx.arc(hx, hy, 12, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(76, 175, 80, 0.25)';
+        ctx.fill();
+        
+        // Draw plus sign in the center
+        ctx.strokeStyle = 'rgba(76, 175, 80, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.lineCap = 'round';
+        
+        // Horizontal line of plus
+        ctx.beginPath();
+        ctx.moveTo(hx - 8, hy);
+        ctx.lineTo(hx + 8, hy);
+        ctx.stroke();
+        
+        // Vertical line of plus
+        ctx.beginPath();
+        ctx.moveTo(hx, hy - 8);
+        ctx.lineTo(hx, hy + 8);
+        ctx.stroke();
+      } else {
+        // Other modes: original gray circle
+        ctx.beginPath();
+        ctx.arc(hx, hy, 12, 0, 2 * Math.PI);
+        ctx.fillStyle = 'rgba(120,120,120,0.25)';
+        ctx.fill();
+      }
       ctx.restore();
     }
     
@@ -4125,8 +4174,8 @@ const HexGridWithToolbar = () => {
     setCurvedArrowStartPoint(null);
     setArrowPreview(null);
     
-    // Clear fourth bond source when switching away from draw mode
-    if (m !== 'draw') {
+    // Clear fourth bond source when switching away from draw or triple mode
+    if (m !== 'draw' && m !== 'triple') {
       setFourthBondSource(null);
       setFourthBondPreview(null);
     }
@@ -4364,9 +4413,6 @@ const HexGridWithToolbar = () => {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     
-    // Capture state before any action (will be added to history if action proceeds)
-    let shouldCaptureState = false;
-    
     // Don't handle clicks in paste mode - paste is handled on mouse down
     if (isPasteMode) {
       return; // Exit early, paste is handled elsewhere
@@ -4410,12 +4456,13 @@ const HexGridWithToolbar = () => {
       }
       
       const direction = calculateBondDirection(fourthBondSource.x, fourthBondSource.y, endX, endY);
+      const bondOrder = mode === 'triple' ? 3 : 1; // Triple bond in triple mode, single bond otherwise
       const newBond = {
         x1: fourthBondSource.x,
         y1: fourthBondSource.y,
         x2: endX,
         y2: endY,
-        bondOrder: 1,
+        bondOrder: bondOrder,
         bondType: null,
         bondDirection: 1,
         direction: direction,
@@ -4434,8 +4481,8 @@ const HexGridWithToolbar = () => {
 
 
 
-    // Handle vertex clicks for freebond functionality in draw mode and stereochemistry modes
-    const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
+    // Handle vertex clicks for freebond functionality in draw mode, triple mode, and stereochemistry modes
+    const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'triple' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
     if (isDrawOrStereochemistryMode) {
       let nearestVertex = null;
       let minV = vertexThreshold;
@@ -4447,8 +4494,8 @@ const HexGridWithToolbar = () => {
         }
       }
       if (nearestVertex) {
-        // In draw mode, implement freebond functionality with spinnable preview
-        if (mode === 'draw') {
+        // In draw or triple mode, implement freebond functionality with spinnable preview
+        if (mode === 'draw' || mode === 'triple') {
           // If we don't have a source yet, set this vertex as the source and start spinning preview
           if (!fourthBondSource) {
             setFourthBondSource(nearestVertex);
@@ -4525,13 +4572,14 @@ const HexGridWithToolbar = () => {
           // Capture state before creating bond
           captureState();
           
-          // Create new bond
+          // Create new bond with appropriate bond order based on mode
+          const bondOrder = mode === 'triple' ? 3 : 1; // Triple bond in triple mode, single bond otherwise
           const newBond = {
             x1: preview.x1,
             y1: preview.y1,
             x2: preview.x2,
             y2: preview.y2,
-            bondOrder: 1,
+            bondOrder: bondOrder,
             bondType: null,
             bondDirection: 1,
             direction: calculateBondDirection(preview.x1, preview.y1, preview.x2, preview.y2),
@@ -4589,8 +4637,9 @@ const HexGridWithToolbar = () => {
         const endY = fourthBondSource.y + uy * hexRadius;
         
         // Add the new segment as a permanent bond using constant length (hexRadius)
-        // Use the current stereochemistry mode if active
+        // Use the current mode to determine bond order and type
         const bondType = ['wedge', 'dash', 'ambiguous'].includes(mode) ? mode : null;
+        const bondOrder = mode === 'triple' ? 3 : 1; // Triple bond in triple mode, single bond otherwise
         const direction = calculateBondDirection(fourthBondSource.x, fourthBondSource.y, endX, endY);
         
         // Add the new endpoint as a vertex if it doesn't already exist
@@ -4620,7 +4669,7 @@ const HexGridWithToolbar = () => {
           y1: fourthBondSource.y,
           x2: endX,
           y2: endY,
-          bondOrder: 1, // Single bond
+          bondOrder: bondOrder, // Single bond in draw mode, triple bond in triple mode
           bondType: bondType, // Apply stereochemistry if in stereochemistry mode
           bondDirection: 1, // Default direction
           direction: direction, // Calculate direction
@@ -4920,7 +4969,7 @@ const HexGridWithToolbar = () => {
         setShowAtomInput(true);
         return;
       }
-    } else if (mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') {
+    } else if (mode === 'draw' || mode === 'triple' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') {
       // Allow bond creation in draw and stereochemistry modes
       // (Vertex detection has been moved to the top for higher priority)
       let closestIdx = null;
@@ -4955,7 +5004,7 @@ const HexGridWithToolbar = () => {
             // Normal draw mode - cycle through bond orders with no special bond type
             updatedSegments = segments.map((seg, idx) => {
               if (idx === closestIdx) {
-                const newBondOrder = seg.bondOrder === 0 ? 1 : seg.bondOrder === 1 ? 2 : seg.bondOrder === 2 ? 3 : 0;
+                const newBondOrder = seg.bondOrder === 0 ? 1 : seg.bondOrder === 1 ? 2 : 0;
                 const direction = seg.direction || calculateBondDirection(seg.x1, seg.y1, seg.x2, seg.y2);
                 
                 // Calculate upperVertex and lowerVertex for double bonds
@@ -4973,6 +5022,116 @@ const HexGridWithToolbar = () => {
                   direction: direction, // Ensure direction is set
                   upperVertex: upperVertex, // Only set for double bonds
                   lowerVertex: lowerVertex, // Only set for double bonds
+                  flipSmallerLine: false // Default to false for all bonds
+                };
+                
+                // If this is becoming a triple bond, check bond context before applying linear geometry
+                if (newBondOrder === 3) {
+                  // Check if either vertex has existing bonds to orient the triple bond linearly
+                  const v1 = { x: seg.x1, y: seg.y1 };
+                  const v2 = { x: seg.x2, y: seg.y2 };
+                  
+                  const v1Bonds = segments.filter((s, idx) => 
+                    idx !== closestIdx && s.bondOrder > 0 &&
+                    ((Math.abs(s.x1 - v1.x) < 0.01 && Math.abs(s.y1 - v1.y) < 0.01) ||
+                     (Math.abs(s.x2 - v1.x) < 0.01 && Math.abs(s.y2 - v1.y) < 0.01))
+                  );
+                  
+                  const v2Bonds = segments.filter((s, idx) => 
+                    idx !== closestIdx && s.bondOrder > 0 &&
+                    ((Math.abs(s.x1 - v2.x) < 0.01 && Math.abs(s.y1 - v2.y) < 0.01) ||
+                     (Math.abs(s.x2 - v2.x) < 0.01 && Math.abs(s.y2 - v2.y) < 0.01))
+                  );
+                  
+                  // If BOTH vertices have existing bonds, skip linear geometry (keep existing structure)
+                  const bothVerticesHaveBonds = v1Bonds.length > 0 && v2Bonds.length > 0;
+                  
+                  // Only apply linear geometry if not both vertices have bonds
+                  if (!bothVerticesHaveBonds && (v1Bonds.length > 0 || v2Bonds.length > 0)) {
+                    let anchorVertex, otherVertex, anchorBonds;
+                    
+                    if (v1Bonds.length > 0) {
+                      anchorVertex = v1;
+                      otherVertex = v2;
+                      anchorBonds = v1Bonds;
+                    } else {
+                      anchorVertex = v2;
+                      otherVertex = v1;
+                      anchorBonds = v2Bonds;
+                    }
+                    
+                    // Calculate the direction of existing bonds from the anchor vertex
+                    const existingBond = anchorBonds[0]; // Use first bond for orientation
+                    let existingBondAngle;
+                    
+                    if (Math.abs(existingBond.x1 - anchorVertex.x) < 0.01 && Math.abs(existingBond.y1 - anchorVertex.y) < 0.01) {
+                      // Anchor is at the start of the existing bond
+                      existingBondAngle = Math.atan2(existingBond.y2 - anchorVertex.y, existingBond.x2 - anchorVertex.x);
+                    } else {
+                      // Anchor is at the end of the existing bond
+                      existingBondAngle = Math.atan2(existingBond.y1 - anchorVertex.y, existingBond.x1 - anchorVertex.x);
+                    }
+                    
+                    // Orient triple bond 180° from the existing bond
+                    const tripleBondAngle = existingBondAngle + Math.PI;
+                    const newOtherX = anchorVertex.x + Math.cos(tripleBondAngle) * hexRadius;
+                    const newOtherY = anchorVertex.y + Math.sin(tripleBondAngle) * hexRadius;
+                    
+                    // Update the segment coordinates for linear orientation
+                    if (anchorVertex === v1) {
+                      updatedSegment.x2 = newOtherX;
+                      updatedSegment.y2 = newOtherY;
+                    } else {
+                      updatedSegment.x1 = newOtherX;
+                      updatedSegment.y1 = newOtherY;
+                    }
+                    
+                                         // Update the direction based on new coordinates
+                     updatedSegment.direction = calculateBondDirection(updatedSegment.x1, updatedSegment.y1, updatedSegment.x2, updatedSegment.y2);
+                     
+                     // Store the vertex update to be applied immediately after segment update
+                     updatedSegment._needsVertexUpdate = {
+                       newOtherX,
+                       newOtherY,
+                       originalX1: seg.x1,
+                       originalY1: seg.y1,
+                       originalX2: seg.x2,
+                       originalY2: seg.y2,
+                       anchorVertex: anchorVertex, // The vertex that stays on-grid
+                       otherVertex: otherVertex    // The vertex that becomes off-grid
+                     };
+                                     } else if (!bothVerticesHaveBonds) {
+                     // No existing bonds and not both vertices have bonds, mark vertices as off-grid
+                     updatedSegment._needsVertexUpdate = {
+                       newOtherX: seg.x2, // Keep original coordinates
+                       newOtherY: seg.y2,
+                       originalX1: seg.x1,
+                       originalY1: seg.y1,
+                       originalX2: seg.x2,
+                       originalY2: seg.y2
+                     };
+                   }
+                   // If both vertices have bonds, do nothing special - keep existing structure
+                }
+                
+                return updatedSegment;
+              }
+              return seg;
+            });
+          } else if (mode === 'triple') {
+            // Triple bond mode - any existing bond (1 or 2) goes to 3, only 3 goes to 0, 0 goes to 3
+            updatedSegments = segments.map((seg, idx) => {
+              if (idx === closestIdx) {
+                const newBondOrder = seg.bondOrder === 3 ? 0 : 3;
+                const direction = seg.direction || calculateBondDirection(seg.x1, seg.y1, seg.x2, seg.y2);
+                
+                const updatedSegment = { 
+                  ...seg, 
+                  bondOrder: newBondOrder,
+                  bondType: null, // Clear any special bond type when using triple bond mode
+                  direction: direction, // Ensure direction is set
+                  upperVertex: undefined, // Clear double bond vertices for triple bonds
+                  lowerVertex: undefined, // Clear double bond vertices for triple bonds
                   flipSmallerLine: false // Default to false for all bonds
                 };
                 
@@ -5259,8 +5418,8 @@ const HexGridWithToolbar = () => {
         setFourthBondPreview(null);
       }
       
-      // In draw mode, if clicking on empty space, find closest vertex and start bond preview
-      if (mode === 'draw' && !fourthBondSource) {
+      // In draw or triple mode, if clicking on empty space, find closest vertex and start bond preview
+      if ((mode === 'draw' || mode === 'triple') && !fourthBondSource) {
         // Find the closest vertex to the click position
         let closestVertex = null;
         let minDistance = Infinity;
@@ -5695,6 +5854,86 @@ const HexGridWithToolbar = () => {
       distanceToVertex,
       isPointInVertexBox
     );
+
+    // Additional logic for draw mode: prioritize vertex hover, then grid line, then nearest vertex
+    if (mode === 'draw' && !isDragging && !isSelecting && !isPasteMode && !fourthBondMode && !draggingVertex && !draggingArrowIndex) {
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        
+        // First priority: Check if we're directly hovering over a vertex
+        let directHoverVertex = null;
+        let minDirectVertexDist = vertexThreshold;
+        
+        for (let v of vertices) {
+          const dist = distanceToVertex(x, y, v.x, v.y);
+          if (dist <= minDirectVertexDist) {
+            minDirectVertexDist = dist;
+            directHoverVertex = v;
+          }
+        }
+        
+        if (directHoverVertex) {
+          // Hovering directly over a vertex - highlight vertex and clear grid line hover
+          setHoverVertex(directHoverVertex);
+          setHoverSegmentIndex(null);
+        } else {
+          // Second priority: Check if we're hovering over a grid line
+          let closestSegmentIdx = null;
+          let minSegmentDist = lineThreshold;
+          
+          segments.forEach((seg, idx) => {
+            const A = x - (seg.x1 + offset.x);
+            const B = y - (seg.y1 + offset.y);
+            const C = (seg.x2 + offset.x) - (seg.x1 + offset.x);
+            const D = (seg.y2 + offset.y) - (seg.y1 + offset.y);
+            const dot = A * C + B * D;
+            const len_sq = C * C + D * D;
+            let t = dot / len_sq;
+            t = Math.max(0, Math.min(1, t));
+            const projX = seg.x1 + offset.x + t * C;
+            const projY = seg.y1 + offset.y + t * D;
+            const dx = x - projX;
+            const dy = y - projY;
+            const distSeg = Math.sqrt(dx * dx + dy * dy);
+            if (distSeg < minSegmentDist) {
+              minSegmentDist = distSeg;
+              closestSegmentIdx = idx;
+            }
+          });
+          
+          if (closestSegmentIdx !== null) {
+            // Hovering over a grid line - highlight the segment and clear vertex hover
+            setHoverSegmentIndex(closestSegmentIdx);
+            setHoverVertex(null);
+          } else {
+            // Third priority: Find nearest vertex as fallback for empty space
+            let nearestVertex = null;
+            let minDistance = 150; // Maximum distance to consider for highlighting (in pixels)
+            
+            for (let v of vertices) {
+              const dist = distanceToVertex(x, y, v.x, v.y);
+              if (dist < minDistance) {
+                minDistance = dist;
+                nearestVertex = v;
+              }
+            }
+            
+            // Set the nearest vertex as hovered if we found one
+            if (nearestVertex) {
+              setHoverVertex(nearestVertex);
+              setHoverSegmentIndex(null); // Clear segment hover when highlighting vertex
+            } else {
+              // Not hovering over anything - clear both highlights
+              setHoverVertex(null);
+              setHoverSegmentIndex(null);
+            }
+          }
+        }
+      }
+    }
   };
   const handleMouseUp = event => {
     // Don't handle mouse up events in paste mode
@@ -5931,8 +6170,8 @@ const HexGridWithToolbar = () => {
       setCurvedArrowStartPoint(null);
     }
     
-    // Clear fourth bond state when switching away from draw mode
-    if (mode !== 'draw') {
+    // Clear fourth bond state when switching away from draw or triple mode
+    if (mode !== 'draw' && mode !== 'triple') {
       setFourthBondSource(null);
       setFourthBondPreview(null);
     }
@@ -6130,7 +6369,7 @@ const HexGridWithToolbar = () => {
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
-          marginBottom: 'calc(min(280px, 25vw) * 0.006)',
+          marginBottom: 'calc(min(280px, 25vw) * 0.001)',
           textAlign: 'left',
           userSelect: 'none',
         }}>Create</div>
@@ -6167,7 +6406,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'draw') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6210,7 +6449,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'mouse') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6253,7 +6492,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'erase') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6298,7 +6537,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'text') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6344,7 +6583,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'plus') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6390,7 +6629,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'minus') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6433,7 +6672,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'lone') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6460,7 +6699,7 @@ const HexGridWithToolbar = () => {
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
-          marginTop: 'max(8px, min(calc(min(280px, 25vw) * 0.031), 2vh))',
+          marginTop: 'max(0px, min(calc(min(280px, 25vw) * 0.001), 0vh))',
           textAlign: 'left',
           userSelect: 'none',
         }}>Reactions</div>
@@ -6487,7 +6726,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'arrow') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6525,7 +6764,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'equil') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6575,7 +6814,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve2') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6608,7 +6847,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve1') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6641,7 +6880,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve0') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6674,7 +6913,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve5') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6707,7 +6946,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve4') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6740,7 +6979,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve3') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6759,7 +6998,7 @@ const HexGridWithToolbar = () => {
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
-          marginTop: 'max(8px, min(calc(min(280px, 25vw) * 0.031), 2vh))',
+          marginTop: 'max(0px, min(calc(min(280px, 25vw) * 0.001), 0vh))',
           textAlign: 'left',
           userSelect: 'none',
         }}>Stereochemistry</div>
@@ -6786,7 +7025,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'wedge') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6823,7 +7062,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'dash') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6869,7 +7108,7 @@ const HexGridWithToolbar = () => {
             }}
             onMouseEnter={(e) => {
               if (mode !== 'ambiguous') {
-                e.target.style.backgroundColor = '#2a4470';
+                e.target.style.backgroundColor = '#3554a0';
                 e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
               }
             }}
@@ -6892,101 +7131,481 @@ const HexGridWithToolbar = () => {
             </svg>
           </button>
         </div>
+
+        {/* Special Section Title */}
+        <div style={{
+          color: '#888',
+          fontWeight: 600,
+          fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
+          letterSpacing: '0.04em',
+          marginTop: 'max(0px, min(calc(min(280px, 25vw) * 0.001), 0vh))',
+          textAlign: 'left',
+          userSelect: 'none',
+        }}>Special</div>
+        
+        {/* Special buttons in 2x4 grid */}
+        <div style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(4, 1fr)',
+          gridTemplateRows: 'repeat(2, 1fr)',
+          gap: 'max(4px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))',
+          marginTop: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+        }}>
+          {/* Triple Bond Button */}
+          <button
+            onClick={() => setModeAndClearSelection('triple')}
+            className="toolbar-button"
+            style={{
+              aspectRatio: '1/1',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: mode === 'triple' ? 'rgb(54,98,227)' : '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              cursor: 'pointer',
+              boxShadow: mode === 'triple' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              outline: 'none',
+              padding: 0,
+            }}
+            onMouseEnter={(e) => {
+              if (mode !== 'triple') {
+                e.target.style.backgroundColor = '#3554a0';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'triple') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
+            title="Triple Bond"
+          >
+            <svg width="max(24px, min(32px, calc(min(280px, 25vw) * 0.114)))" height="max(14px, min(18px, calc(min(280px, 25vw) * 0.064)))" viewBox="0 0 32 18" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
+              {/* Triple bond - three parallel lines (smaller) */}
+              <line x1="4" y1="5" x2="28" y2="5" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+              <line x1="4" y1="9" x2="28" y2="9" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+              <line x1="4" y1="13" x2="28" y2="13" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+            </svg>
+          </button>
+          
+          {/* Benzene preset button */}
+          <button
+            onClick={toggleBenzenePreset}
+            className="toolbar-button"
+            style={{
+              aspectRatio: '1/1',
+              backgroundColor: selectedPreset === 'benzene' ? 'rgb(54,98,227)' : '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: selectedPreset === 'benzene' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              outline: 'none',
+              padding: '4px',
+            }}
+            onMouseEnter={(e) => {
+              if (selectedPreset !== 'benzene') {
+                e.target.style.backgroundColor = '#3554a0';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (selectedPreset !== 'benzene') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
+            title="Benzene Ring"
+          >
+            {/* Benzene ring SVG preview (enlarged) */}
+            <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
+              {/* Benzene ring structure with alternating single/double bonds */}
+              <g transform="translate(60, 60)">
+                {/* Bond 0: Double bond (top-right) */}
+                <g>
+                  <line x1="40" y1="-10" x2="80" y2="12" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="42" y1="8" x2="66" y2="22" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                </g>
+                
+                {/* Bond 1: Single bond (right) */}
+                <line x1="80" y1="12" x2="80" y2="60" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                
+                {/* Bond 2: Double bond (bottom-right) */}
+                <g>
+                  <line x1="80" y1="60" x2="40" y2="82" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="66" y1="52" x2="44" y2="65" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                </g>
+                
+                {/* Bond 3: Single bond (bottom-left) */}
+                <line x1="40" y1="82" x2="0" y2="60" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                
+                {/* Bond 4: Double bond (left) */}
+                <g>
+                  <line x1="0" y1="60" x2="0" y2="12" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="14" y1="50" x2="14" y2="21" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                </g>
+                
+                {/* Bond 5: Single bond (top-left) */}
+                <line x1="0" y1="12" x2="40" y2="-10" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+              </g>
+            </svg>
+          </button>
+          
+          {/* Cyclohexane preset button */}
+          <button
+            onClick={toggleCyclohexanePreset}
+            className="toolbar-button"
+            style={{
+              aspectRatio: '1/1',
+              backgroundColor: selectedPreset === 'cyclohexane' ? 'rgb(54,98,227)' : '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: selectedPreset === 'cyclohexane' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              outline: 'none',
+              padding: '4px',
+            }}
+            onMouseEnter={(e) => {
+              if (selectedPreset !== 'cyclohexane') {
+                e.target.style.backgroundColor = '#3554a0';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (selectedPreset !== 'cyclohexane') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
+            title="Cyclohexane Ring"
+          >
+            {/* Cyclohexane ring SVG preview (enlarged) */}
+            <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
+              {/* Cyclohexane ring structure with all single bonds */}
+              <g transform="translate(60, 60)">
+                {/* All single bonds in hexagon pattern */}
+                <line x1="40" y1="-10" x2="80" y2="12" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="12" x2="80" y2="60" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="60" x2="40" y2="82" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="82" x2="0" y2="60" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="60" x2="0" y2="12" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="12" x2="40" y2="-10" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+
+              </g>
+            </svg>
+          </button>
+          
+          {/* Cyclopentane preset button */}
+          <button
+            onClick={toggleCyclopentanePreset}
+            className="toolbar-button"
+            style={{
+              aspectRatio: '1/1',
+              backgroundColor: selectedPreset === 'cyclopentane' ? 'rgb(54,98,227)' : '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: selectedPreset === 'cyclopentane' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              outline: 'none',
+              padding: '4px',
+            }}
+            onMouseEnter={(e) => {
+              if (selectedPreset !== 'cyclopentane') {
+                e.target.style.backgroundColor = '#3554a0';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (selectedPreset !== 'cyclopentane') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
+            title="Cyclopentane Ring"
+          >
+            {/* Cyclopentane ring SVG preview (enlarged) */}
+            <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
+              {/* Cyclopentane ring structure with all single bonds */}
+              <g transform="translate(60, 60)">
+                {/* All single bonds in pentagon pattern */}
+                <line x1="40" y1="0" x2="80" y2="30" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="80" y1="30" x2="66" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="66" y1="80" x2="20" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="0" y1="30" x2="16" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="40" y1="0" x2="0" y2="30" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
+              </g>
+            </svg>
+          </button>
+          
+          {/* Cyclobutane preset button */}
+          <button
+            onClick={toggleCyclobutanePreset}
+            className="toolbar-button"
+            style={{
+              aspectRatio: '1/1',
+              backgroundColor: selectedPreset === 'cyclobutane' ? 'rgb(54,98,227)' : '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: selectedPreset === 'cyclobutane' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              outline: 'none',
+              padding: '4px',
+            }}
+            onMouseEnter={(e) => {
+              if (selectedPreset !== 'cyclobutane') {
+                e.target.style.backgroundColor = '#3554a0';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (selectedPreset !== 'cyclobutane') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
+            title="Cyclobutane Ring"
+          >
+            {/* Cyclobutane ring SVG preview (enlarged) */}
+            <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
+              {/* Cyclobutane ring structure with all single bonds */}
+              <g transform="translate(60, 60)">
+                {/* All single bonds in square pattern */}
+                <line x1="0" y1="0" x2="80" y2="0" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="0" x2="80" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="80" x2="0" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="0" y2="0" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
+              </g>
+            </svg>
+          </button>
+          
+          {/* Cyclopropane preset button */}
+          <button
+            onClick={toggleCyclopropanePreset}
+            className="toolbar-button"
+            style={{
+              aspectRatio: '1/1',
+              backgroundColor: selectedPreset === 'cyclopropane' ? 'rgb(54,98,227)' : '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: selectedPreset === 'cyclopropane' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              outline: 'none',
+              padding: '4px',
+            }}
+            onMouseEnter={(e) => {
+              if (selectedPreset !== 'cyclopropane') {
+                e.target.style.backgroundColor = '#3554a0';
+                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (selectedPreset !== 'cyclopropane') {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              }
+            }}
+            title="Cyclopropane Ring"
+          >
+            {/* Cyclopropane ring SVG preview (enlarged) */}
+            <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
+              {/* Cyclopropane ring structure with all single bonds */}
+              <g transform="translate(60, 60)">
+                {/* All single bonds in triangle pattern */}
+                <line x1="80" y1="80" x2="40" y2="0" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="80" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="40" y2="0" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
+              </g>
+            </svg>
+          </button>
+          
+          {/* Placeholder button (Coming Soon) */}
+          <button
+            className="toolbar-button"
+            style={{
+              aspectRatio: '1/1',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              cursor: 'pointer',
+              boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              outline: 'none',
+              padding: 0,
+              color: '#888',
+              fontSize: 'max(10px, min(14px, calc(min(280px, 25vw) * 0.05)))',
+              fontWeight: '600',
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#3554a0';
+              e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#23395d';
+              e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+            }}
+            title="Coming Soon"
+          >
+            7
+          </button>
+          
+          <button
+            className="toolbar-button"
+            style={{
+              aspectRatio: '1/1',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: '#23395d',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+              cursor: 'pointer',
+              boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              outline: 'none',
+              padding: 0,
+              color: '#888',
+              fontSize: 'max(10px, min(14px, calc(min(280px, 25vw) * 0.05)))',
+              fontWeight: '600',
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#3554a0';
+              e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#23395d';
+              e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+            }}
+            title="Coming Soon"
+          >
+            8
+          </button>
+        </div>
         
         <div style={{ flex: 1, minHeight: '10px' }} />
         
-        {/* Undo Button */}
-        <button
-          onClick={undo}
-          disabled={historyIndex <= 0}
-          className="toolbar-button"
-          style={{
-            width: '100%',
-            padding: 'calc(min(280px, 25vw) * 0.019) 0',
-            backgroundColor: historyIndex <= 0 ? '#555' : '#23395d',
-            color: historyIndex <= 0 ? '#999' : '#fff',
-            border: 'none',
-            borderRadius: 'calc(min(280px, 25vw) * 0.025)',
-            cursor: historyIndex <= 0 ? 'not-allowed' : 'pointer',
-            boxShadow: historyIndex <= 0 ? 
-              '0 2px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.05)' :
-              '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)',
-            fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
-            fontWeight: 700,
-            marginTop: 0,
-            marginBottom: 'max(6px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))',
-            outline: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
-            opacity: historyIndex <= 0 ? 0.6 : 1,
-          }}
-          onMouseEnter={(e) => {
-            if (historyIndex > 0) {
-              e.target.style.backgroundColor = '#2a4470';
-              e.target.style.boxShadow = '0 6px 16px rgba(35,57,93,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (historyIndex > 0) {
+        {/* Undo and Erase All Buttons Side by Side */}
+        <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 'max(6px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))' }}>
+          {/* Erase All Button (Left) */}
+          <button
+            onClick={() => { 
+              handleEraseAll(); 
+              clearSelection(); 
+            }}
+            className="toolbar-button"
+            style={{
+              flex: 1,
+              padding: 'calc(min(280px, 25vw) * 0.019) 0',
+              backgroundColor: '#23395d',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.025)',
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)',
+              fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
+              fontWeight: 700,
+              marginTop: 0,
+              outline: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#dc3545';
+              e.target.style.boxShadow = '0 6px 16px rgba(220,53,69,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
+            }}
+            onMouseLeave={(e) => {
               e.target.style.backgroundColor = '#23395d';
               e.target.style.boxShadow = '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)';
-            }
-          }}
-          title={`Undo${historyIndex <= 0 ? ' (No actions to undo)' : ''}`}
-        >
-          {/* Undo SVG */}
-          <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(20px, calc(min(280px, 25vw) * 0.081))" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
-            <path d="M3 7v6h6"/>
-            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
-          </svg>
-          Undo
-        </button>
-        
-        <button
-          onClick={() => { 
-            handleEraseAll(); 
-            clearSelection(); 
-          }}
-          className="toolbar-button"
-          style={{
-            width: '100%',
-            padding: 'calc(min(280px, 25vw) * 0.019) 0',
-            backgroundColor: '#23395d',
-            color: '#fff',
-            border: 'none',
-            borderRadius: 'calc(min(280px, 25vw) * 0.025)',
-            cursor: 'pointer',
-            boxShadow: '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)',
-            fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
-            fontWeight: 700,
-            marginTop: 0,
-            marginBottom: 'max(6px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))',
-            outline: 'none',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
-          }}
-          onMouseEnter={(e) => {
-            e.target.style.backgroundColor = '#2a4470';
-            e.target.style.boxShadow = '0 6px 16px rgba(35,57,93,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.backgroundColor = '#23395d';
-            e.target.style.boxShadow = '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)';
-          }}
-        >
-          {/* Taller Trash Can SVG */}
-          <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(24px, calc(min(280px, 25vw) * 0.094))" viewBox="0 0 26 30" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
-            <rect x="4" y="8" width="18" height="18" rx="2.5"/>
-            <path d="M9 8V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/>
-            <line x1="11" y1="13" x2="11" y2="22"/>
-            <line x1="15" y1="13" x2="15" y2="22"/>
-          </svg>
-          Erase All
-        </button>
+            }}
+          >
+            {/* Taller Trash Can SVG */}
+            <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(24px, calc(min(280px, 25vw) * 0.094))" viewBox="0 0 26 30" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
+              <rect x="4" y="8" width="18" height="18" rx="2.5"/>
+              <path d="M9 8V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/>
+              <line x1="11" y1="13" x2="11" y2="22"/>
+              <line x1="15" y1="13" x2="15" y2="22"/>
+            </svg>
+            Erase All
+          </button>
+          
+          {/* Undo Button (Right) */}
+          <button
+            onClick={undo}
+            disabled={historyIndex <= 0}
+            className="toolbar-button"
+            style={{
+              flex: 1,
+              padding: 'calc(min(280px, 25vw) * 0.019) 0',
+              backgroundColor: historyIndex <= 0 ? '#555' : '#23395d',
+              color: historyIndex <= 0 ? '#999' : '#fff',
+              border: 'none',
+              borderRadius: 'calc(min(280px, 25vw) * 0.025)',
+              cursor: historyIndex <= 0 ? 'not-allowed' : 'pointer',
+              boxShadow: historyIndex <= 0 ? 
+                '0 2px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.05)' :
+                '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)',
+              fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
+              fontWeight: 700,
+              marginTop: 0,
+              outline: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+              opacity: historyIndex <= 0 ? 0.6 : 1,
+            }}
+            onMouseEnter={(e) => {
+              if (historyIndex > 0) {
+                e.target.style.backgroundColor = '#ffc107';
+                e.target.style.boxShadow = '0 6px 16px rgba(255,193,7,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (historyIndex > 0) {
+                e.target.style.backgroundColor = '#23395d';
+                e.target.style.boxShadow = '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)';
+              }
+            }}
+            title={`Undo${historyIndex <= 0 ? ' (No actions to undo)' : ''}`}
+          >
+            {/* Undo SVG */}
+            <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(20px, calc(min(280px, 25vw) * 0.081))" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
+              <path d="M3 7v6h6"/>
+              <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
+            </svg>
+            Undo
+          </button>
+        </div>
       </div>
       
 
@@ -7029,318 +7648,31 @@ const HexGridWithToolbar = () => {
             letterSpacing: '0.04em',
             textAlign: 'left',
             userSelect: 'none',
-            marginBottom: '4px',
+            marginBottom: '0px',
             whiteSpace: 'nowrap', // Prevent text wrapping during animation
           }}>Presets</div>
           
-          {/* Placeholder content grid */}
+          {/* Empty content area - preset buttons are now in main toolbar */}
           <div style={{
             display: 'flex',
-            flexDirection: 'row',
+            flexDirection: 'column',
             gap: '8px',
-            flexWrap: 'nowrap', // Prevent wrapping during animation
-            justifyContent: 'flex-start',
-            alignItems: 'center',
             flex: 1,
-            minWidth: '0', // Allow shrinking during animation
+            minWidth: '0',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#888',
+            fontSize: '14px',
+            fontWeight: '500',
+            textAlign: 'center',
+            padding: '20px',
+            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
           }}>
-            {/* Preset buttons */}
-            {/* Benzene preset button */}
-            <button
-              onClick={toggleBenzenePreset}
-              className="toolbar-button"
-              style={{
-                width: '95px',
-                height: '95px',
-                backgroundColor: selectedPreset === 'benzene' ? 'rgb(54,98,227)' : '#23395d',
-                border: 'none',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                boxShadow: selectedPreset === 'benzene' ? 
-                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-                flexShrink: 0,
-                outline: 'none',
-                padding: '8px',
-              }}
-              onMouseEnter={(e) => {
-                if (selectedPreset !== 'benzene') {
-                  e.target.style.backgroundColor = '#2a4470';
-                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (selectedPreset !== 'benzene') {
-                  e.target.style.backgroundColor = '#23395d';
-                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-                }
-              }}
-              title="Benzene Ring"
-            >
-                                            {/* Benzene ring SVG preview */}
-               <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
-                                    {/* Benzene ring structure with alternating single/double bonds */}
-                   <g transform="translate(60, 60)">
-                     {/* Bond 0: Double bond (top-right) */}
-                     <g>
-                       <line x1="0" y1="-40" x2="34.6" y2="-20" stroke="#fff" strokeWidth="3"/>
-                       <line x1="2" y1="-31" x2="28.6" y2="-15" stroke="#fff" strokeWidth="3"/>
-                     </g>
-                     
-                     {/* Bond 1: Single bond (right) */}
-                     <line x1="34.6" y1="-20" x2="34.6" y2="20" stroke="#fff" strokeWidth="3"/>
-                     
-                     {/* Bond 2: Double bond (bottom-right) */}
-                     <g>
-                       <line x1="34.6" y1="20" x2="0" y2="40" stroke="#fff" strokeWidth="3"/>
-                       <line x1="28.6" y1="15" x2="2" y2="31" stroke="#fff" strokeWidth="3"/>
-                     </g>
-                     
-                     {/* Bond 3: Single bond (bottom-left) */}
-                     <line x1="0" y1="40" x2="-34.6" y2="20" stroke="#fff" strokeWidth="3"/>
-                     
-                     {/* Bond 4: Double bond (left) */}
-                     <g>
-                       <line x1="-34.6" y1="20" x2="-34.6" y2="-20" stroke="#fff" strokeWidth="3"/>
-                       <line x1="-26.6" y1="15" x2="-26.6" y2="-15" stroke="#fff" strokeWidth="3"/>
-                     </g>
-                     
-                     {/* Bond 5: Single bond (top-left) */}
-                     <line x1="-34.6" y1="-20" x2="0" y2="-40" stroke="#fff" strokeWidth="3"/>
-                   </g>
-               </svg>
-            </button>
-            
-            {/* Cyclohexane preset button */}
-            <button
-              onClick={toggleCyclohexanePreset}
-              className="toolbar-button"
-              style={{
-                width: '95px',
-                height: '95px',
-                backgroundColor: selectedPreset === 'cyclohexane' ? 'rgb(54,98,227)' : '#23395d',
-                border: 'none',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                boxShadow: selectedPreset === 'cyclohexane' ? 
-                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-                flexShrink: 0,
-                outline: 'none',
-                padding: '8px',
-              }}
-              onMouseEnter={(e) => {
-                if (selectedPreset !== 'cyclohexane') {
-                  e.target.style.backgroundColor = '#2a4470';
-                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (selectedPreset !== 'cyclohexane') {
-                  e.target.style.backgroundColor = '#23395d';
-                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-                }
-              }}
-              title="Cyclohexane Ring"
-            >
-              {/* Cyclohexane ring SVG preview */}
-              <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
-                {/* Cyclohexane ring structure with all single bonds */}
-                <g transform="translate(60, 60)">
-                  {/* All single bonds in hexagon pattern */}
-                  <line x1="0" y1="-40" x2="34.6" y2="-20" stroke="#fff" strokeWidth="3"/>
-                  <line x1="34.6" y1="-20" x2="34.6" y2="20" stroke="#fff" strokeWidth="3"/>
-                  <line x1="34.6" y1="20" x2="0" y2="40" stroke="#fff" strokeWidth="3"/>
-                  <line x1="0" y1="40" x2="-34.6" y2="20" stroke="#fff" strokeWidth="3"/>
-                  <line x1="-34.6" y1="20" x2="-34.6" y2="-20" stroke="#fff" strokeWidth="3"/>
-                  <line x1="-34.6" y1="-20" x2="0" y2="-40" stroke="#fff" strokeWidth="3"/>
-                </g>
-              </svg>
-            </button>
-            
-            {/* Cyclopentane preset button */}
-            <button
-              onClick={toggleCyclopentanePreset}
-              className="toolbar-button"
-              style={{
-                width: '95px',
-                height: '95px',
-                backgroundColor: selectedPreset === 'cyclopentane' ? 'rgb(54,98,227)' : '#23395d',
-                border: 'none',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                boxShadow: selectedPreset === 'cyclopentane' ? 
-                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-                flexShrink: 0,
-                outline: 'none',
-                padding: '8px',
-              }}
-              onMouseEnter={(e) => {
-                if (selectedPreset !== 'cyclopentane') {
-                  e.target.style.backgroundColor = '#2a4470';
-                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (selectedPreset !== 'cyclopentane') {
-                  e.target.style.backgroundColor = '#23395d';
-                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-                }
-              }}
-              title="Cyclopentane Ring"
-            >
-              {/* Cyclopentane ring SVG preview */}
-              <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
-                {/* Cyclopentane ring structure with all single bonds */}
-                <g transform="translate(60, 60)">
-                  {/* All single bonds in pentagon pattern */}
-                  <line x1="0" y1="-32" x2="30.4" y2="-9.9" stroke="#fff" strokeWidth="3"/>
-                  <line x1="30.4" y1="-9.9" x2="18.8" y2="25.9" stroke="#fff" strokeWidth="3"/>
-                  <line x1="18.8" y1="25.9" x2="-18.8" y2="25.9" stroke="#fff" strokeWidth="3"/>
-                  <line x1="-18.8" y1="25.9" x2="-30.4" y2="-9.9" stroke="#fff" strokeWidth="3"/>
-                  <line x1="-30.4" y1="-9.9" x2="0" y2="-32" stroke="#fff" strokeWidth="3"/>
-                </g>
-              </svg>
-            </button>
-
-            {/* Cyclobutane preset button */}
-            <button
-              onClick={toggleCyclobutanePreset}
-              className="toolbar-button"
-              style={{
-                width: '95px',
-                height: '95px',
-                backgroundColor: selectedPreset === 'cyclobutane' ? 'rgb(54,98,227)' : '#23395d',
-                border: 'none',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                boxShadow: selectedPreset === 'cyclobutane' ? 
-                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-                flexShrink: 0,
-                outline: 'none',
-                padding: '8px',
-              }}
-              onMouseEnter={(e) => {
-                if (selectedPreset !== 'cyclobutane') {
-                  e.target.style.backgroundColor = '#2a4470';
-                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (selectedPreset !== 'cyclobutane') {
-                  e.target.style.backgroundColor = '#23395d';
-                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-                }
-              }}
-              title="Cyclobutane Ring"
-            >
-              {/* Cyclobutane ring SVG preview */}
-              <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
-                {/* Cyclobutane ring structure with all single bonds */}
-                <g transform="translate(60, 60)">
-                  {/* All single bonds in square pattern */}
-                  <line x1="25" y1="-25" x2="25" y2="25" stroke="#fff" strokeWidth="3"/>
-                  <line x1="25" y1="25" x2="-25" y2="25" stroke="#fff" strokeWidth="3"/>
-                  <line x1="-25" y1="25" x2="-25" y2="-25" stroke="#fff" strokeWidth="3"/>
-                  <line x1="-25" y1="-25" x2="25" y2="-25" stroke="#fff" strokeWidth="3"/>
-                </g>
-              </svg>
-            </button>
-
-            {/* Cyclopropane preset button */}
-            <button
-              onClick={toggleCyclopropanePreset}
-              className="toolbar-button"
-              style={{
-                width: '95px',
-                height: '95px',
-                backgroundColor: selectedPreset === 'cyclopropane' ? 'rgb(54,98,227)' : '#23395d',
-                border: 'none',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-                boxShadow: selectedPreset === 'cyclopropane' ? 
-                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-                flexShrink: 0,
-                outline: 'none',
-                padding: '8px',
-              }}
-              onMouseEnter={(e) => {
-                if (selectedPreset !== 'cyclopropane') {
-                  e.target.style.backgroundColor = '#2a4470';
-                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (selectedPreset !== 'cyclopropane') {
-                  e.target.style.backgroundColor = '#23395d';
-                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-                }
-              }}
-              title="Cyclopropane Ring"
-            >
-              {/* Cyclopropane ring SVG preview */}
-              <svg width="70" height="70" viewBox="0 0 120 120" fill="none" style={{ pointerEvents: 'none' }}>
-                {/* Cyclopropane ring structure with all single bonds */}
-                <g transform="translate(60, 60)">
-                  {/* All single bonds in triangle pattern */}
-                  <line x1="0" y1="-23" x2="20" y2="11.5" stroke="#fff" strokeWidth="3"/>
-                  <line x1="20" y1="11.5" x2="-20" y2="11.5" stroke="#fff" strokeWidth="3"/>
-                  <line x1="-20" y1="11.5" x2="0" y2="-23" stroke="#fff" strokeWidth="3"/>
-                </g>
-              </svg>
-            </button>
-
-            {/* Placeholder preset button */}
-            <button
-              className="toolbar-button"
-              style={{
-                width: '95px',
-                height: '95px',
-                backgroundColor: '#23395d',
-                border: 'none',
-                borderRadius: '8px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: '#888',
-                fontSize: '16px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-                flexShrink: 0,
-                outline: 'none',
-                padding: '8px',
-              }}
-              onMouseEnter={(e) => {
-                e.target.style.backgroundColor = '#2a4470';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
-              }}
-              onMouseLeave={(e) => {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-              }}
-              title="Coming Soon"
-            >
-              6
-            </button>
+            <div>Preset buttons are now</div>
+            <div>available in the main toolbar</div>
+            <div style={{ marginTop: '8px', fontSize: '12px', opacity: '0.7' }}>
+              This space reserved for future features
+            </div>
           </div>
         </div>
         
@@ -7757,7 +8089,7 @@ const HexGridWithToolbar = () => {
                 boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
                 transition: 'background 0.2s',
               }}
-              onMouseEnter={(e) => e.target.style.backgroundColor = '#2a4470'}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#3554a0'}
               onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
             >
               Close
@@ -7802,7 +8134,7 @@ const HexGridWithToolbar = () => {
           }}
           title="Export"
           onMouseEnter={(e) => {
-            e.target.style.backgroundColor = '#2a4470';
+            e.target.style.backgroundColor = '#3554a0';
             e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
           }}
           onMouseLeave={(e) => {
@@ -7841,7 +8173,7 @@ const HexGridWithToolbar = () => {
           title={`Grid Breaking Debug: ${gridBreakingEnabled ? 'ON' : 'OFF'} (${gridBreakingAnalysis.totalOffGrid} off-grid vertices)`}
           onMouseEnter={(e) => {
             if (!gridBreakingEnabled) {
-              e.target.style.backgroundColor = '#2a4470';
+              e.target.style.backgroundColor = '#3554a0';
               e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
             }
           }}
@@ -7880,7 +8212,7 @@ const HexGridWithToolbar = () => {
           }}
           title="About"
           onMouseEnter={(e) => {
-            e.target.style.backgroundColor = '#2a4470';
+            e.target.style.backgroundColor = '#3554a0';
             e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
           }}
           onMouseLeave={(e) => {
