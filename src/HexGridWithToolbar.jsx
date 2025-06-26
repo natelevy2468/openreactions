@@ -252,6 +252,9 @@ const HexGridWithToolbar = () => {
   const [draggingVertex, setDraggingVertex] = useState(null);
   const [draggingArrowIndex, setDraggingArrowIndex] = useState(null);
   const [dragArrowOffset, setDragArrowOffset] = useState({ x: 0, y: 0 });
+  
+  // Track when we're actively dragging to defer expensive operations
+  const [isDraggingVertex, setIsDraggingVertex] = useState(false);
 
   // Undo/Redo history system
   const [history, setHistory] = useState([]);
@@ -2260,11 +2263,14 @@ const HexGridWithToolbar = () => {
       ctx.restore();
     }
     
-    // Highlight free-floating vertices in mouse mode
+    // Highlight draggable vertices (free-floating or off-grid) in mouse mode
     if (mode === 'mouse') {
       vertices.forEach(v => {
         const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
-        if (freeFloatingVertices.has(key)) {
+        const isFreeFloating = freeFloatingVertices.has(key);
+        const isOffGrid = v.isOffGrid === true;
+        
+        if (isFreeFloating || isOffGrid) {
           const isBeingDragged = draggingVertex && 
             Math.abs(draggingVertex.x - v.x) < 0.01 && 
             Math.abs(draggingVertex.y - v.y) < 0.01;
@@ -2377,27 +2383,74 @@ const HexGridWithToolbar = () => {
             ctx.fill();
             ctx.restore();
           } else {
-            // For vertices with no atom label, use a small box
+            // For vertices with no atom label, use a four-way arrow
             ctx.save();
-            ctx.beginPath();
             
-            const boxSize = 15;
-            ctx.rect(
-              v.x + offset.x - boxSize/2, 
-              v.y + offset.y - boxSize/2,
-              boxSize, 
-              boxSize
-            );
+            const centerX = v.x + offset.x;
+            const centerY = v.y + offset.y;
+            const arrowSize = 13; // Half the total size (so 24px total)
             
             if (isBeingDragged) {
               ctx.strokeStyle = 'rgba(54,98,227,1.0)';
-              ctx.lineWidth = 2;
+              ctx.fillStyle = 'rgba(54,98,227,1.0)';
+              ctx.lineWidth = 5;
             } else {
               ctx.strokeStyle = 'rgba(54,98,227,0.8)';
-              ctx.lineWidth = 1.5;
+              ctx.fillStyle = 'rgba(54,98,227,0.8)';
+              ctx.lineWidth = 2.5;
             }
             
+            ctx.lineJoin = 'round';
+            ctx.lineCap = 'round';
+            
+            // Draw four-way arrow (cross with arrowheads)
+            ctx.beginPath();
+            
+            // Horizontal line
+            ctx.moveTo(centerX - arrowSize, centerY);
+            ctx.lineTo(centerX + arrowSize, centerY);
+            
+            // Vertical line  
+            ctx.moveTo(centerX, centerY - arrowSize);
+            ctx.lineTo(centerX, centerY + arrowSize);
+            
             ctx.stroke();
+            
+            // Draw arrowheads
+            const arrowheadSize = 4;
+            
+            // Right arrowhead
+            ctx.beginPath();
+            ctx.moveTo(centerX + arrowSize, centerY);
+            ctx.lineTo(centerX + arrowSize - arrowheadSize, centerY - arrowheadSize);
+            ctx.lineTo(centerX + arrowSize - arrowheadSize, centerY + arrowheadSize);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Left arrowhead
+            ctx.beginPath();
+            ctx.moveTo(centerX - arrowSize, centerY);
+            ctx.lineTo(centerX - arrowSize + arrowheadSize, centerY - arrowheadSize);
+            ctx.lineTo(centerX - arrowSize + arrowheadSize, centerY + arrowheadSize);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Up arrowhead
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY - arrowSize);
+            ctx.lineTo(centerX - arrowheadSize, centerY - arrowSize + arrowheadSize);
+            ctx.lineTo(centerX + arrowheadSize, centerY - arrowSize + arrowheadSize);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Down arrowhead
+            ctx.beginPath();
+            ctx.moveTo(centerX, centerY + arrowSize);
+            ctx.lineTo(centerX - arrowheadSize, centerY + arrowSize - arrowheadSize);
+            ctx.lineTo(centerX + arrowheadSize, centerY + arrowSize - arrowheadSize);
+            ctx.closePath();
+            ctx.fill();
+            
             ctx.restore();
           }
         }
@@ -2539,18 +2592,71 @@ const HexGridWithToolbar = () => {
         
                       drawArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, arrowColor, 3, mode);
         
-        // Draw semi-transparent blue circle in the center of forward arrows when in mouse mode
+        // Draw four-way arrow indicator in the center of forward arrows when in mouse mode
         if (mode === 'mouse') {
           // Calculate center point
           const centerX = (ox1 + ox2) / 2;
           const centerY = (oy1 + oy2) / 2;
           
-          // Draw the blue circle
+          // Draw the four-way arrow
           ctx.save();
+          
+          const arrowSize = 12; // Size from center (extended by 4px)
+          const arrowheadSize = 4;
+          
+          ctx.strokeStyle = 'rgba(54,98,227,0.8)';
+          ctx.fillStyle = 'rgba(54,98,227,0.8)';
+          ctx.lineWidth = 2.5;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
+          
+          // Draw four-way arrow (cross with arrowheads)
           ctx.beginPath();
-          ctx.arc(centerX, centerY, 10, 0, 2 * Math.PI); // Increased from 8 to 10
-          ctx.fillStyle = 'rgba(54, 98, 227, 0.6)'; // Semi-transparent blue
+          
+          // Horizontal line
+          ctx.moveTo(centerX - arrowSize, centerY);
+          ctx.lineTo(centerX + arrowSize, centerY);
+          
+          // Vertical line  
+          ctx.moveTo(centerX, centerY - arrowSize);
+          ctx.lineTo(centerX, centerY + arrowSize);
+          
+          ctx.stroke();
+          
+          // Draw arrowheads
+          
+          // Right arrowhead
+          ctx.beginPath();
+          ctx.moveTo(centerX + arrowSize, centerY);
+          ctx.lineTo(centerX + arrowSize - arrowheadSize, centerY - arrowheadSize);
+          ctx.lineTo(centerX + arrowSize - arrowheadSize, centerY + arrowheadSize);
+          ctx.closePath();
           ctx.fill();
+          
+          // Left arrowhead
+          ctx.beginPath();
+          ctx.moveTo(centerX - arrowSize, centerY);
+          ctx.lineTo(centerX - arrowSize + arrowheadSize, centerY - arrowheadSize);
+          ctx.lineTo(centerX - arrowSize + arrowheadSize, centerY + arrowheadSize);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Up arrowhead
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY - arrowSize);
+          ctx.lineTo(centerX - arrowheadSize, centerY - arrowSize + arrowheadSize);
+          ctx.lineTo(centerX + arrowheadSize, centerY - arrowSize + arrowheadSize);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Down arrowhead
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY + arrowSize);
+          ctx.lineTo(centerX - arrowheadSize, centerY + arrowSize - arrowheadSize);
+          ctx.lineTo(centerX + arrowheadSize, centerY + arrowSize - arrowheadSize);
+          ctx.closePath();
+          ctx.fill();
+          
           ctx.restore();
         }
       } else if (type === 'equil') {
@@ -2566,18 +2672,71 @@ const HexGridWithToolbar = () => {
         
                       drawEquilArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, arrowColor, 3, topX1, topX2, bottomX1, bottomX2, index, mode, isPointInArrowCircle, offset);
         
-        // Draw semi-transparent blue circle in the center of equilibrium arrows when in mouse mode
+        // Draw four-way arrow indicator in the center of equilibrium arrows when in mouse mode
         if (mode === 'mouse') {
           // Calculate center point
           const centerX = (ox1 + ox2) / 2;
           const centerY = oy1; // For equilibrium arrows, use the middle y-coordinate
           
-          // Draw the blue circle
+          // Draw the four-way arrow
           ctx.save();
+          
+          const arrowSize = 12; // Size from center (extended by 4px)
+          const arrowheadSize = 4;
+          
+          ctx.strokeStyle = 'rgba(54,98,227,0.8)';
+          ctx.fillStyle = 'rgba(54,98,227,0.8)';
+          ctx.lineWidth = 2.5;
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
+          
+          // Draw four-way arrow (cross with arrowheads)
           ctx.beginPath();
-          ctx.arc(centerX, centerY, 10, 0, 2 * Math.PI); // Increased from 8 to 10
-          ctx.fillStyle = 'rgba(54, 98, 227, 0.6)'; // Semi-transparent blue
+          
+          // Horizontal line
+          ctx.moveTo(centerX - arrowSize, centerY);
+          ctx.lineTo(centerX + arrowSize, centerY);
+          
+          // Vertical line  
+          ctx.moveTo(centerX, centerY - arrowSize);
+          ctx.lineTo(centerX, centerY + arrowSize);
+          
+          ctx.stroke();
+          
+          // Draw arrowheads
+          
+          // Right arrowhead
+          ctx.beginPath();
+          ctx.moveTo(centerX + arrowSize, centerY);
+          ctx.lineTo(centerX + arrowSize - arrowheadSize, centerY - arrowheadSize);
+          ctx.lineTo(centerX + arrowSize - arrowheadSize, centerY + arrowheadSize);
+          ctx.closePath();
           ctx.fill();
+          
+          // Left arrowhead
+          ctx.beginPath();
+          ctx.moveTo(centerX - arrowSize, centerY);
+          ctx.lineTo(centerX - arrowSize + arrowheadSize, centerY - arrowheadSize);
+          ctx.lineTo(centerX - arrowSize + arrowheadSize, centerY + arrowheadSize);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Up arrowhead
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY - arrowSize);
+          ctx.lineTo(centerX - arrowheadSize, centerY - arrowSize + arrowheadSize);
+          ctx.lineTo(centerX + arrowheadSize, centerY - arrowSize + arrowheadSize);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Down arrowhead
+          ctx.beginPath();
+          ctx.moveTo(centerX, centerY + arrowSize);
+          ctx.lineTo(centerX - arrowheadSize, centerY + arrowSize - arrowheadSize);
+          ctx.lineTo(centerX + arrowheadSize, centerY + arrowSize - arrowheadSize);
+          ctx.closePath();
+          ctx.fill();
+          
           ctx.restore();
         }
       } else if (type.startsWith('curve')) {
@@ -4197,7 +4356,8 @@ const HexGridWithToolbar = () => {
 
   // Handle clicks for draw vs erase
   const handleClick = useCallback(event => {
-    if (isDragging) return;
+    // Only block clicks if we're dragging the canvas or selecting, not if we're dragging vertices
+    if (isDragging && !draggingVertex) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -4293,6 +4453,41 @@ const HexGridWithToolbar = () => {
           if (!fourthBondSource) {
             setFourthBondSource(nearestVertex);
             setFourthBondMode(true); // Activate fourth bond mode for preview
+            
+            // Generate initial preview pointing toward the click position
+            const sourceScreenX = nearestVertex.x + offset.x;
+            const sourceScreenY = nearestVertex.y + offset.y;
+            const dx = x - sourceScreenX;
+            const dy = y - sourceScreenY;
+            const length = Math.sqrt(dx * dx + dy * dy);
+            
+            // If click is very close to vertex, default to pointing right
+            let endX, endY;
+            if (length < 10) {
+              endX = sourceScreenX + hexRadius;
+              endY = sourceScreenY;
+            } else {
+              // Point toward click position at hexRadius distance
+              const ux = dx / length;
+              const uy = dy / length;
+              endX = sourceScreenX + ux * hexRadius;
+              endY = sourceScreenY + uy * hexRadius;
+            }
+            
+            // Find closest grid vertex for snapping
+            const gridX = endX - offset.x;
+            const gridY = endY - offset.y;
+            const closestGrid = findClosestGridVertex(gridX, gridY, 30);
+            
+            setFourthBondPreview({
+              startX: sourceScreenX,
+              startY: sourceScreenY,
+              endX: endX,
+              endY: endY,
+              snappedToGrid: !!closestGrid,
+              snappedToVertex: !!closestGrid
+            });
+            
             return; // Exit early, freebond source set
           }
           // If we already have a source, any click (including on the same vertex) will be handled
@@ -4464,40 +4659,43 @@ const HexGridWithToolbar = () => {
       }
       if (foundVertex) {
         const key = `${foundVertex.x.toFixed(2)},${foundVertex.y.toFixed(2)}`;
-        if (vertexAtoms[key]) {
-          // Capture state before modifying charges/lone pairs
-          captureState();
-          setVertexAtoms(prev => {
-            const prevVal = prev[key];
-            let newVal = prevVal;
-            if (typeof prevVal === 'string') {
-              newVal = { symbol: prevVal };
-            }
-            if (mode === 'plus') {
-              // Toggle +1 charge (cycle: 0 -> +1 -> 0)
-              const charge = newVal.charge === 1 ? 0 : 1;
-              return { ...prev, [key]: { ...newVal, charge } };
-            } else if (mode === 'minus') {
-              // Toggle -1 charge (cycle: 0 -> -1 -> 0)
-              const charge = newVal.charge === -1 ? 0 : -1;
-              return { ...prev, [key]: { ...newVal, charge } };
-            } else if (mode === 'lone') {
-              // Get vertex type information
-              const vertexType = getType(foundVertex, vertexTypes, segments);
-              const isTopStatus = getIfTop(foundVertex, segments);
-              
-              // Calculate lone pair position order for this specific vertex
-              const connectedBonds = getConnectedBonds(foundVertex, segments);
-              const priorityOrder = getLonePairPositionOrder(connectedBonds, foundVertex);
-      
-              
-              // Increment lone pairs count and store the priority order
-              const lonePairs = ((newVal.lonePairs || 0) + 1) % 9;
-              return { ...prev, [key]: { ...newVal, lonePairs, lonePairOrder: priorityOrder } };
-            }
-            return prev;
-          });
-        }
+        // Capture state before modifying charges/lone pairs
+        captureState();
+        setVertexAtoms(prev => {
+          const prevVal = prev[key];
+          let newVal = prevVal;
+          
+          // If no atom exists, create a default one (usually Carbon)
+          if (!prevVal) {
+            newVal = { symbol: '' }; // Empty symbol for implicit carbon
+          } else if (typeof prevVal === 'string') {
+            newVal = { symbol: prevVal };
+          }
+          
+          if (mode === 'plus') {
+            // Toggle +1 charge (cycle: 0 -> +1 -> 0)
+            const charge = newVal.charge === 1 ? 0 : 1;
+            return { ...prev, [key]: { ...newVal, charge } };
+          } else if (mode === 'minus') {
+            // Toggle -1 charge (cycle: 0 -> -1 -> 0)
+            const charge = newVal.charge === -1 ? 0 : -1;
+            return { ...prev, [key]: { ...newVal, charge } };
+          } else if (mode === 'lone') {
+            // Get vertex type information
+            const vertexType = getType(foundVertex, vertexTypes, segments);
+            const isTopStatus = getIfTop(foundVertex, segments);
+            
+            // Calculate lone pair position order for this specific vertex
+            const connectedBonds = getConnectedBonds(foundVertex, segments);
+            const priorityOrder = getLonePairPositionOrder(connectedBonds, foundVertex);
+    
+            
+            // Increment lone pairs count and store the priority order
+            const lonePairs = ((newVal.lonePairs || 0) + 1) % 9;
+            return { ...prev, [key]: { ...newVal, lonePairs, lonePairOrder: priorityOrder } };
+          }
+          return prev;
+        });
       }
       return;
     }
@@ -4705,9 +4903,12 @@ const HexGridWithToolbar = () => {
         // Add the new vertex
         setVertices(prevVertices => [...prevVertices, newVertex]);
         
+        // Add the new text mode vertex to freeFloatingVertices set so it can be moved
+        const newVertexKey = `${gridX.toFixed(2)},${gridY.toFixed(2)}`;
+        setFreeFloatingVertices(prevSet => new Set([...prevSet, newVertexKey]));
+        
         // Set up text input for the new vertex
-        const vertexKey = `${gridX.toFixed(2)},${gridY.toFixed(2)}`;
-        setMenuVertexKey(vertexKey);
+        setMenuVertexKey(newVertexKey);
         
         // Position the input box at the vertex position
         setAtomInputPosition({ x: x, y: y }); // Use screen coordinates for positioning
@@ -5077,6 +5278,34 @@ const HexGridWithToolbar = () => {
         if (closestVertex) {
           setFourthBondSource(closestVertex);
           setFourthBondMode(true); // Activate fourth bond mode for preview
+          
+          // Generate initial preview pointing from vertex toward click position
+          const sourceScreenX = closestVertex.x + offset.x;
+          const sourceScreenY = closestVertex.y + offset.y;
+          const dx = x - sourceScreenX;
+          const dy = y - sourceScreenY;
+          const length = Math.sqrt(dx * dx + dy * dy);
+          
+          // Point toward click position at hexRadius distance
+          const ux = dx / length;
+          const uy = dy / length;
+          const endX = sourceScreenX + ux * hexRadius;
+          const endY = sourceScreenY + uy * hexRadius;
+          
+          // Find closest grid vertex for snapping
+          const gridX = endX - offset.x;
+          const gridY = endY - offset.y;
+          const closestGrid = findClosestGridVertex(gridX, gridY, 30);
+          
+          setFourthBondPreview({
+            startX: sourceScreenX,
+            startY: sourceScreenY,
+            endX: endX,
+            endY: endY,
+            snappedToGrid: !!closestGrid,
+            snappedToVertex: !!closestGrid
+          });
+          
           return;
         }
       }
@@ -5392,6 +5621,7 @@ const HexGridWithToolbar = () => {
       setIsDragging,
       setDidDrag,
       setDraggingVertex,
+      setIsDraggingVertex,
       setIsSelecting,
       setSelectionStart,
       setSelectionEnd
@@ -5489,6 +5719,7 @@ const HexGridWithToolbar = () => {
       setIsSelecting,
       setIsDragging,
       setDraggingVertex,
+      setIsDraggingVertex,
       setDraggingArrowIndex,
       setDragArrowOffset,
       setHoverVertex,
@@ -5609,11 +5840,15 @@ const HexGridWithToolbar = () => {
     }
   }, [offGridVertexCount]);
 
-  // Update vertex types whenever vertices, segments, or atoms change
+  // Update vertex types whenever vertices, segments, or atoms change (skip during dragging)
   useEffect(() => {
-    const newVertexTypes = determineVertexTypes(vertices, segments, vertexAtoms);
-    setVertexTypes(newVertexTypes);
-  }, [vertices, segments, vertexAtoms]);
+    if (!isDraggingVertex) {
+      const newVertexTypes = determineVertexTypes(vertices, segments, vertexAtoms);
+      setVertexTypes(newVertexTypes);
+    }
+  }, [vertices, segments, vertexAtoms, isDraggingVertex]);
+
+
 
   // Capture initial state when component first loads
   useEffect(() => {
@@ -5714,10 +5949,12 @@ const HexGridWithToolbar = () => {
 
   }, [mode]);
 
-  // Effect to run ring detection whenever vertices or segments change
+  // Effect to run ring detection whenever vertices or segments change (skip during dragging)
   useEffect(() => {
-    detectRings();
-  }, [segments, vertices, detectRings]);
+    if (!isDraggingVertex) {
+      detectRings();
+    }
+  }, [segments, vertices, detectRings, isDraggingVertex]);
 
   // Effect to run grid breaking analysis only when off-grid vertices change or bond structure changes
   const bondCount = useMemo(() => 
@@ -5726,10 +5963,10 @@ const HexGridWithToolbar = () => {
   );
 
   useEffect(() => {
-    if (!isUpdatingGrid) {
+    if (!isUpdatingGrid && !isDraggingVertex) {
       analyzeGridBreakingState();
     }
-  }, [offGridVertexCount, bondCount, analyzeGridBreakingState, isUpdatingGrid]);
+  }, [offGridVertexCount, bondCount, analyzeGridBreakingState, isUpdatingGrid, isDraggingVertex]);
 
   // Handle keyboard events for the fourth bond mode
   useEffect(() => {

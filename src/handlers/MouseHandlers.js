@@ -386,60 +386,63 @@ export const handleMouseMove = (
         setDragStart({ x, y });
       }
     }
-    // If we're dragging a free-floating vertex in mouse mode
+    // If we're dragging a vertex in mouse mode (free-floating or off-grid)
     else if (mode === 'mouse' && draggingVertex) {
-      // Update the position of the vertex being dragged
+      // Calculate the new position
+      const newVertexX = draggingVertex.x + dx;
+      const newVertexY = draggingVertex.y + dy;
+      const oldKey = `${draggingVertex.x.toFixed(2)},${draggingVertex.y.toFixed(2)}`;
+      const newKey = `${newVertexX.toFixed(2)},${newVertexY.toFixed(2)}`;
+      
+      // Batch all state updates using React's automatic batching
+      // Update vertices
       setVertices(prevVertices => {
         return prevVertices.map(v => {
-          // Check if this is the vertex we're dragging
           if (Math.abs(v.x - draggingVertex.x) < 0.01 && Math.abs(v.y - draggingVertex.y) < 0.01) {
-            // Update the freeFloatingVertices Set with the new position
-            const oldKey = `${draggingVertex.x.toFixed(2)},${draggingVertex.y.toFixed(2)}`;
-            const newKey = `${(draggingVertex.x + dx).toFixed(2)},${(draggingVertex.y + dy).toFixed(2)}`;
-            
-            setFreeFloatingVertices(prev => {
-              const newSet = new Set(prev);
-              newSet.delete(oldKey);
-              newSet.add(newKey);
-              return newSet;
-            });
-            
-            // Also update any segments connected to this vertex
-            setSegments(prevSegments => {
-              return prevSegments.map(seg => {
-                if (Math.abs(seg.x1 - draggingVertex.x) < 0.01 && Math.abs(seg.y1 - draggingVertex.y) < 0.01) {
-                  return { ...seg, x1: draggingVertex.x + dx, y1: draggingVertex.y + dy };
-                }
-                if (Math.abs(seg.x2 - draggingVertex.x) < 0.01 && Math.abs(seg.y2 - draggingVertex.y) < 0.01) {
-                  return { ...seg, x2: draggingVertex.x + dx, y2: draggingVertex.y + dy };
-                }
-                return seg;
-              });
-            });
-            
-            // Also update the atom label positions
-            setVertexAtoms(prevAtoms => {
-              const oldKey = `${draggingVertex.x.toFixed(2)},${draggingVertex.y.toFixed(2)}`;
-              const newKey = `${(draggingVertex.x + dx).toFixed(2)},${(draggingVertex.y + dy).toFixed(2)}`;
-              
-              if (prevAtoms[oldKey]) {
-                const { [oldKey]: atom, ...rest } = prevAtoms;
-                return { ...rest, [newKey]: atom };
-              }
-              return prevAtoms;
-            });
-            
-            // Return the updated vertex
-            return { ...v, x: draggingVertex.x + dx, y: draggingVertex.y + dy };
+            return { ...v, x: newVertexX, y: newVertexY };
           }
           return v;
         });
       });
       
-      // Update the draggingVertex reference with its new position
+      // Update segments 
+      setSegments(prevSegments => {
+        return prevSegments.map(seg => {
+          let updated = seg;
+          if (Math.abs(seg.x1 - draggingVertex.x) < 0.01 && Math.abs(seg.y1 - draggingVertex.y) < 0.01) {
+            updated = { ...updated, x1: newVertexX, y1: newVertexY };
+          }
+          if (Math.abs(seg.x2 - draggingVertex.x) < 0.01 && Math.abs(seg.y2 - draggingVertex.y) < 0.01) {
+            updated = { ...updated, x2: newVertexX, y2: newVertexY };
+          }
+          return updated;
+        });
+      });
+      
+      // Update freeFloatingVertices set if needed
+      if (freeFloatingVertices.has(oldKey)) {
+        setFreeFloatingVertices(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(oldKey);
+          newSet.add(newKey);
+          return newSet;
+        });
+      }
+      
+      // Update atom positions if needed
+      setVertexAtoms(prevAtoms => {
+        if (prevAtoms[oldKey]) {
+          const { [oldKey]: atom, ...rest } = prevAtoms;
+          return { ...rest, [newKey]: atom };
+        }
+        return prevAtoms;
+      });
+      
+      // Update the draggingVertex reference
       setDraggingVertex(prevVertex => ({
-        x: prevVertex.x + dx,
-        y: prevVertex.y + dy
+        ...prevVertex,
+        x: newVertexX,
+        y: newVertexY
       }));
       
       setDragStart({ x, y });
@@ -529,11 +532,14 @@ export const handleMouseMove = (
         canvasRef.current.style.cursor = 'text'; // Show text cursor when not over a vertex
       }
     } else if (mode === 'mouse') {
-      // In mouse mode, check both exact vertex matches and box areas for free-floating vertices
+      // In mouse mode, check both exact vertex matches and box areas for draggable vertices
       if (found) {
         // If directly found a vertex by circle detection
         const key = `${found.x.toFixed(2)},${found.y.toFixed(2)}`;
-        if (freeFloatingVertices.has(key)) {
+        const isFreeFloating = freeFloatingVertices.has(key);
+        const isOffGrid = found.isOffGrid === true;
+        
+        if (isFreeFloating || isOffGrid) {
           setHoverVertex(found);
           canvasRef.current.style.cursor = 'pointer'; // Change cursor when hovering over draggable vertex
         } else {
@@ -541,12 +547,15 @@ export const handleMouseMove = (
           canvasRef.current.style.cursor = 'default';
         }
       } else {
-        // If no direct vertex hit, check if we're inside any free-floating vertex boxes
+        // If no direct vertex hit, check if we're inside any draggable vertex boxes
         let foundInBox = null;
         
         for (let v of vertices) {
           const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
-          if (freeFloatingVertices.has(key) && isPointInVertexBox(x, y, v)) {
+          const isFreeFloating = freeFloatingVertices.has(key);
+          const isOffGrid = v.isOffGrid === true;
+          
+          if ((isFreeFloating || isOffGrid) && isPointInVertexBox(x, y, v)) {
             foundInBox = v;
             break;
           }
@@ -633,6 +642,7 @@ export const handleMouseDown = (
   setIsDragging,
   setDidDrag,
   setDraggingVertex,
+  setIsDraggingVertex,
   setIsSelecting,
   setSelectionStart,
   setSelectionEnd
@@ -774,34 +784,38 @@ export const handleMouseDown = (
       return; // Exit early since we're handling a curved arrow drag
     }
     
-    // Find if user clicked on a free-floating vertex or its box
+    // Find if user clicked on a draggable vertex (free-floating or off-grid) or its box
     for (let v of vertices) {
       const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+      const isFreeFloating = freeFloatingVertices.has(key);
+      const isOffGrid = v.isOffGrid === true;
       
-      if (freeFloatingVertices.has(key)) {
-        // Check if click is within the box area for free-floating vertices
-        if (isPointInVertexBox(x, y, v)) {
-          // Capture state before starting vertex drag
-          captureState();
-          
-          setDraggingVertex(v);
-          // Set dragStart for the canvas offset, not vertex dragging
-          setDragStart({ x, y });
-          setIsDragging(true);
-          setDidDrag(false);
-          return; // Exit early since we're handling a free vertex drag
+      if (isFreeFloating || isOffGrid) {
+        // Check if click is within the box area for vertices with atom labels
+        if (isFreeFloating && isPointInVertexBox(x, y, v)) {
+                      // Capture state before starting vertex drag
+            captureState();
+            
+            setDraggingVertex(v);
+            setIsDraggingVertex(true);
+            // Set dragStart for the canvas offset, not vertex dragging
+            setDragStart({ x, y });
+            setIsDragging(true);
+            setDidDrag(false);
+            return; // Exit early since we're handling a vertex drag
         } else {
-          // Fallback to circle detection if no atom or box missed
+          // Check circle detection for all draggable vertices
           const dist = distanceToVertex(x, y, v.x, v.y);
           if (dist <= vertexThreshold) {
             // Capture state before starting vertex drag
             captureState();
             
             setDraggingVertex(v);
+            setIsDraggingVertex(true);
             setDragStart({ x, y });
             setIsDragging(true);
             setDidDrag(false);
-            return; // Exit early since we're handling a free vertex drag
+            return; // Exit early since we're handling a vertex drag
           }
         }
       }
@@ -855,6 +869,7 @@ export const handleMouseUp = (
   setIsSelecting,
   setIsDragging,
   setDraggingVertex,
+  setIsDraggingVertex,
   setDraggingArrowIndex,
   setDragArrowOffset,
   setHoverVertex,
@@ -881,6 +896,7 @@ export const handleMouseUp = (
   // Reset dragging vertex if we were dragging one
   if (draggingVertex) {
     setDraggingVertex(null);
+    setIsDraggingVertex(false);
   }
   
   // Reset arrow dragging state if we were dragging an arrow
