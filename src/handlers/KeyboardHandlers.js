@@ -84,6 +84,8 @@ export const createFourthBondKeyHandler = (
       setFourthBondMode(false);
       setFourthBondSource(null);
       setFourthBondPreview(null);
+      // Note: If we're in add bond mode, this will return to the hover state
+      // but won't exit add bond mode entirely
     }
   };
 };
@@ -140,6 +142,80 @@ export const createUndoKeyHandler = (
         e.preventDefault();
         undo();
       }
+    }
+  };
+};
+
+export const createEnterKeyHandler = (
+  mode,
+  hoverVertex,
+  vertexAtoms,
+  offset,
+  showAtomInput,
+  setMenuVertexKey,
+  setAtomInputPosition,
+  setAtomInputValue,
+  setShowAtomInput
+) => {
+  return (e) => {
+    // Don't trigger if an input field is currently focused
+    if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+      return;
+    }
+    
+    // Enter key in draw mode to edit hovered vertex - only if text box is NOT already open
+    if (e.key === 'Enter' && mode === 'draw' && hoverVertex && !showAtomInput) {
+      e.preventDefault();
+      
+      const key = `${hoverVertex.x.toFixed(2)},${hoverVertex.y.toFixed(2)}`;
+      setMenuVertexKey(key);
+      
+      // Position the input box at the vertex position
+      setAtomInputPosition({ x: hoverVertex.x + offset.x, y: hoverVertex.y + offset.y });
+      
+      // Set initial value if there's an existing atom
+      const existingAtom = vertexAtoms[key];
+      if (existingAtom) {
+        const symbol = existingAtom.symbol || existingAtom;
+        setAtomInputValue(symbol);
+      } else {
+        setAtomInputValue('');
+      }
+      
+      // Show the input box
+      setShowAtomInput(true);
+    }
+  };
+};
+
+export const createElementShortcutHandler = (
+  mode,
+  hoverVertex,
+  showAtomInput,
+  captureState,
+  setVertexAtoms
+) => {
+  return (e) => {
+    // Don't trigger if an input field is currently focused
+    if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+      return;
+    }
+    
+    // Element shortcuts: O, N, F, S, C, H - only in draw mode, when hovering, and text box not open
+    const elementKeys = ['o', 'n', 'f', 's', 'c', 'h'];
+    const key = e.key.toLowerCase();
+    
+    if (elementKeys.includes(key) && mode === 'draw' && hoverVertex && !showAtomInput) {
+      e.preventDefault();
+      
+      // Capture state before modifying atom
+      captureState();
+      
+      const vertexKey = `${hoverVertex.x.toFixed(2)},${hoverVertex.y.toFixed(2)}`;
+      const elementSymbol = key.toUpperCase(); // Convert to uppercase for proper chemical symbol
+      
+      // Set the atom symbol directly
+      setVertexAtoms(prev => ({ ...prev, [vertexKey]: elementSymbol }));
     }
   };
 }; 

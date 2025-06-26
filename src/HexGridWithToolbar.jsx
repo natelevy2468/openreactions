@@ -12,7 +12,7 @@ import {
   pasteAtPosition as pasteAtPositionUtil
 } from './utils/SelectionUtils';
 import { handleMouseMove as handleMouseMoveUtil, handleMouseDown as handleMouseDownUtil, handleMouseUp as handleMouseUpUtil } from './handlers/MouseHandlers';
-import { createEscapeKeyHandler, createGeneralEscapeHandler, createFourthBondKeyHandler, createCopyPasteKeyHandler, createUndoKeyHandler } from './handlers/KeyboardHandlers';
+import { createEscapeKeyHandler, createGeneralEscapeHandler, createFourthBondKeyHandler, createCopyPasteKeyHandler, createUndoKeyHandler, createEnterKeyHandler, createElementShortcutHandler } from './handlers/KeyboardHandlers';
 import { handleArrowMouseMove, handleArrowClick } from './handlers/ArrowHandlers';
 import { formatAtomText } from './utils/TextUtils.jsx';
 import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview, isVertexInLinearSystem, getLinearAxis } from './utils/GridBreakingUtils.js';
@@ -2404,15 +2404,17 @@ const HexGridWithToolbar = () => {
       });
     }
 
-    // Draw fourth bond preview if in fourth bond mode or freebond mode
-    if ((fourthBondMode || mode === 'freebond') && fourthBondPreview) {
+    // Draw fourth bond preview if in fourth bond mode or draw mode with source
+    if ((fourthBondMode || (mode === 'draw' && fourthBondSource)) && fourthBondPreview) {
       ctx.save();
       
       const sx1 = fourthBondPreview.startX;
       const sy1 = fourthBondPreview.startY;
       const sx2 = fourthBondPreview.endX;
       const sy2 = fourthBondPreview.endY;
-      const previewColor = fourthBondPreview.snappedToVertex ? '#444444' : '#888888';
+      // Use green when snapped to grid, darker gray when snapped to vertex, light gray otherwise
+      const previewColor = (fourthBondPreview.snappedToGrid || false) ? '#4CAF50' : 
+                          (fourthBondPreview.snappedToVertex ? '#444444' : '#888888');
       
       // Check if we're in a stereochemistry mode to show the appropriate preview
       if (mode === 'wedge') {
@@ -3964,6 +3966,12 @@ const HexGridWithToolbar = () => {
     setCurvedArrowStartPoint(null);
     setArrowPreview(null);
     
+    // Clear fourth bond source when switching away from draw mode
+    if (m !== 'draw') {
+      setFourthBondSource(null);
+      setFourthBondPreview(null);
+    }
+    
     // Clear selection state
     setIsSelecting(false);
     setSelectionStart({ x: 0, y: 0 });
@@ -4121,8 +4129,12 @@ const HexGridWithToolbar = () => {
   // Handle atom input key events (Enter to submit, Escape to cancel)
   const handleAtomInputKeyDown = (e) => {
     if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation(); // Prevent the global Enter handler from triggering
       handleAtomInputSubmit();
     } else if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation(); // Prevent other escape handlers from triggering
       setShowAtomInput(false);
     }
   };
@@ -4200,34 +4212,69 @@ const HexGridWithToolbar = () => {
       return; // Exit early, paste is handled elsewhere
     }
 
-    // Handle vertex clicks in freebond mode
-    if (mode === 'freebond') {
-      let nearestVertex = null;
-      let minV = vertexThreshold;
-      for (let v of vertices) {
-        const dist = distanceToVertex(x, y, v.x, v.y);
-        if (dist <= minV) {
-          minV = dist;
-          nearestVertex = v;
-        }
+    // Handle fourth bond confirmation in draw mode (any click confirms the spinning preview)
+    if (mode === 'draw' && fourthBondSource && fourthBondPreview) {
+      // Capture state before creating fourth bond
+      captureState();
+      
+      // Calculate normalized direction vector from source to preview end
+      const dx = fourthBondPreview.endX - (fourthBondSource.x + offset.x);
+      const dy = fourthBondPreview.endY - (fourthBondSource.y + offset.y);
+      const length = Math.sqrt(dx * dx + dy * dy);
+      const ux = dx / length;
+      const uy = dy / length;
+      
+      // Calculate the endpoint coordinates for the new bond
+      const endX = fourthBondSource.x + ux * hexRadius;
+      const endY = fourthBondSource.y + uy * hexRadius;
+      
+      // Add the new endpoint as a vertex if it doesn't already exist
+      // If snapped to grid, make it an on-grid vertex, otherwise off-grid
+      const newEndpointVertex = { 
+        x: endX, 
+        y: endY, 
+        isOffGrid: !(fourthBondPreview.snappedToGrid || false)
+      };
+      
+      // Check if vertex already exists
+      const vertexExists = vertices.some(
+        v => Math.abs(v.x - endX) < 0.01 && Math.abs(v.y - endY) < 0.01
+      );
+      
+      if (!vertexExists) {
+        setVertices(prevVertices => {
+          const newVertices = [...prevVertices, newEndpointVertex];
+          setTimeout(detectRings, 0);
+          return newVertices;
+        });
       }
-      if (nearestVertex) {
-        // If we don't have a source yet, set this vertex as the source and start preview
-        if (!fourthBondSource) {
-          setFourthBondSource(nearestVertex);
-          return; // Exit early, freebond source set
-        }
-        // If we already have a source and we're clicking the same vertex, do nothing
-        if (fourthBondSource && 
-            Math.abs(fourthBondSource.x - nearestVertex.x) < 0.01 && 
-            Math.abs(fourthBondSource.y - nearestVertex.y) < 0.01) {
-          return; // Exit early, clicking same vertex
-        }
-        // If we have a source and click a different vertex, continue to bond creation logic above
-      }
+      
+      const direction = calculateBondDirection(fourthBondSource.x, fourthBondSource.y, endX, endY);
+      const newBond = {
+        x1: fourthBondSource.x,
+        y1: fourthBondSource.y,
+        x2: endX,
+        y2: endY,
+        bondOrder: 1,
+        bondType: null,
+        bondDirection: 1,
+        direction: direction,
+        flipSmallerLine: false
+      };
+      
+      setSegments(prevSegments => [...prevSegments, newBond]);
+      
+      // Clear the spinning preview
+      setFourthBondMode(false);
+      setFourthBondSource(null);
+      setFourthBondPreview(null);
+      
+      return; // Exit early, bond created
     }
 
-    // Handle vertex clicks first (highest priority) - only in draw and stereochemistry modes
+
+
+    // Handle vertex clicks for freebond functionality in draw mode and stereochemistry modes
     const isDrawOrStereochemistryMode = mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous';
     if (isDrawOrStereochemistryMode) {
       let nearestVertex = null;
@@ -4240,24 +4287,39 @@ const HexGridWithToolbar = () => {
         }
       }
       if (nearestVertex) {
-        const key = `${nearestVertex.x.toFixed(2)},${nearestVertex.y.toFixed(2)}`;
-        setMenuVertexKey(key);
-        
-        // Position the input box at the vertex position
-        setAtomInputPosition({ x: nearestVertex.x + offset.x, y: nearestVertex.y + offset.y });
-        
-        // Set initial value if there's an existing atom
-        const existingAtom = vertexAtoms[key];
-        if (existingAtom) {
-          const symbol = existingAtom.symbol || existingAtom;
-          setAtomInputValue(symbol);
+        // In draw mode, implement freebond functionality with spinnable preview
+        if (mode === 'draw') {
+          // If we don't have a source yet, set this vertex as the source and start spinning preview
+          if (!fourthBondSource) {
+            setFourthBondSource(nearestVertex);
+            setFourthBondMode(true); // Activate fourth bond mode for preview
+            return; // Exit early, freebond source set
+          }
+          // If we already have a source, any click (including on the same vertex) will be handled
+          // by the fourth bond confirmation logic above, so we don't need to do anything here
+          // Just return to let the confirmation logic handle it
+          return;
         } else {
-          setAtomInputValue('');
+          // In stereochemistry modes, still allow text editing
+          const key = `${nearestVertex.x.toFixed(2)},${nearestVertex.y.toFixed(2)}`;
+          setMenuVertexKey(key);
+          
+          // Position the input box at the vertex position
+          setAtomInputPosition({ x: nearestVertex.x + offset.x, y: nearestVertex.y + offset.y });
+          
+          // Set initial value if there's an existing atom
+          const existingAtom = vertexAtoms[key];
+          if (existingAtom) {
+            const symbol = existingAtom.symbol || existingAtom;
+            setAtomInputValue(symbol);
+          } else {
+            setAtomInputValue('');
+          }
+          
+          // Show the input box instead of menu
+          setShowAtomInput(true);
+          return; // Exit early, vertex click handled
         }
-        
-        // Show the input box instead of menu
-        setShowAtomInput(true);
-        return; // Exit early, vertex click handled
       }
     }
 
@@ -4314,8 +4376,8 @@ const HexGridWithToolbar = () => {
       }
     }
 
-    // Handle fourth bond mode (triggered by blue triangle) or freebond mode (triggered by toolbar button)
-    if (fourthBondMode || mode === 'freebond') {
+    // Handle fourth bond mode (triggered by blue triangle) or draw mode with source
+    if (fourthBondMode || (mode === 'draw' && fourthBondSource)) {
       if (fourthBondPreview) {
         // Capture state before creating fourth bond
         captureState();
@@ -4337,7 +4399,12 @@ const HexGridWithToolbar = () => {
         const direction = calculateBondDirection(fourthBondSource.x, fourthBondSource.y, endX, endY);
         
         // Add the new endpoint as a vertex if it doesn't already exist
-        const newEndpointVertex = { x: endX, y: endY, isOffGrid: true }; // Off-grid vertex
+        // If snapped to grid, make it an on-grid vertex, otherwise off-grid
+        const newEndpointVertex = { 
+          x: endX, 
+          y: endY, 
+          isOffGrid: !(fourthBondPreview.snappedToGrid || false)
+        };
         
         // Check if vertex already exists
         const vertexExists = vertices.some(
@@ -4369,10 +4436,11 @@ const HexGridWithToolbar = () => {
         
         // Fourth bond created successfully - no automatic atom input
         
-        // Exit fourth bond mode (but stay in freebond mode if that's what we're in)
+        // Exit fourth bond mode and clear source after bond creation
         if (fourthBondMode) {
           setFourthBondMode(false);
         }
+        // Always clear the source after creating a bond
         setFourthBondSource(null);
         setFourthBondPreview(null);
         
@@ -4588,40 +4656,69 @@ const HexGridWithToolbar = () => {
       // Arrow placement is handled by handleArrowClick via mouse up events
       return;
     } else if (mode === 'text') {
-      // Text mode: Create a vertex at the clicked position and immediately show input box
+      // Text mode: Allow clicking on existing vertices to edit their text, or create new vertices
       
-      // Capture state before creating new vertex
-      captureState();
+      // Check if we're clicking on an existing vertex
+      let nearestVertex = null;
+      let minV = vertexThreshold;
+      for (let v of vertices) {
+        const dist = distanceToVertex(x, y, v.x, v.y);
+        if (dist <= minV) {
+          minV = dist;
+          nearestVertex = v;
+        }
+      }
       
-      // Calculate coordinates in the grid reference frame (subtract offset)
-      const gridX = x - offset.x;
-      const gridY = y - offset.y;
-      
-      // Create a new vertex at the exact click position
-      const newVertex = { x: gridX, y: gridY, isOffGrid: false }; // On-grid vertex
-      
-      // Add the new vertex
-      setVertices(prevVertices => [...prevVertices, newVertex]);
-      
-      // Mark this vertex as free-floating (created in text mode)
-      const vertexKey = `${gridX.toFixed(2)},${gridY.toFixed(2)}`;
-      setFreeFloatingVertices(prev => {
-        const newSet = new Set(prev);
-        newSet.add(vertexKey);
-        return newSet;
-      });
-      
-      setMenuVertexKey(vertexKey);
-      
-      // Position the input box at the clicked position
-      setAtomInputPosition({ x, y });
-      
-      // Clear any existing value in the atom input
-      setAtomInputValue('');
-      
-      // Show the input box
-      setShowAtomInput(true);
-      return;
+      if (nearestVertex) {
+        // Clicking on existing vertex - edit its text
+        const key = `${nearestVertex.x.toFixed(2)},${nearestVertex.y.toFixed(2)}`;
+        setMenuVertexKey(key);
+        
+        // Position the input box at the vertex position
+        setAtomInputPosition({ x: nearestVertex.x + offset.x, y: nearestVertex.y + offset.y });
+        
+        // Set initial value if there's an existing atom
+        const existingAtom = vertexAtoms[key];
+        if (existingAtom) {
+          const symbol = existingAtom.symbol || existingAtom;
+          setAtomInputValue(symbol);
+        } else {
+          setAtomInputValue('');
+        }
+        
+        // Show the input box
+        setShowAtomInput(true);
+        return;
+      } else {
+        // Clicking on empty space - create new vertex and open text input
+        
+        // Capture state before creating new vertex
+        captureState();
+        
+        // Calculate coordinates in the grid reference frame (subtract offset)
+        const gridX = x - offset.x;
+        const gridY = y - offset.y;
+        
+        // Create a new vertex at the exact click position (on-grid)
+        const newVertex = { x: gridX, y: gridY, isOffGrid: false };
+        
+        // Add the new vertex
+        setVertices(prevVertices => [...prevVertices, newVertex]);
+        
+        // Set up text input for the new vertex
+        const vertexKey = `${gridX.toFixed(2)},${gridY.toFixed(2)}`;
+        setMenuVertexKey(vertexKey);
+        
+        // Position the input box at the vertex position
+        setAtomInputPosition({ x: x, y: y }); // Use screen coordinates for positioning
+        
+        // Start with empty text
+        setAtomInputValue('');
+        
+        // Show the input box
+        setShowAtomInput(true);
+        return;
+      }
     } else if (mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') {
       // Allow bond creation in draw and stereochemistry modes
       // (Vertex detection has been moved to the top for higher priority)
@@ -4953,6 +5050,35 @@ const HexGridWithToolbar = () => {
           return cleanedSegments;
         });
         return;
+      }
+      
+      // If we reach here in draw mode and have a fourth bond source but no preview, clear it
+      if (mode === 'draw' && fourthBondSource) {
+        setFourthBondSource(null);
+        setFourthBondPreview(null);
+      }
+      
+      // In draw mode, if clicking on empty space, find closest vertex and start bond preview
+      if (mode === 'draw' && !fourthBondSource) {
+        // Find the closest vertex to the click position
+        let closestVertex = null;
+        let minDistance = Infinity;
+        const maxDistance = 150; // Maximum distance to consider (in pixels)
+        
+        for (let v of vertices) {
+          const dist = distanceToVertex(x, y, v.x, v.y);
+          if (dist < minDistance && dist <= maxDistance) {
+            minDistance = dist;
+            closestVertex = v;
+          }
+        }
+        
+        // If we found a close enough vertex, start bond preview from it
+        if (closestVertex) {
+          setFourthBondSource(closestVertex);
+          setFourthBondMode(true); // Activate fourth bond mode for preview
+          return;
+        }
       }
     } else {
       // For any other mode (not draw, erase, arrow, equil, curve, plus, minus, lone)
@@ -5314,6 +5440,7 @@ const HexGridWithToolbar = () => {
       lineThreshold,
       freeFloatingVertices,
       segments,
+      vertexAtoms,
       // Setters
       setPastePreviewPosition,
       calculateGridAlignment,
@@ -5569,8 +5696,8 @@ const HexGridWithToolbar = () => {
       setCurvedArrowStartPoint(null);
     }
     
-    // Clear fourth bond state when switching away from freebond mode
-    if (mode !== 'freebond') {
+    // Clear fourth bond state when switching away from draw mode
+    if (mode !== 'draw') {
       setFourthBondSource(null);
       setFourthBondPreview(null);
     }
@@ -5652,6 +5779,42 @@ const HexGridWithToolbar = () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [historyIndex, undo]);
+
+  // Handle Enter key in draw mode to edit hovered vertex
+  useEffect(() => {
+    const handleKeyDown = createEnterKeyHandler(
+      mode,
+      hoverVertex,
+      vertexAtoms,
+      offset,
+      showAtomInput,
+      setMenuVertexKey,
+      setAtomInputPosition,
+      setAtomInputValue,
+      setShowAtomInput
+    );
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mode, hoverVertex, vertexAtoms, offset, showAtomInput]);
+
+  // Handle element shortcuts (O, N, F, S, C, H) in draw mode
+  useEffect(() => {
+    const handleKeyDown = createElementShortcutHandler(
+      mode,
+      hoverVertex,
+      showAtomInput,
+      captureState,
+      setVertexAtoms
+    );
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [mode, hoverVertex, showAtomInput, captureState]);
 
 
 
@@ -6052,59 +6215,7 @@ const HexGridWithToolbar = () => {
             </svg>
           </button>
         </div>
-        
-        {/* Free Bond Button */}
-        <button
-          onClick={() => setModeAndClearSelection('freebond')}
-          className="toolbar-button"
-          style={{
-            width: '100%',
-            height: 'min(44px, 7vh)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: mode === 'freebond' ? 'rgb(54,98,227)' : '#23395d',
-            border: 'none',
-            borderRadius: 'calc(min(280px, 25vw) * 0.019)',
-            cursor: 'pointer',
-            boxShadow: mode === 'freebond' ? 
-              '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-              '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-            outline: 'none',
-            padding: 0,
-            gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
-            fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
-            fontWeight: 600,
-            color: '#fff',
-            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-            marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))',
-          }}
-          onMouseEnter={(e) => {
-            if (mode !== 'freebond') {
-              e.target.style.backgroundColor = '#2a4470';
-              e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (mode !== 'freebond') {
-              e.target.style.backgroundColor = '#23395d';
-              e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-            }
-          }}
-          title="Free Bond"
-        >
-          {/* Free Bond SVG - four lines radiating from center */}
-          <svg width="max(20px, min(28px, calc(min(280px, 25vw) * 0.1)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 28 26" fill="none" style={{ pointerEvents: 'none' }}>
-            {/* Center point */}
-            <circle cx="14" cy="13" r=".5" fill="#fff" />
-            {/* Four radiating lines */}
-            <line x1="14" y1="13" x2="14" y2="5" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
-            <line x1="14" y1="13" x2="22" y2="18" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
-            <line x1="14" y1="13" x2="17" y2="21.5" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
-            <line x1="14" y1="13" x2="6" y2="18" stroke="#fff" strokeWidth="1.6" strokeLinecap="round" />
-          </svg>
-          Free Bond
-        </button>
+
         
         {/* Reactions Section Title */}
         <div style={{
@@ -6589,7 +6700,7 @@ const HexGridWithToolbar = () => {
           title={`Undo${historyIndex <= 0 ? ' (No actions to undo)' : ''}`}
         >
           {/* Undo SVG */}
-          <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(20px, calc(min(280px, 25vw) * 0.081))" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(20px, calc(min(280px, 25vw) * 0.081))" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
             <path d="M3 7v6h6"/>
             <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13"/>
           </svg>
@@ -6631,7 +6742,7 @@ const HexGridWithToolbar = () => {
           }}
         >
           {/* Taller Trash Can SVG */}
-          <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(24px, calc(min(280px, 25vw) * 0.094))" viewBox="0 0 26 30" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(24px, calc(min(280px, 25vw) * 0.094))" viewBox="0 0 26 30" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
             <rect x="4" y="8" width="18" height="18" rx="2.5"/>
             <path d="M9 8V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/>
             <line x1="11" y1="13" x2="11" y2="22"/>

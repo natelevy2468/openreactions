@@ -23,6 +23,7 @@ export const handleMouseMove = (
   lineThreshold,
   freeFloatingVertices,
   segments,
+  vertexAtoms,
   // Setters
   setPastePreviewPosition,
   calculateGridAlignment,
@@ -71,8 +72,8 @@ export const handleMouseMove = (
     }
   }
 
-  // Handle fourth bond preview mode (triggered by blue triangle) or freebond mode (triggered by toolbar button)
-  if ((fourthBondMode || mode === 'freebond') && fourthBondSource && !isDragging) {
+  // Handle fourth bond preview mode (triggered by blue triangle) or draw mode with source
+  if ((fourthBondMode || (mode === 'draw' && fourthBondSource)) && fourthBondSource && !isDragging) {
     const sourceX = fourthBondSource.x + offset.x;
     const sourceY = fourthBondSource.y + offset.y;
 
@@ -82,20 +83,85 @@ export const handleMouseMove = (
     const currentLength = Math.sqrt(dx * dx + dy * dy);
 
     // Normalize direction vector (prevents division by zero with || 1)
-    const ux = dx / (currentLength || 1);
-    const uy = dy / (currentLength || 1);
+    let ux = dx / (currentLength || 1);
+    let uy = dy / (currentLength || 1);
 
-    // Set endpoint at constant length in exact mouse direction
+    // Calculate current angle in radians
+    const currentAngle = Math.atan2(uy, ux);
+    
+    // Check for grid snapping - only for on-grid vertices
+    const snapThreshold = 15 * Math.PI / 180; // 15 degrees in radians
+    let snappedAngle = null;
+    let snappedToGrid = false;
+
+    // Only snap if the source vertex is on-grid (not off-grid)
+    if (fourthBondSource.isOffGrid !== true) {
+      // Find grid lines connected to this specific vertex
+      const connectedGridLines = [];
+      
+      for (const segment of segments) {
+        if (segment.bondOrder === 0) { // Grid lines only
+          // Check if this grid line connects to our source vertex
+          const sourceX = fourthBondSource.x;
+          const sourceY = fourthBondSource.y;
+          
+          const connectsToStart = Math.abs(segment.x1 - sourceX) < 0.01 && Math.abs(segment.y1 - sourceY) < 0.01;
+          const connectsToEnd = Math.abs(segment.x2 - sourceX) < 0.01 && Math.abs(segment.y2 - sourceY) < 0.01;
+          
+          if (connectsToStart || connectsToEnd) {
+            // Calculate the direction from source vertex along this grid line
+            let directionX, directionY;
+            if (connectsToStart) {
+              directionX = segment.x2 - segment.x1;
+              directionY = segment.y2 - segment.y1;
+            } else {
+              directionX = segment.x1 - segment.x2;
+              directionY = segment.y1 - segment.y2;
+            }
+            
+            const length = Math.sqrt(directionX * directionX + directionY * directionY);
+            if (length > 0) {
+              const angle = Math.atan2(directionY / length, directionX / length);
+              connectedGridLines.push(angle);
+            }
+          }
+        }
+      }
+
+      // Check if current angle is close to any of the connected grid line directions
+      for (const gridAngle of connectedGridLines) {
+        // Calculate shortest angular distance
+        let angleDiff = currentAngle - gridAngle;
+        // Normalize to [-π, π]
+        while (angleDiff > Math.PI) angleDiff -= 2 * Math.PI;
+        while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
+        
+        if (Math.abs(angleDiff) < snapThreshold) {
+          snappedAngle = gridAngle;
+          snappedToGrid = true;
+          break;
+        }
+      }
+    }
+
+    // Use snapped angle if found, otherwise use original direction
+    if (snappedAngle !== null) {
+      ux = Math.cos(snappedAngle);
+      uy = Math.sin(snappedAngle);
+    }
+
+    // Set endpoint at constant length in calculated direction
     const endX = sourceX + ux * hexRadius;
     const endY = sourceY + uy * hexRadius;
     
-    // Update preview
+    // Update preview with snapping indication
     setFourthBondPreview({
       startX: sourceX,
       startY: sourceY,
       endX: endX,
       endY: endY,
-      snappedToVertex: false
+      snappedToVertex: false,
+      snappedToGrid: snappedToGrid
     });
     return; // Exit early to prevent other mouse move handling
   }
@@ -395,7 +461,7 @@ export const handleMouseMove = (
   }
     
   // Handle hover effects for vertices and segments in various modes
-  if (mode === 'draw' || mode === 'erase' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous' || mode === 'mouse' || mode === 'freebond') {
+  if (mode === 'draw' || mode === 'erase' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous' || mode === 'mouse' || mode === 'freebond' || mode === 'text') {
     // Check if mouse is over an arrow control circle or triangle in mouse mode
     if (mode === 'mouse') {
       const { index: arrowIndex, part: arrowPart } = isPointInArrowCircle(x, y);
@@ -450,9 +516,18 @@ export const handleMouseMove = (
       }
     }
     
-    // Set hover vertex in draw, erase, freebond modes, or for free-floating vertices in mouse mode
+    // Set hover vertex in draw, erase, freebond modes, or for free-floating vertices in mouse mode, or for any vertex in text mode
     if (mode === 'draw' || mode === 'erase' || mode === 'freebond') {
       setHoverVertex(found);
+    } else if (mode === 'text') {
+      // In text mode, hover over any vertex to edit its text
+      if (found) {
+        setHoverVertex(found);
+        canvasRef.current.style.cursor = 'pointer'; // Show pointer cursor when hovering over editable vertex
+      } else {
+        setHoverVertex(null);
+        canvasRef.current.style.cursor = 'text'; // Show text cursor when not over a vertex
+      }
     } else if (mode === 'mouse') {
       // In mouse mode, check both exact vertex matches and box areas for free-floating vertices
       if (found) {
@@ -490,8 +565,8 @@ export const handleMouseMove = (
       setHoverVertex(null);
     }
     
-    // Only set hoverSegmentIndex if not hovering a vertex
-    if (!found) {
+    // Only set hoverSegmentIndex if not hovering a vertex and not in text mode
+    if (!found && mode !== 'text') {
       let closestIdx = null;
       let minDist = lineThreshold;
       segments.forEach((seg, idx) => {
@@ -515,6 +590,11 @@ export const handleMouseMove = (
       });
       setHoverSegmentIndex(closestIdx);
     } else {
+      setHoverSegmentIndex(null);
+    }
+    
+    // In text mode, always clear segment hover since only vertices are interactive
+    if (mode === 'text') {
       setHoverSegmentIndex(null);
     }
   } else {
