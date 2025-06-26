@@ -263,6 +263,190 @@ const HexGridWithToolbar = () => {
   // Prevent duplicate captureState calls within a short time window
   const [lastCaptureTime, setLastCaptureTime] = useState(0);
 
+  // Vertex merging function - merges overlapping vertices
+  const mergeOverlappingVertices = useCallback((mergeThreshold = 10) => {
+    console.log('🔄 Running vertex merge check...');
+    
+    // Find pairs of vertices that are close enough to merge
+    const toMerge = [];
+    for (let i = 0; i < vertices.length; i++) {
+      for (let j = i + 1; j < vertices.length; j++) {
+        const v1 = vertices[i];
+        const v2 = vertices[j];
+        const distance = Math.sqrt((v1.x - v2.x) ** 2 + (v1.y - v2.y) ** 2);
+        
+        if (distance <= mergeThreshold) {
+          toMerge.push({ v1, v2, v1Index: i, v2Index: j, distance });
+        }
+      }
+    }
+    
+    if (toMerge.length === 0) {
+      console.log('✅ No overlapping vertices found');
+      return false; // No merging needed
+    }
+    
+    console.log(`🔗 Found ${toMerge.length} pairs of vertices to merge`);
+    
+    // Sort by distance (merge closest pairs first)
+    toMerge.sort((a, b) => a.distance - b.distance);
+    
+    // Track which vertices have been merged to avoid double-processing
+    const mergedIndices = new Set();
+    const mergeActions = [];
+    
+    for (const { v1, v2, v1Index, v2Index } of toMerge) {
+      // Skip if either vertex has already been merged
+      if (mergedIndices.has(v1Index) || mergedIndices.has(v2Index)) {
+        continue;
+      }
+      
+      // Determine which vertex to keep (prefer vertex with atom label, or the first one)
+      const v1Key = `${v1.x.toFixed(2)},${v1.y.toFixed(2)}`;
+      const v2Key = `${v2.x.toFixed(2)},${v2.y.toFixed(2)}`;
+      const v1HasAtom = !!vertexAtoms[v1Key];
+      const v2HasAtom = !!vertexAtoms[v2Key];
+      
+      let keepVertex, removeVertex, keepIndex, removeIndex;
+      if (v1HasAtom && !v2HasAtom) {
+        keepVertex = v1; removeVertex = v2; keepIndex = v1Index; removeIndex = v2Index;
+      } else if (v2HasAtom && !v1HasAtom) {
+        keepVertex = v2; removeVertex = v1; keepIndex = v2Index; removeIndex = v1Index;
+      } else {
+        // Both have atoms or neither has atoms - keep the first one
+        keepVertex = v1; removeVertex = v2; keepIndex = v1Index; removeIndex = v2Index;
+      }
+      
+      // Calculate merged position (average of the two positions)
+      const mergedX = (keepVertex.x + removeVertex.x) / 2;
+      const mergedY = (keepVertex.y + removeVertex.y) / 2;
+      
+      mergeActions.push({
+        keepVertex: { ...keepVertex, x: mergedX, y: mergedY },
+        removeVertex,
+        keepIndex,
+        removeIndex,
+        keepKey: `${keepVertex.x.toFixed(2)},${keepVertex.y.toFixed(2)}`,
+        removeKey: `${removeVertex.x.toFixed(2)},${removeVertex.y.toFixed(2)}`,
+        mergedKey: `${mergedX.toFixed(2)},${mergedY.toFixed(2)}`
+      });
+      
+      mergedIndices.add(keepIndex);
+      mergedIndices.add(removeIndex);
+    }
+    
+    if (mergeActions.length === 0) {
+      console.log('✅ No vertices to merge after filtering');
+      return false;
+    }
+    
+    console.log(`🔗 Performing ${mergeActions.length} vertex merges`);
+    
+    // Apply all merge actions
+    setVertices(prevVertices => {
+      let newVertices = [...prevVertices];
+      
+      // Sort by removeIndex in descending order to avoid index shifting issues
+      const sortedActions = [...mergeActions].sort((a, b) => b.removeIndex - a.removeIndex);
+      
+      for (const action of sortedActions) {
+        // Update the kept vertex position
+        if (action.keepIndex < newVertices.length) {
+          newVertices[action.keepIndex] = action.keepVertex;
+        }
+        
+        // Remove the duplicate vertex
+        if (action.removeIndex < newVertices.length) {
+          newVertices.splice(action.removeIndex, 1);
+        }
+      }
+      
+      return newVertices;
+    });
+    
+    // Update segments to reference the merged vertices
+    setSegments(prevSegments => {
+      let newSegments = [...prevSegments];
+      
+      for (const action of mergeActions) {
+        newSegments = newSegments.map(seg => {
+          let updated = seg;
+          
+          // Update x1, y1 if it matches the removed vertex
+          if (Math.abs(seg.x1 - action.removeVertex.x) < 0.01 && Math.abs(seg.y1 - action.removeVertex.y) < 0.01) {
+            updated = { ...updated, x1: action.keepVertex.x, y1: action.keepVertex.y };
+          }
+          
+          // Update x2, y2 if it matches the removed vertex
+          if (Math.abs(seg.x2 - action.removeVertex.x) < 0.01 && Math.abs(seg.y2 - action.removeVertex.y) < 0.01) {
+            updated = { ...updated, x2: action.keepVertex.x, y2: action.keepVertex.y };
+          }
+          
+          return updated;
+        });
+      }
+      
+      return newSegments;
+    });
+    
+    // Update vertex atoms by merging properties
+    setVertexAtoms(prevAtoms => {
+      let newAtoms = { ...prevAtoms };
+      
+      for (const action of mergeActions) {
+        const keepAtom = newAtoms[action.keepKey];
+        const removeAtom = newAtoms[action.removeKey];
+        
+        // Merge atom properties
+        let mergedAtom = null;
+        if (keepAtom && removeAtom) {
+          // Both have atoms - merge them intelligently
+          mergedAtom = {
+            symbol: keepAtom.symbol || removeAtom.symbol || '',
+            charge: keepAtom.charge || removeAtom.charge || 0,
+            lonePairs: Math.max(keepAtom.lonePairs || 0, removeAtom.lonePairs || 0),
+            lonePairOrder: keepAtom.lonePairOrder || removeAtom.lonePairOrder
+          };
+        } else if (keepAtom) {
+          mergedAtom = keepAtom;
+        } else if (removeAtom) {
+          mergedAtom = removeAtom;
+        }
+        
+        // Remove old atom entries
+        delete newAtoms[action.keepKey];
+        delete newAtoms[action.removeKey];
+        
+        // Add merged atom if it exists
+        if (mergedAtom) {
+          newAtoms[action.mergedKey] = mergedAtom;
+        }
+      }
+      
+      return newAtoms;
+    });
+    
+    // Update free floating vertices set
+    setFreeFloatingVertices(prevSet => {
+      let newSet = new Set(prevSet);
+      
+      for (const action of mergeActions) {
+        newSet.delete(action.keepKey);
+        newSet.delete(action.removeKey);
+        
+        // If either vertex was free-floating, make the merged one free-floating
+        if (prevSet.has(action.keepKey) || prevSet.has(action.removeKey)) {
+          newSet.add(action.mergedKey);
+        }
+      }
+      
+      return newSet;
+    });
+    
+    console.log(`✅ Successfully merged ${mergeActions.length} vertex pairs`);
+    return true; // Merging occurred
+  }, [vertices, segments, vertexAtoms]);
+
   // Generate unique segments and vertices based on view size
   const generateGrid = useCallback((width, height, existingVertices = [], existingVertexAtoms = {}, existingSegments = []) => {
     const newSegments = [];
@@ -1014,15 +1198,9 @@ const HexGridWithToolbar = () => {
           ctx.moveTo(sx1, sy1);
           ctx.lineTo(sx2, sy2);
           
-          if (isHovered && mode === 'draw') {
-            // Draw mode: green semi-transparent line
-            ctx.strokeStyle = 'rgba(76, 175, 80, 0.6)';
-            ctx.lineWidth = 4;
-          } else {
-            // Other modes: use consistent grid line color
-            ctx.strokeStyle = isHovered ? '#888' : '#e0e0e0';
-            ctx.lineWidth = 1.5; // Same thickness as normal grid lines
-          }
+          // Use consistent highlighting for all modes: darker gray and thicker when hovered
+          ctx.strokeStyle = isHovered ? '#888' : '#e0e0e0';
+          ctx.lineWidth = isHovered ? 2.5 : 1.5;
           ctx.stroke();
         }
         
@@ -1040,13 +1218,13 @@ const HexGridWithToolbar = () => {
 
     // Draw bond previews for off-grid vertices (solid gray lines like grid)
     ctx.save();
-    ctx.lineWidth = 1.5; // Same thickness as grid lines
     
     bondPreviews.forEach(preview => {
       if (preview.isVisible) {
         const isHovered = hoverBondPreview?.id === preview.id;
-        // Use same colors as grid lines: light gray normally, darker when hovered
+        // Use consistent highlighting: darker gray and thicker when hovered
         ctx.strokeStyle = isHovered ? '#888' : '#e0e0e0';
+        ctx.lineWidth = isHovered ? 2.5 : 1.5; // Thicker when hovered, same as grid lines
         
         const sx1 = preview.x1 + offset.x;
         const sy1 = preview.y1 + offset.y;
@@ -1069,8 +1247,13 @@ const HexGridWithToolbar = () => {
       if (seg.bondOrder >= 1) {
         // Use blue color for selected segments in mouse mode
         const isSelected = mode === 'mouse' && selectedSegments.has(segIdx);
+        // Use blue highlight for hovered single bonds in draw mode
+        const isHoveredSingleBond = mode === 'draw' && segIdx === hoverSegmentIndex && seg.bondOrder === 1;
+        
         if (isSelected) {
           ctx.strokeStyle = 'rgb(54,98,227)';
+        } else if (isHoveredSingleBond) {
+          ctx.strokeStyle = 'rgb(54, 227, 112)'; // Blue highlight for single bonds that can become double bonds
         } else {
           ctx.strokeStyle = '#000000';
         }
@@ -2279,36 +2462,29 @@ const HexGridWithToolbar = () => {
       const hx = hoverVertex.x + offset.x;
       const hy = hoverVertex.y + offset.y;
       
-      if (mode === 'draw') {
-        // Draw mode: green semi-transparent circle with plus sign
-        ctx.beginPath();
-        ctx.arc(hx, hy, 12, 0, 2 * Math.PI);
-        ctx.fillStyle = 'rgba(76, 175, 80, 0.25)';
-        ctx.fill();
-        
-        // Draw plus sign in the center
-        ctx.strokeStyle = 'rgba(76, 175, 80, 0.7)';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        
-        // Horizontal line of plus
-        ctx.beginPath();
-        ctx.moveTo(hx - 8, hy);
-        ctx.lineTo(hx + 8, hy);
-        ctx.stroke();
-        
-        // Vertical line of plus
-        ctx.beginPath();
-        ctx.moveTo(hx, hy - 8);
-        ctx.lineTo(hx, hy + 8);
-        ctx.stroke();
-      } else {
-        // Other modes: original gray circle
-        ctx.beginPath();
-        ctx.arc(hx, hy, 12, 0, 2 * Math.PI);
-        ctx.fillStyle = 'rgba(120,120,120,0.25)';
-        ctx.fill();
-      }
+      // Blue circle for all modes (smaller and more subtle)
+      ctx.beginPath();
+      ctx.arc(hx, hy, 10, 0, 2 * Math.PI);
+      ctx.fillStyle = 'rgba(54, 98, 227, 0.3)';
+      ctx.fill();
+      
+      // Draw small gray plus sign in the center for all modes
+      ctx.strokeStyle = 'rgba(120, 120, 120, 0.8)';
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+      
+      // Horizontal line of plus (smaller)
+      ctx.beginPath();
+      ctx.moveTo(hx - 4, hy);
+      ctx.lineTo(hx + 4, hy);
+      ctx.stroke();
+      
+      // Vertical line of plus (smaller)
+      ctx.beginPath();
+      ctx.moveTo(hx, hy - 4);
+      ctx.lineTo(hx, hy + 4);
+      ctx.stroke();
+      
       ctx.restore();
     }
     
@@ -2506,6 +2682,8 @@ const HexGridWithToolbar = () => {
       });
     }
 
+
+
     // Draw fourth bond preview if in fourth bond mode or draw mode with source
     if ((fourthBondMode || (mode === 'draw' && fourthBondSource)) && fourthBondPreview) {
       ctx.save();
@@ -2514,9 +2692,8 @@ const HexGridWithToolbar = () => {
       const sy1 = fourthBondPreview.startY;
       const sx2 = fourthBondPreview.endX;
       const sy2 = fourthBondPreview.endY;
-      // Use green when snapped to grid, darker gray when snapped to vertex, light gray otherwise
-      const previewColor = (fourthBondPreview.snappedToGrid || false) ? '#4CAF50' : 
-                          (fourthBondPreview.snappedToVertex ? '#444444' : '#888888');
+      // Use blue when snapped to anything (grid or bond preview), light gray otherwise
+      const previewColor = (fourthBondPreview.snappedToGrid || fourthBondPreview.snappedToVertex) ? '#2196F3' : '#888888';
       
       // Check if we're in a stereochemistry mode to show the appropriate preview
       if (mode === 'wedge') {
@@ -4162,6 +4339,8 @@ const HexGridWithToolbar = () => {
     
     // Run small ring off-grid vertex detection after pasting (with small delay to ensure state is updated)
     setTimeout(detectEpoxideVertices, 10);
+    // Run vertex merging after pasting
+    setTimeout(mergeOverlappingVertices, 15);
   }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState, selectedPreset, detectEpoxideVertices]);
 
   // Set mode (draw/erase/arrow/text/etc.) - must be defined before setModeAndClearSelection
@@ -4451,6 +4630,7 @@ const HexGridWithToolbar = () => {
         setVertices(prevVertices => {
           const newVertices = [...prevVertices, newEndpointVertex];
           setTimeout(detectRings, 0);
+          setTimeout(mergeOverlappingVertices, 0);
           return newVertices;
         });
       }
@@ -4609,6 +4789,7 @@ const HexGridWithToolbar = () => {
           
           if (!vertexExists) {
             setVertices(prevVertices => [...prevVertices, newVertex]);
+            setTimeout(mergeOverlappingVertices, 0);
           }
           
           // Run ring detection after adding bond/vertex
@@ -4951,6 +5132,7 @@ const HexGridWithToolbar = () => {
         
         // Add the new vertex
         setVertices(prevVertices => [...prevVertices, newVertex]);
+        setTimeout(mergeOverlappingVertices, 0);
         
         // Add the new text mode vertex to freeFloatingVertices set so it can be moved
         const newVertexKey = `${gridX.toFixed(2)},${gridY.toFixed(2)}`;
@@ -5787,25 +5969,6 @@ const HexGridWithToolbar = () => {
     );
   };
   const handleMouseMove = event => {
-    // Handle bond preview hover detection
-    const canvas = canvasRef.current;
-    if (canvas && bondPreviews.length > 0) {
-      const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
-      
-      // Check if mouse is over any bond preview
-      let hoveredPreview = null;
-      for (const preview of bondPreviews) {
-        if (isPointOnBondPreview(x, y, preview, offset)) {
-          hoveredPreview = preview;
-          break;
-        }
-      }
-      
-      setHoverBondPreview(hoveredPreview);
-    }
-    
     handleMouseMoveUtil(
       event,
       canvasRef,
@@ -5830,6 +5993,8 @@ const HexGridWithToolbar = () => {
       freeFloatingVertices,
       segments,
       vertexAtoms,
+      bondPreviews,
+      isPointOnBondPreview,
       // Setters
       setPastePreviewPosition,
       calculateGridAlignment,
@@ -5855,8 +6020,11 @@ const HexGridWithToolbar = () => {
       isPointInVertexBox
     );
 
-    // Additional logic for draw mode: prioritize vertex hover, then grid line, then nearest vertex
-    if (mode === 'draw' && !isDragging && !isSelecting && !isPasteMode && !fourthBondMode && !draggingVertex && !draggingArrowIndex) {
+    // Enhanced hover priority system for interactive modes: vertex > bond preview > grid line > nearest vertex fallback
+    const isInteractiveMode = (mode === 'draw' || mode === 'triple' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && 
+                             !isDragging && !isSelecting && !isPasteMode && !fourthBondMode && !draggingVertex && !draggingArrowIndex;
+    
+    if (isInteractiveMode) {
       const canvas = canvasRef.current;
       if (canvas) {
         const rect = canvas.getBoundingClientRect();
@@ -5876,62 +6044,103 @@ const HexGridWithToolbar = () => {
         }
         
         if (directHoverVertex) {
-          // Hovering directly over a vertex - highlight vertex and clear grid line hover
+          // Hovering directly over a vertex - highlight vertex and clear everything else
           setHoverVertex(directHoverVertex);
           setHoverSegmentIndex(null);
+          setHoverBondPreview(null);
         } else {
-          // Second priority: Check if we're hovering over a grid line
-          let closestSegmentIdx = null;
-          let minSegmentDist = lineThreshold;
-          
-          segments.forEach((seg, idx) => {
-            const A = x - (seg.x1 + offset.x);
-            const B = y - (seg.y1 + offset.y);
-            const C = (seg.x2 + offset.x) - (seg.x1 + offset.x);
-            const D = (seg.y2 + offset.y) - (seg.y1 + offset.y);
-            const dot = A * C + B * D;
-            const len_sq = C * C + D * D;
-            let t = dot / len_sq;
-            t = Math.max(0, Math.min(1, t));
-            const projX = seg.x1 + offset.x + t * C;
-            const projY = seg.y1 + offset.y + t * D;
-            const dx = x - projX;
-            const dy = y - projY;
-            const distSeg = Math.sqrt(dx * dx + dy * dy);
-            if (distSeg < minSegmentDist) {
-              minSegmentDist = distSeg;
-              closestSegmentIdx = idx;
-            }
-          });
-          
-          if (closestSegmentIdx !== null) {
-            // Hovering over a grid line - highlight the segment and clear vertex hover
-            setHoverSegmentIndex(closestSegmentIdx);
-            setHoverVertex(null);
-          } else {
-            // Third priority: Find nearest vertex as fallback for empty space
-            let nearestVertex = null;
-            let minDistance = 150; // Maximum distance to consider for highlighting (in pixels)
-            
-            for (let v of vertices) {
-              const dist = distanceToVertex(x, y, v.x, v.y);
-              if (dist < minDistance) {
-                minDistance = dist;
-                nearestVertex = v;
+          // Second priority: Check if we're hovering over a bond preview (off-grid bonds)
+          let hoveredPreview = null;
+          if (bondPreviews.length > 0) {
+            for (const preview of bondPreviews) {
+              if (isPointOnBondPreview(x, y, preview, offset)) {
+                hoveredPreview = preview;
+                break;
               }
             }
+          }
+          
+          if (hoveredPreview) {
+            // Hovering over a bond preview - highlight it and clear everything else
+            setHoverBondPreview(hoveredPreview);
+            setHoverVertex(null);
+            setHoverSegmentIndex(null);
+          } else {
+            // Third priority: Check if we're hovering over a grid line
+            let closestSegmentIdx = null;
+            let minSegmentDist = lineThreshold;
             
-            // Set the nearest vertex as hovered if we found one
-            if (nearestVertex) {
-              setHoverVertex(nearestVertex);
-              setHoverSegmentIndex(null); // Clear segment hover when highlighting vertex
-            } else {
-              // Not hovering over anything - clear both highlights
-              setHoverVertex(null);
-              setHoverSegmentIndex(null);
+            segments.forEach((seg, idx) => {
+              const A = x - (seg.x1 + offset.x);
+              const B = y - (seg.y1 + offset.y);
+              const C = (seg.x2 + offset.x) - (seg.x1 + offset.x);
+              const D = (seg.y2 + offset.y) - (seg.y1 + offset.y);
+              const dot = A * C + B * D;
+              const len_sq = C * C + D * D;
+              let t = dot / len_sq;
+              t = Math.max(0, Math.min(1, t));
+              const projX = seg.x1 + offset.x + t * C;
+              const projY = seg.y1 + offset.y + t * D;
+              const dx = x - projX;
+              const dy = y - projY;
+              const distSeg = Math.sqrt(dx * dx + dy * dy);
+              if (distSeg < minSegmentDist) {
+                minSegmentDist = distSeg;
+                closestSegmentIdx = idx;
+              }
+            });
+            
+                    if (closestSegmentIdx !== null) {
+          // Hovering over a grid line - highlight the segment and clear everything else
+          setHoverSegmentIndex(closestSegmentIdx);
+          setHoverVertex(null);
+          setHoverBondPreview(null);
+        } else {
+              // Fourth priority: Find nearest vertex as fallback for empty space
+              let nearestVertex = null;
+              let minDistance = 150; // Maximum distance to consider for highlighting (in pixels)
+              
+              for (let v of vertices) {
+                const dist = distanceToVertex(x, y, v.x, v.y);
+                if (dist < minDistance) {
+                  minDistance = dist;
+                  nearestVertex = v;
+                }
+              }
+              
+              // Set the nearest vertex as hovered if we found one, otherwise clear everything
+              if (nearestVertex) {
+                setHoverVertex(nearestVertex);
+                setHoverSegmentIndex(null);
+                setHoverBondPreview(null);
+              } else {
+                // Not hovering over anything - clear all highlights
+                setHoverVertex(null);
+                setHoverSegmentIndex(null);
+                setHoverBondPreview(null);
+              }
             }
           }
         }
+      }
+    } else {
+      // For non-interactive modes, still handle bond preview hover detection
+      const canvas = canvasRef.current;
+      if (canvas && bondPreviews.length > 0) {
+        const rect = canvas.getBoundingClientRect();
+        const x = event.clientX - rect.left;
+        const y = event.clientY - rect.top;
+        
+        // Check if mouse is over any bond preview
+        let hoveredPreview = null;
+        for (const preview of bondPreviews) {
+          if (isPointOnBondPreview(x, y, preview, offset)) {
+            hoveredPreview = preview;
+            break;
+          }
+        }
+        
+        setHoverBondPreview(hoveredPreview);
       }
     }
   };
@@ -5954,6 +6163,7 @@ const HexGridWithToolbar = () => {
       fourthBondMode,
       // Functions
       handleArrowClickLocal,
+      mergeOverlappingVertices,
       // Setters
       setIsSelecting,
       setIsDragging,
@@ -6084,8 +6294,15 @@ const HexGridWithToolbar = () => {
     if (!isDraggingVertex) {
       const newVertexTypes = determineVertexTypes(vertices, segments, vertexAtoms);
       setVertexTypes(newVertexTypes);
+      
+      // Also run vertex merging after any vertex changes (with small delay to allow state to settle)
+      const timeoutId = setTimeout(() => {
+        mergeOverlappingVertices();
+      }, 100);
+      
+      return () => clearTimeout(timeoutId);
     }
-  }, [vertices, segments, vertexAtoms, isDraggingVertex]);
+  }, [vertices, segments, vertexAtoms, isDraggingVertex, mergeOverlappingVertices]);
 
 
 
@@ -7077,7 +7294,7 @@ const HexGridWithToolbar = () => {
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Updated dash bond icon to better reflect actual appearance with perpendicular lines that get progressively wider */}
               <g transform="translate(6, 13)">
-                <line x1="0" y1="0" x2="32" y2="0" stroke="#fff" strokeWidth="1" strokeOpacity="0.0" />
+                <line x1="0" y1="0" x2="32" y2="0" stroke="#fff" strokeWidth="1" strokeOpacity="0" />
                 <line x1="3" y1="-1" x2="3" y2="1" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
                 <line x1="9" y1="-2" x2="9" y2="2" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
                 <line x1="15" y1="-3" x2="15" y2="3" stroke="#fff" strokeWidth="2" strokeLinecap="round" />

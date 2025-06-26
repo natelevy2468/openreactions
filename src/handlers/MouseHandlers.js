@@ -24,6 +24,8 @@ export const handleMouseMove = (
   freeFloatingVertices,
   segments,
   vertexAtoms,
+  bondPreviews,
+  isPointOnBondPreview,
   // Setters
   setPastePreviewPosition,
   calculateGridAlignment,
@@ -46,7 +48,8 @@ export const handleMouseMove = (
   isPointInArrowCircle,
   isPointInCurvedArrowCircle,
   distanceToVertex,
-  isPointInVertexBox
+  isPointInVertexBox,
+  mergeOverlappingVertices
 ) => {
   const rect = canvasRef.current.getBoundingClientRect();
   const x = event.clientX - rect.left;
@@ -93,6 +96,8 @@ export const handleMouseMove = (
     const snapThreshold = 15 * Math.PI / 180; // 15 degrees in radians
     let snappedAngle = null;
     let snappedToGrid = false;
+    let snappedToBondPreview = false;
+    let snappedEndpoint = null;
 
     // Only snap if the source vertex is on-grid (not off-grid)
     if (fourthBondSource.isOffGrid !== true) {
@@ -142,17 +147,55 @@ export const handleMouseMove = (
           break;
         }
       }
+    } else {
+      // For off-grid vertices, check for bond preview snapping
+      if (bondPreviews && bondPreviews.length > 0) {
+        const snapDistance = 30; // Distance threshold for snapping to bond previews
+        
+        // Check each bond preview endpoint for proximity
+        for (const preview of bondPreviews) {
+          if (preview.isVisible) {
+            // Check distance to the endpoint of the bond preview (x2, y2)
+            const previewEndX = preview.x2 + offset.x;
+            const previewEndY = preview.y2 + offset.y;
+            const distanceToPreviewEnd = Math.sqrt((x - previewEndX) ** 2 + (y - previewEndY) ** 2);
+            
+            if (distanceToPreviewEnd <= snapDistance) {
+              // Snap to this bond preview endpoint
+              const directionX = previewEndX - sourceX;
+              const directionY = previewEndY - sourceY;
+              const directionLength = Math.sqrt(directionX ** 2 + directionY ** 2);
+              
+              if (directionLength > 0) {
+                ux = directionX / directionLength;
+                uy = directionY / directionLength;
+                snappedToBondPreview = true;
+                snappedEndpoint = { x: preview.x2, y: preview.y2 }; // Store world coordinates
+                break;
+              }
+            }
+          }
+        }
+      }
     }
 
-    // Use snapped angle if found, otherwise use original direction
+    // Use snapped angle if found (for grid snapping), otherwise use original direction
     if (snappedAngle !== null) {
       ux = Math.cos(snappedAngle);
       uy = Math.sin(snappedAngle);
     }
 
-    // Set endpoint at constant length in calculated direction
-    const endX = sourceX + ux * hexRadius;
-    const endY = sourceY + uy * hexRadius;
+    // Set endpoint - use snapped position for bond preview snapping, otherwise constant length
+    let endX, endY;
+    if (snappedToBondPreview && snappedEndpoint) {
+      // When snapping to bond preview, use the exact endpoint position
+      endX = snappedEndpoint.x + offset.x;
+      endY = snappedEndpoint.y + offset.y;
+    } else {
+      // Normal case: set endpoint at constant length in calculated direction
+      endX = sourceX + ux * hexRadius;
+      endY = sourceY + uy * hexRadius;
+    }
     
     // Update preview with snapping indication
     setFourthBondPreview({
@@ -160,7 +203,7 @@ export const handleMouseMove = (
       startY: sourceY,
       endX: endX,
       endY: endY,
-      snappedToVertex: false,
+      snappedToVertex: snappedToBondPreview,
       snappedToGrid: snappedToGrid
     });
     return; // Exit early to prevent other mouse move handling
@@ -865,6 +908,7 @@ export const handleMouseUp = (
   fourthBondMode,
   // Functions
   handleArrowClick,
+  mergeOverlappingVertices,
   // Setters
   setIsSelecting,
   setIsDragging,
@@ -897,6 +941,9 @@ export const handleMouseUp = (
   if (draggingVertex) {
     setDraggingVertex(null);
     setIsDraggingVertex(false);
+    
+    // After dragging a vertex, check for and merge any overlapping vertices
+    setTimeout(() => mergeOverlappingVertices(), 50);
   }
   
   // Reset arrow dragging state if we were dragging an arrow
