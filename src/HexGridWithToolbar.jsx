@@ -19,8 +19,6 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
 
   const HexGridWithToolbar = () => {
     const canvasRef = useRef(null);
-    // Add tab state - starts with 'draw' as the default
-    const [activeTab, setActiveTab] = useState('draw');
     
     // segments store base coordinates and bondOrder: 0 (none), 1 (single), 2 (double)
   // bondType: null (normal), 'wedge', 'dash', 'ambiguous'
@@ -1098,7 +1096,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         }
       }
       
-      if (seg.bondOrder === 0 && !inBreakingZone && activeTab !== 'animate') {
+      if (seg.bondOrder === 0 && !inBreakingZone) {
         const sx1 = seg.x1 + offset.x;
         const sy1 = seg.y1 + offset.y;
         const sx2 = seg.x2 + offset.x;
@@ -1221,7 +1219,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
     ctx.save();
     
     bondPreviews.forEach(preview => {
-      if (preview.isVisible && activeTab !== 'animate') {
+      if (preview.isVisible) {
         const isHovered = hoverBondPreview?.id === preview.id;
         // Use white color: lighter when normal, darker when hovered
         ctx.strokeStyle = isHovered ? '#cccccc' : '#ffffff';
@@ -2978,7 +2976,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
     });
     
     // Draw arrow preview if necessary
-    if (arrowPreview && (mode === 'arrow' || mode === 'equil' || mode === 'drawAnimationArrow' || mode.startsWith('curve'))) {
+    if (arrowPreview && (mode === 'arrow' || mode === 'equil' || mode.startsWith('curve'))) {
       // For curved arrows with both start and end points
       if (arrowPreview.isCurved) {
         // Draw a curved arrow from start point to current mouse position
@@ -3025,27 +3023,6 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
           const previewX2 = x + 40;
           const previewY2 = y;
           drawArrowOnCanvas(ctx, previewX1, previewY1, previewX2, previewY2, 'rgba(0,0,0,0.4)', 3, mode);
-        } else if (mode === 'drawAnimationArrow') {
-          const previewX1 = x - 40;
-          const previewY1 = y;
-          const previewX2 = x + 40;
-          const previewY2 = y;
-          // Draw animation arrow preview with visual distinction
-          drawArrowOnCanvas(ctx, previewX1, previewY1, previewX2, previewY2, 'rgba(54,98,227,0.6)', 3, mode);
-          
-          // Add small animation indicator dots above the arrow
-          ctx.save();
-          ctx.fillStyle = 'rgba(54,98,227,0.4)';
-          ctx.beginPath();
-          ctx.arc(x - 20, y - 8, 2, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.beginPath();
-          ctx.arc(x, y - 8, 2, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.beginPath();
-          ctx.arc(x + 20, y - 8, 2, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.restore();
         } else if (mode === 'equil') {
           const previewX1 = x - 40;
           const previewY1 = y;
@@ -5106,7 +5083,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
           }
         }
       }
-    } else if (mode === 'arrow' || mode === 'equil' || mode === 'drawAnimationArrow' || mode.startsWith('curve')) {
+    } else if (mode === 'arrow' || mode === 'equil' || mode.startsWith('curve')) {
       // Arrow modes: don't do anything on click - arrows are handled separately
       // Arrow placement is handled by handleArrowClick via mouse up events
       return;
@@ -6265,7 +6242,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
     const y = event.clientY - rect.top;
     
     // Only capture state if we're actually going to create an arrow
-    if (mode === 'arrow' || mode === 'equil' || mode === 'drawAnimationArrow' || mode.startsWith('curve')) {
+    if (mode === 'arrow' || mode === 'equil' || mode.startsWith('curve')) {
       captureState();
     }
     
@@ -6373,7 +6350,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
     }
   }, [vertices, history.length, captureState]);
 
-  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow, bondPreviews, hoverBondPreview, epoxideVertices, activeTab]);
+  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow, bondPreviews, hoverBondPreview, epoxideVertices]);
 
   // Erase all handler
   const handleEraseAll = () => {
@@ -6437,7 +6414,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
 
   // When mode changes away from arrow modes, clear preview:
   useEffect(() => { 
-    if (mode !== 'arrow' && mode !== 'equil' && mode !== 'drawAnimationArrow' && !mode.startsWith('curve')) {
+    if (mode !== 'arrow' && mode !== 'equil' && !mode.startsWith('curve')) {
       setArrowPreview(null);
       setCurvedArrowStartPoint(null);
     }
@@ -6608,78 +6585,21 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         zIndex: 10,
         boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
       }}>
-        <button
-          onClick={() => {
-            setActiveTab('draw');
-            // Only switch to draw mode if we're coming from animate tab
-            if (activeTab === 'animate') {
-              selectMode('draw');
-            }
-          }}
+        <div
           style={{
-            backgroundColor: activeTab === 'draw' ? 'rgb(54,98,227)' : 'transparent',
-            color: activeTab === 'draw' ? '#fff' : '#bbb',
+            backgroundColor: 'rgb(54,98,227)',
+            color: '#fff',
             border: 'none',
             padding: '8px 20px',
             marginRight: '8px',
             borderRadius: '6px',
-            cursor: 'pointer',
             fontSize: '14px',
             fontWeight: '600',
             fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-            transition: 'all 0.2s ease',
-            outline: 'none',
-          }}
-          onMouseEnter={(e) => {
-            if (activeTab !== 'draw') {
-              e.target.style.backgroundColor = 'rgba(255,255,255,0.1)';
-              e.target.style.color = '#fff';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (activeTab !== 'draw') {
-              e.target.style.backgroundColor = 'transparent';
-              e.target.style.color = '#bbb';
-            }
           }}
         >
           Draw
-        </button>
-        <button
-          onClick={() => {
-            setActiveTab('animate');
-            // Automatically switch to drawAnimationArrow mode when entering animate tab
-            selectMode('drawAnimationArrow');
-          }}
-          style={{
-            backgroundColor: activeTab === 'animate' ? 'rgb(54,98,227)' : 'transparent',
-            color: activeTab === 'animate' ? '#fff' : '#bbb',
-            border: 'none',
-            padding: '8px 20px',
-            marginRight: '8px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '14px',
-            fontWeight: '600',
-            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-            transition: 'all 0.2s ease',
-            outline: 'none',
-          }}
-          onMouseEnter={(e) => {
-            if (activeTab !== 'animate') {
-              e.target.style.backgroundColor = 'rgba(255,255,255,0.1)';
-              e.target.style.color = '#fff';
-            }
-          }}
-          onMouseLeave={(e) => {
-            if (activeTab !== 'animate') {
-              e.target.style.backgroundColor = 'transparent';
-              e.target.style.color = '#bbb';
-            }
-          }}
-        >
-          Animate
-        </button>
+        </div>
       </div>
       
       <style>{`
@@ -6735,10 +6655,9 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
           marginBottom: 'calc(min(280px, 25vw) * 0.001)',
           textAlign: 'left',
           userSelect: 'none',
-        }}>{activeTab === 'draw' ? 'Create' : 'Animate'}</div>
+        }}>Create</div>
         
-        {/* Toolbar Content - only show in Draw mode */}
-        {activeTab === 'draw' && (
+        {/* Toolbar Content - always show since we only have Draw mode */}
         <>
         {/* Draw/Erase Buttons as icon buttons side by side */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0 }}>
@@ -7965,124 +7884,6 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
           </button>
         </div>
         </>
-        )}
-        
-        {/* Animate Tab Content */}
-        {activeTab === 'animate' && (
-          <>
-            {/* Draw Animation Arrow Button */}
-            <button
-              onClick={() => {
-                const newMode = mode === 'drawAnimationArrow' ? 'draw' : 'drawAnimationArrow';
-                selectMode(newMode);
-              }}
-              className="toolbar-button"
-              style={{
-                width: '100%',
-                height: 'min(44px, 7vh)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                backgroundColor: mode === 'drawAnimationArrow' ? 'rgb(54,98,227)' : '#23395d',
-                border: 'none',
-                borderRadius: 'calc(min(280px, 25vw) * 0.019)',
-                cursor: 'pointer',
-                boxShadow: mode === 'drawAnimationArrow' ? 
-                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-                outline: 'none',
-                padding: 0,
-                color: '#fff',
-                fontSize: 'max(12px, min(calc(min(280px, 25vw) * 0.05), 2vh))',
-                fontWeight: '600',
-                fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-                gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
-              }}
-              onMouseEnter={(e) => {
-                if (mode !== 'drawAnimationArrow') {
-                  e.target.style.backgroundColor = '#3554a0';
-                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
-                }
-              }}
-              onMouseLeave={(e) => {
-                if (mode !== 'drawAnimationArrow') {
-                  e.target.style.backgroundColor = '#23395d';
-                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-                }
-              }}
-              title="Draw Animation Arrow"
-            >
-              {/* Animation Arrow SVG */}
-              <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-                <line x1="6" y1="13" x2="32" y2="13" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-                <polygon points="32,7 44,13 32,19" fill="white" />
-                {/* Add animation indicator - small circles */}
-                <circle cx="12" cy="8" r="1.5" fill="white" opacity="0.8" />
-                <circle cx="18" cy="8" r="1.5" fill="white" opacity="0.6" />
-                <circle cx="24" cy="8" r="1.5" fill="white" opacity="0.4" />
-              </svg>
-              Draw Animation Arrow
-                         </button>
-             
-             {/* Add Step Button */}
-             <button
-               onClick={() => {
-                 // TODO: Implement add step functionality
-                 console.log('Add step clicked');
-               }}
-               className="toolbar-button"
-               style={{
-                 width: '100%',
-                 height: 'min(44px, 7vh)',
-                 display: 'flex',
-                 alignItems: 'center',
-                 justifyContent: 'center',
-                 backgroundColor: '#23395d',
-                 border: 'none',
-                 borderRadius: 'calc(min(280px, 25vw) * 0.019)',
-                 cursor: 'pointer',
-                 boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-                 outline: 'none',
-                 padding: 0,
-                 color: '#fff',
-                 fontSize: 'max(12px, min(calc(min(280px, 25vw) * 0.05), 2vh))',
-                 fontWeight: '600',
-                 fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-                 gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
-                 marginTop: 'max(8px, calc(min(280px, 25vw) * 0.03))',
-               }}
-               onMouseEnter={(e) => {
-                 e.target.style.backgroundColor = '#28a745';
-                 e.target.style.boxShadow = '0 4px 12px rgba(40,167,69,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
-               }}
-               onMouseLeave={(e) => {
-                 e.target.style.backgroundColor = '#23395d';
-                 e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-               }}
-               title="Add Step"
-             >
-               {/* Plus icon for Add Step */}
-               <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
-                 <line x1="12" y1="5" x2="12" y2="19"></line>
-                 <line x1="5" y1="12" x2="19" y2="12"></line>
-               </svg>
-               Add Step
-             </button>
-             
-             {/* Future animation controls can be added here */}
-             <div style={{
-               color: '#888',
-               fontWeight: 400,
-               fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.045), 2vh))',
-               textAlign: 'center',
-               marginTop: 'max(20px, calc(min(280px, 25vw) * 0.05))',
-               fontStyle: 'italic',
-               lineHeight: '1.4',
-             }}>
-               More animation tools coming soon...
-             </div>
-          </>
-        )}
       </div>
       
       {/* Canvas wrapper fills all except toolbar area */}
