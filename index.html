@@ -9,54 +9,376 @@
       margin: 0;
       font-family: sans-serif;
       display: flex;
+      flex-direction: column;
       height: 100vh;
     }
 
+    .navbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 50px;
+      background: #c4c4c4;
+      border-bottom: 1px solid rgb(191, 191, 191);
+      display: flex;
+      align-items: center;
+      padding-left: 20px;
+      padding-right: 20px;
+      z-index: 10;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      justify-content: space-between;
+    }
+
+    .navbar-left {
+      display: flex;
+      align-items: center;
+      margin-top: 3px;
+    }
+
+    .navbar-center {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex: 1;
+      margin-top: 3px;
+    }
+
+    .navbar-title {
+      font-size: 28px;
+      font-weight: 700;
+      color: #333;
+      font-family: "Inter", "Segoe UI", "Arial", sans-serif;
+      letter-spacing: -0.5px;
+    }
+
+    .navbar-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 3px;
+    }
+
+    .navbar a.home-btn {
+      background-color: transparent;
+      color: #333;
+      text-decoration: none;
+      border: none;
+      padding: 10px 12px;
+      margin-right: 2px;
+      margin-left: -16px;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      font-family: "Inter", "Segoe UI", "Arial", sans-serif;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+
+    .navbar .logo {
+      height: 38px;
+      width: auto;
+      pointer-events: none;
+      filter: hue-rotate(0deg) saturate(1.6) brightness(0.5);
+    }
+
+    .navbar .nav-btn {
+      background-color: transparent;
+      color: #333;
+      text-decoration: none;
+      border: none;
+      padding: 10px 12px;
+      margin-right: 2px;
+      border-radius: 6px;
+      font-size: 16px;
+      font-weight: 600;
+      font-family: "Inter", "Segoe UI", "Arial", sans-serif;
+      cursor: pointer;
+      transition: all 0.15s ease-out;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .navbar .nav-btn:hover {
+      background-color: rgba(54, 98, 227, 0.2);
+      transform: scale(1.02);
+    }
+
+    .navbar .nav-btn.active {
+      background-color: rgba(54, 98, 227, 0.7);
+      color: #fff;
+    }
+
+
+
+    .navbar .settings-btn {
+      background-color: transparent;
+      color: #333;
+      text-decoration: none;
+      border: none;
+      padding: 0px 0px;
+      border-radius: 6px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: "Inter", "Segoe UI", "Arial", sans-serif;
+      cursor: default;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .navbar .gear-icon {
+      width: 50px;
+      height: 50px;
+      pointer-events: none;
+      filter: brightness(0) saturate(100%) invert(27%) sepia(0%) saturate(1567%) hue-rotate(184deg) brightness(95%) contrast(87%);
+    }
+
+    .content {
+      display: flex;
+      flex-grow: 1;
+      margin-top: 50px;
+    }
+
     .sidebar {
-      background-color: #222;
-      color: white;
+      background-color: rgb(248, 249, 250);
+      color: #333;
       width: 200px;
       padding: 1rem;
+      border-right: 1px solid #bbbbbb;
     }
 
     .main {
       flex-grow: 1;
       display: flex;
       flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      text-align: center;
+      justify-content: flex-start;
+      align-items: flex-start;
+      text-align: left;
+      padding: 3.5rem;
     }
 
-    .button {
-      background-color: #007BFF;
-      color: white;
-      padding: 1rem 2rem;
-      text-decoration: none;
+    .new-button {
+      background-color: #dee2e6;
+      color: #333;
+      border: 1px solid #ced4da;
+      padding: 2rem 2rem;
       font-size: 1.5rem;
-      border-radius: 8px;
-      margin-top: 2rem;
+      font-weight: 600;
+      font-family: "Inter", "Segoe UI", "Arial", sans-serif;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease-out;
+      width: 160px;
+      height: 160px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-decoration: none;
+      gap: 4px;
+      position: relative;
     }
 
-    .button:hover {
-      background-color: #0056b3;
+    .new-button:hover {
+      background-color: #ced4da;
+      transform: scale(1.02);
     }
 
-    .coming-soon {
-      margin-top: 1rem;
-      font-style: italic;
+    .section-title {
+      color: #666;
+      font-size: 1.5rem;
+      font-weight: 100;
+      font-family: "Inter", "Segoe UI", "Arial", sans-serif;
+      margin-bottom: 2rem;
+      margin-top: 0;
     }
+
+    .corner-line {
+      position: absolute;
+      background-color: #999;
+      border-radius: 1.5px;
+    }
+
+    .corner-line.horizontal {
+      width: 28px;
+      height: 3px;
+    }
+
+    .corner-line.vertical {
+      width: 3px;
+      height: 28px;
+    }
+
+    .corner-top-left-h {
+      top: 8px;
+      left: 8px;
+    }
+
+    .corner-top-left-v {
+      top: 8px;
+      left: 8px;
+    }
+
+    .corner-top-right-h {
+      top: 8px;
+      right: 8px;
+    }
+
+    .corner-top-right-v {
+      top: 8px;
+      right: 8px;
+    }
+
+    .corner-bottom-left-h {
+      bottom: 8px;
+      left: 8px;
+    }
+
+    .corner-bottom-left-v {
+      bottom: 8px;
+      left: 8px;
+    }
+
+    .corner-bottom-right-h {
+      bottom: 8px;
+      right: 8px;
+    }
+
+    .corner-bottom-right-v {
+      bottom: 8px;
+      right: 8px;
+    }
+
+    .option-btn {
+      background-color: transparent;
+      color: #333;
+      border: 1px solid transparent;
+      padding: 16px 20px 16px 25px;
+      margin-bottom: 16px;
+      border-radius: 0px 50px 50px 0px;
+      font-size: 16px;
+      font-weight: 500;
+      font-family: "Inter", "Segoe UI", "Arial", sans-serif;
+      cursor: pointer;
+      transition: all 0.15s ease-out;
+      width: calc(100% + 1rem);
+      margin-left: -1rem;
+      text-align: left;
+      display: block;
+    }
+
+    .option-btn:hover {
+      background-color: #dee2e6;
+      border-color: #ced4da;
+    }
+
+    .option-btn.active {
+      background-color: #116fcd;
+      color: white;
+      border-color: #5a6570;
+    }
+
+    .option-btn.active:hover {
+      background-color: #0057af;
+    }
+
+
   </style>
+  <script>
+    function showAbout() {
+      alert('Made by: Nathan Levy PO \'27\n\ntext 925-808-9441 with questions!\n\nstill under development.');
+    }
+
+    function switchMode(mode) {
+      // Remove active class from all buttons
+      document.querySelectorAll('.option-btn').forEach(btn => btn.classList.remove('active'));
+      
+      // Add active class to clicked button
+      document.getElementById(mode + '-btn').classList.add('active');
+      
+      // Hide all content areas
+      document.querySelectorAll('.mode-content').forEach(content => content.style.display = 'none');
+      
+      // Show selected content area
+      document.getElementById(mode + '-content').style.display = 'block';
+    }
+
+    // Set default mode on page load
+    window.addEventListener('load', function() {
+      switchMode('structure-drawer');
+    });
+  </script>
 </head>
 <body>
-  <div class="sidebar">
-    <h3>Options</h3>
-    <p>(Coming soon)</p>
+  <div class="navbar">
+    <!-- Left side buttons -->
+    <div class="navbar-left">
+      <a href="/" class="home-btn">
+        <img src="logoFinal3.png" alt="OpenReactions Logo" class="logo" />
+        <span>Home</span>
+      </a>
+      <a href="/draw/" class="nav-btn">
+        Draw
+      </a>
+    </div>
+    
+    <!-- Center title -->
+    <div class="navbar-center">
+      <span class="navbar-title">OpenReactions</span>
+    </div>
+    
+    <!-- Right side buttons -->
+    <div class="navbar-right">
+      <button class="nav-btn" onclick="showAbout()">
+        About
+      </button>
+      <div class="settings-btn" title="Settings">
+        <img src="gear.png" alt="Settings" class="gear-icon" />
+      </div>
+    </div>
   </div>
-  <div class="main">
-    <h1>Welcome to OpenReactions!</h1>
-    <p class="coming-soon">More features coming soon...</p>
-    <a class="button" href="/draw/">Draw</a>
+  <div class="content">
+    <div class="sidebar">
+      <h3>Options</h3>
+      <button class="option-btn" id="structure-drawer-btn" onclick="switchMode('structure-drawer')">Draw Molecule</button>
+      <button class="option-btn" id="structure-animation-btn" onclick="switchMode('structure-animation')">Structure Animation</button>
+      <button class="option-btn" id="molecule-search-btn" onclick="switchMode('molecule-search')">Molecule Search</button>
+    </div>
+    <div class="main">
+      <!-- Structure Drawer Mode -->
+      <div id="structure-drawer-content" class="mode-content">
+        <h2 class="section-title">Draw Molecule</h2>
+        <a href="/draw/" class="new-button">
+          <div class="corner-line horizontal corner-top-left-h"></div>
+          <div class="corner-line vertical corner-top-left-v"></div>
+          <div class="corner-line horizontal corner-top-right-h"></div>
+          <div class="corner-line vertical corner-top-right-v"></div>
+          <div class="corner-line horizontal corner-bottom-left-h"></div>
+          <div class="corner-line vertical corner-bottom-left-v"></div>
+          <div class="corner-line horizontal corner-bottom-right-h"></div>
+          <div class="corner-line vertical corner-bottom-right-v"></div>
+          <span style="font-size: 3rem; font-weight: 300; opacity: 0.7;">+</span>
+          <span style="opacity: 0.7; font-size: 0.9rem; text-transform: uppercase; letter-spacing: 1px;">Create New</span>
+        </a>
+        <h2 class="section-title" style="margin-top: 3.5rem;">Saved Molecules</h2>
+      </div>
+
+      <!-- Structure Animation Mode -->
+      <div id="structure-animation-content" class="mode-content" style="display: none;">
+        <h2 class="section-title">Structure Animation</h2>
+        <p style="color: #666; font-style: italic; font-size: 1.2rem;">Coming soon...</p>
+      </div>
+
+      <!-- Molecule Search Mode -->
+      <div id="molecule-search-content" class="mode-content" style="display: none;">
+        <h2 class="section-title">Molecule Search</h2>
+        <p style="color: #666; font-style: italic; font-size: 1.2rem;">Coming soon...</p>
+      </div>
+    </div>
   </div>
 </body>
 </html>
