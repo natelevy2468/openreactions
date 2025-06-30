@@ -1,4 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import logoFinal3 from '/logoFinal3.png';
+import gearIcon from '/gear.png';
 import { detectSixMemberedRings, isSegmentInRing, getRingInteriorDirection, isSpecialRingBond, getRingInfo, detectThreeMemberedRings, detectFourMemberedRings, detectFiveMemberedRings } from './ringDetection.js';
 import { determineVertexTypes, isTopOfHex, getType, getIfTop } from './vertexDetection.js';
 import { drawArrowOnCanvas, drawEquilArrowOnCanvas, drawCurvedArrowOnCanvas, calculateCurvedArrowPeak } from './rendering/ArrowRenderer.js';
@@ -6570,35 +6572,136 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
       overflow: 'hidden',
       zIndex: 0
     }}>
-      {/* Tab Bar at the top */}
+            {/* Tab Bar at the top */}
       <div style={{
         position: 'fixed',
         top: 0,
         left: 0,
         right: 0,
         height: '50px',
-        background: 'linear-gradient(to right, rgb(19,26,38), rgb(21,28,40))',
-        borderBottom: '2px solid #000',
+        background: '#c4c4c4',
+        borderBottom: '1px solidrgb(191, 191, 191)',
         display: 'flex',
         alignItems: 'center',
         paddingLeft: '20px',
+        paddingRight: '20px',
         zIndex: 10,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        justifyContent: 'space-between'
       }}>
-        <div
-          style={{
-            backgroundColor: 'rgb(54,98,227)',
-            color: '#fff',
-            border: 'none',
-            padding: '8px 20px',
-            marginRight: '8px',
-            borderRadius: '6px',
-            fontSize: '14px',
-            fontWeight: '600',
-            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-          }}
-        >
-          Draw
+        {/* Left side buttons */}
+        <div style={{ display: 'flex', alignItems: 'center' }}>
+          <a
+            href="https://openreactions.com/"
+            style={{
+              backgroundColor: 'transparent',
+              color: '#333',
+              textDecoration: 'none',
+              border: 'none',
+              padding: '8px 16px',
+              marginRight: '8px',
+              marginLeft: '-16px',
+              borderRadius: '6px',
+              fontSize: '16px',
+              fontWeight: '600',
+              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '8px',
+            }}
+   
+          >
+            <img 
+              src={logoFinal3} 
+              alt="OpenReactions Logo" 
+              style={{
+                height: '38px',
+                width: 'auto',
+                pointerEvents: 'none',
+                filter: 'hue-rotate(0deg) saturate(1.6) brightness(0.5)'
+              }}
+              onError={(e) => {
+                console.error('Logo failed to load:', e);
+                e.target.style.display = 'none';
+              }}
+            />
+            <span style={{ pointerEvents: 'none' }}>Home</span>
+          </a>
+          <div
+            style={{
+              backgroundColor: 'rgba(54, 98, 227, 0.7)',
+              color: '#fff',
+              border: 'none',
+              padding: '8px 20px',
+              marginRight: '8px',
+              borderRadius: '6px',
+              fontSize: '14px',
+              fontWeight: '600',
+              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+            }}
+          >
+            Draw
+          </div>
+        </div>
+        
+        {/* Right side buttons */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button
+            onClick={() => setShowAboutPopup(true)}
+            style={{
+              backgroundColor: 'transparent',
+              color: '#333',
+              textDecoration: 'none',
+              border: 'none',
+              padding: '8px 20px',
+              borderRadius: '6px',
+              fontSize: '14px',
+              fontWeight: '600',
+              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+              cursor: 'pointer',
+              transition: 'all 0.15s ease-out',
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = 'rgba(54, 98, 227, 0.2)';
+              e.target.style.transform = 'scale(1.02)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = 'transparent';
+              e.target.style.transform = 'scale(1)';
+            }}
+          >
+            About
+          </button>
+          <div
+            style={{
+              backgroundColor: 'transparent',
+              color: '#333',
+              textDecoration: 'none',
+              border: 'none',
+              padding: '0px 0px',
+              borderRadius: '6px',
+              fontSize: '14px',
+              fontWeight: '600',
+              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+              cursor: 'default',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+            title="Settings"
+          >
+            <img 
+              src={gearIcon} 
+              alt="Settings" 
+              style={{
+                width: '50px',
+                height: '50px',
+                pointerEvents: 'none',
+                filter: 'brightness(0) saturate(100%) invert(27%) sepia(0%) saturate(1567%) hue-rotate(184deg) brightness(95%) contrast(87%)'
+              }}
+            />
+          </div>
         </div>
       </div>
       
@@ -6617,13 +6720,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         minWidth: '200px',
         maxWidth: '100vw',
         height: '100vh',
-        background: 'linear-gradient(to bottom, rgb(19,26,38), rgb(15,40,30))',
-        backgroundImage: `
-          linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
-          linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
-          linear-gradient(to bottom, rgb(21,28,40), rgb(15,40,32))`,
-        backgroundSize: 'calc(min(240px, 22vw) * 0.28) calc(min(240px, 22vw) * 0.28), calc(min(240px, 22vw) * 0.28) calc(min(240px, 22vw) * 0.28), 100% 100%',
-        backgroundPosition: '0 0, calc(min(240px, 22vw) * 0.14) calc(min(240px, 22vw) * 0.14), 0 0',
+        background: '#f8f9fa',
         padding: 'calc(50px + 16px) 16px 16px 16px', // Top padding accounts for tab bar
         boxSizing: 'border-box',
         display: 'flex',
@@ -6635,8 +6732,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         bottom: 0,
         borderRadius: 0, // Remove border radius for full-height sidebar
         boxShadow: 'none', // Remove shadow
-        border: 'none', // Remove border
-        borderRight: '2px solid #000', // Add subtle right border
+        border: '1px solid #e3e7eb', // Remove border
+        borderRight: '1px solidrgb(192, 192, 192)', // Add subtle right border
         zIndex: 2,
         justifyContent: 'flex-start', // Change from space-between to flex-start
         alignItems: 'stretch',
@@ -6644,11 +6741,11 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         overflowY: 'auto',
         overflowX: 'hidden',
         scrollbarWidth: 'thin',
-        scrollbarColor: 'rgba(255,255,255,0.2) transparent'
+        scrollbarColor: 'rgba(0,0,0,0.2) transparent'
       }}>
         {/* Toolbar Title */}
         <div style={{
-          color: '#888',
+          color: '#666',
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
@@ -6670,33 +6767,33 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'draw' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'draw' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'draw' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
             onMouseEnter={(e) => {
               if (mode !== 'draw') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'draw') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Draw Mode"
           >
             {/* Pencil SVG */}
-            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 24 24" fill="none" stroke={mode === 'draw' ? '#fff' : '#666'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
               <path d="M12 20h9" />
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
             </svg>
@@ -6713,35 +6810,35 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'mouse' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'mouse' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'mouse' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
             onMouseEnter={(e) => {
               if (mode !== 'mouse') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'mouse') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Mouse Mode"
           >
             {/* Mouse cursor SVG - bigger with handle */}
             <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
-              <path d="M6 3L12 17L14.5 12.5L19 10.5L6 3Z" fill="#fff" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round"/>
-              <rect x="16.3" y="16" width="3.5" height="7" rx="1.5" fill="#fff" stroke="#fff" strokeWidth="0.5" transform="rotate(316 12.75 18.5)"/>
+              <path d="M6 3L12 17L14.5 12.5L19 10.5L6 3Z" fill={mode === 'mouse' ? '#fff' : '#666'} stroke={mode === 'mouse' ? '#fff' : '#666'} strokeWidth="1.2" strokeLinejoin="round"/>
+              <rect x="16.3" y="16" width="3.5" height="7" rx="1.5" fill={mode === 'mouse' ? '#fff' : '#666'} stroke={mode === 'mouse' ? '#fff' : '#666'} strokeWidth="0.5" transform="rotate(316 12.75 18.5)"/>
             </svg>
           </button>
         </div>
@@ -6756,27 +6853,27 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'erase' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'erase' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'erase' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
             onMouseEnter={(e) => {
               if (mode !== 'erase') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'erase') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Erase Mode"
@@ -6784,8 +6881,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             {/* Minimalist Eraser: Rotated rectangle, bifurcated */}
             <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
               <g transform="rotate(45 13 13)">
-                <rect x="6" y="10" width="14" height="6" rx="1.5" fill="#fff" stroke="#fff" strokeWidth="1.5"/>
-                <line x1="13" y1="10" x2="13" y2="16" stroke="#23395d" strokeWidth="1.5"/>
+                <rect x="6" y="10" width="14" height="6" rx="1.5" fill={mode === 'erase' ? '#fff' : '#666'} stroke={mode === 'erase' ? '#fff' : '#666'} strokeWidth="1.5"/>
+                <line x1="13" y1="10" x2="13" y2="16" stroke={mode === 'erase' ? '#e9ecef' : '#f8f9fa'} strokeWidth="1.5"/>
               </g>
             </svg>
           </button>
@@ -6801,34 +6898,34 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'text' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'text' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'text' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
             onMouseEnter={(e) => {
               if (mode !== 'text') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'text') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Text Mode"
           >
             {/* Text "T" SVG - bigger and Times New Roman font */}
             <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
-              <text x="5" y="18" fill="#fff" style={{ font: 'bold 20px "Times New Roman", serif' }}>T</text>
+              <text x="5" y="18" fill={mode === 'text' ? '#fff' : '#666'} style={{ font: 'bold 20px "Times New Roman", serif' }}>T</text>
             </svg>
           </button>
         </div>
@@ -6847,35 +6944,35 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'plus' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'plus' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'plus' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
             onMouseEnter={(e) => {
               if (mode !== 'plus') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'plus') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Add Positive Charge"
           >
             {/* Plus sign in circle SVG */}
             <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
-              <circle cx="13" cy="13" r="9" stroke="#fff" strokeWidth="2.2" fill="none" />
-              <g stroke="#fff" strokeWidth="2.2" strokeLinecap="round">
+              <circle cx="13" cy="13" r="9" stroke={mode === 'plus' ? '#fff' : '#666'} strokeWidth="2.2" fill="none" />
+              <g stroke={mode === 'plus' ? '#fff' : '#666'} strokeWidth="2.2" strokeLinecap="round">
                 <line x1="13" y1="8.5" x2="13" y2="17.5" />
                 <line x1="8.5" y1="13" x2="17.5" y2="13" />
               </g>
@@ -6893,35 +6990,35 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'minus' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'minus' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'minus' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
             onMouseEnter={(e) => {
               if (mode !== 'minus') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'minus') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Add Negative Charge"
           >
             {/* Minus sign in circle SVG */}
             <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
-              <circle cx="13" cy="13" r="9" stroke="#fff" strokeWidth="2.2" fill="none" />
-              <line x1="8.5" y1="13" x2="17.5" y2="13" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" />
+              <circle cx="13" cy="13" r="9" stroke={mode === 'minus' ? '#fff' : '#666'} strokeWidth="2.2" fill="none" />
+              <line x1="8.5" y1="13" x2="17.5" y2="13" stroke={mode === 'minus' ? '#fff' : '#666'} strokeWidth="2.2" strokeLinecap="round" />
             </svg>
           </button>
           <button
@@ -6936,35 +7033,35 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'lone' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'lone' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(240px, 22vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'lone' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
             }}
             onMouseEnter={(e) => {
               if (mode !== 'lone') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'lone') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Add Lone Pair"
           >
             {/* Two dots SVG */}
             <svg width="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" height="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" viewBox="0 0 22 22" fill="none" style={{ pointerEvents: 'none' }}>
-              <circle cx="7" cy="11" r="2.6" fill="#fff" />
-              <circle cx="15" cy="11" r="2.6" fill="#fff" />
+              <circle cx="7" cy="11" r="2.6" fill={mode === 'lone' ? '#fff' : '#666'} />
+              <circle cx="15" cy="11" r="2.6" fill={mode === 'lone' ? '#fff' : '#666'} />
             </svg>
           </button>
         </div>
@@ -6972,7 +7069,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         
         {/* Reactions Section Title */}
         <div style={{
-          color: '#888',
+          color: '#666',
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
@@ -6991,33 +7088,33 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'arrow' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'arrow' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'arrow' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'arrow') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'arrow') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Arrow"
           >
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-              <line x1="6" y1="13" x2="32" y2="13" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-              <polygon points="32,7 44,13 32,19" fill="white" />
+              <line x1="6" y1="13" x2="32" y2="13" stroke={mode === 'arrow' ? '#fff' : '#666'} strokeWidth="3" strokeLinecap="round" />
+              <polygon points="32,7 44,13 32,19" fill={mode === 'arrow' ? '#fff' : '#666'} />
             </svg>
           </button>
           <button
@@ -7029,37 +7126,37 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'equil' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'equil' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'equil' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'equil') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'equil') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Equilibrium Arrow"
           >
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Top arrow: left to right */}
-              <line x1="8" y1="10" x2="34" y2="10" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-              <polygon points="34,5 44,10 34,15" fill="white" />
+              <line x1="8" y1="10" x2="34" y2="10" stroke={mode === 'equil' ? '#fff' : '#666'} strokeWidth="3" strokeLinecap="round" />
+              <polygon points="34,5 44,10 34,15" fill={mode === 'equil' ? '#fff' : '#666'} />
               {/* Bottom arrow: right to left */}
-              <line x1="38" y1="18" x2="12" y2="18" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
-              <polygon points="12,13 2,18 12,23" fill="white" />
+              <line x1="38" y1="18" x2="12" y2="18" stroke={mode === 'equil' ? '#fff' : '#666'} strokeWidth="3" strokeLinecap="round" />
+              <polygon points="12,13 2,18 12,23" fill={mode === 'equil' ? '#fff' : '#666'} />
             </svg>
           </button>
         </div>
@@ -7076,13 +7173,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve2' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'curve2' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve2' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7091,31 +7188,31 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve2') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve2') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Counterclockwise semicircle (top left)"
-          ><ArrowCCWSemicircleTopLeft /></button>
+          ><ArrowCCWSemicircleTopLeft mode={mode} /></button>
           {/* Arrow 2: CW Semicircle (Top Center) */}
           <button
             onClick={() => setModeAndClearSelection('curve1')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve1' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'curve1' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve1' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7124,31 +7221,31 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve1') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve1') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Clockwise semicircle (top center)"
-          ><ArrowCWSemicircleTopCenter /></button>
+          ><ArrowCWSemicircleTopCenter mode={mode} /></button>
           {/* Arrow 3: CW Quarter-circle (Top Right) */}
           <button
             onClick={() => setModeAndClearSelection('curve0')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve0' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'curve0' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve0' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7157,31 +7254,31 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve0') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve0') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Clockwise quarter (top right)"
-          ><ArrowCWQuarterTopRight /></button>
+          ><ArrowCWQuarterTopRight mode={mode} /></button>
           {/* Arrow 4: CCW Semicircle (Bottom Left) */}
           <button
             onClick={() => setModeAndClearSelection('curve5')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve5' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'curve5' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve5' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7190,31 +7287,31 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve5') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve5') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Counterclockwise semicircle (bottom left)"
-          ><ArrowCCWSemicircleBottomLeft /></button>
+          ><ArrowCCWSemicircleBottomLeft mode={mode} /></button>
           {/* Arrow 5: CW Semicircle (Bottom Center) */}
           <button
             onClick={() => setModeAndClearSelection('curve4')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve4' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'curve4' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve4' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7223,31 +7320,31 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve4') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve4') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Clockwise semicircle (bottom center)"
-          ><ArrowCWSemicircleBottomCenter /></button>
+          ><ArrowCWSemicircleBottomCenter mode={mode} /></button>
           {/* Arrow 6: CW Quarter-circle (Bottom Right) */}
           <button
             onClick={() => setModeAndClearSelection('curve3')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve3' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'curve3' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve3' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7256,22 +7353,22 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve3') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve3') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Clockwise quarter (bottom right)"
-          ><ArrowCWQuarterBottomRight /></button>
+          ><ArrowCWQuarterBottomRight mode={mode} /></button>
         </div>
         {/* Stereochemistry Section Title */}
         <div style={{
-          color: '#888',
+          color: '#666',
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
@@ -7290,32 +7387,32 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'wedge' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'wedge' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'wedge' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'wedge') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'wedge') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Wedge Bond"
           >
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-              <polygon points="6,13 38,6 38,20" fill="white" />
+              <polygon points="6,13 38,6 38,20" fill={mode === 'wedge' ? '#fff' : '#666'} />
             </svg>
           </button>
           <button
@@ -7327,26 +7424,26 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'dash' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'dash' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'dash' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'dash') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'dash') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Dash Bond"
@@ -7354,13 +7451,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Updated dash bond icon to better reflect actual appearance with perpendicular lines that get progressively wider */}
               <g transform="translate(6, 13)">
-                <line x1="0" y1="0" x2="32" y2="0" stroke="#fff" strokeWidth="1" strokeOpacity="0" />
-                <line x1="3" y1="-1" x2="3" y2="1" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-                <line x1="9" y1="-2" x2="9" y2="2" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-                <line x1="15" y1="-3" x2="15" y2="3" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-                <line x1="21" y1="-4" x2="21" y2="4" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-                <line x1="27" y1="-5" x2="27" y2="5" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-                <line x1="33" y1="-6" x2="33" y2="6" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+                <line x1="0" y1="0" x2="32" y2="0" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="1" strokeOpacity="0" />
+                <line x1="3" y1="-1" x2="3" y2="1" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
+                <line x1="9" y1="-2" x2="9" y2="2" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
+                <line x1="15" y1="-3" x2="15" y2="3" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
+                <line x1="21" y1="-4" x2="21" y2="4" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
+                <line x1="27" y1="-5" x2="27" y2="5" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
+                <line x1="33" y1="-6" x2="33" y2="6" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
               </g>
             </svg>
           </button>
@@ -7373,26 +7470,26 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'ambiguous' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'ambiguous' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'ambiguous' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'ambiguous') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'ambiguous') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Ambiguous Bond"
@@ -7400,7 +7497,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               <path
                 d= " M 4 13 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0"
-                stroke="white"
+                stroke={mode === 'ambiguous' ? '#fff' : '#666'}
                 stroke-width="3"
                 fill="none"
                 linecap="round"
@@ -7411,7 +7508,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
 
         {/* Special Section Title */}
         <div style={{
-          color: '#888',
+          color: '#666',
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
@@ -7437,35 +7534,35 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'triple' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: mode === 'triple' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'triple' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'triple') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'triple') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Triple Bond"
           >
             <svg width="max(24px, min(32px, calc(min(280px, 25vw) * 0.114)))" height="max(14px, min(18px, calc(min(280px, 25vw) * 0.064)))" viewBox="0 0 32 18" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Triple bond - three parallel lines (smaller) */}
-              <line x1="4" y1="5" x2="28" y2="5" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-              <line x1="4" y1="9" x2="28" y2="9" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
-              <line x1="4" y1="13" x2="28" y2="13" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
+              <line x1="4" y1="5" x2="28" y2="5" stroke={mode === 'triple' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
+              <line x1="4" y1="9" x2="28" y2="9" stroke={mode === 'triple' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
+              <line x1="4" y1="13" x2="28" y2="13" stroke={mode === 'triple' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
           
@@ -7475,8 +7572,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'benzene' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: selectedPreset === 'benzene' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7484,20 +7581,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'benzene' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'benzene') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'benzene') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Benzene Ring"
@@ -7508,30 +7605,30 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               <g transform="translate(60, 60)">
                 {/* Bond 0: Double bond (top-right) */}
                 <g>
-                  <line x1="40" y1="-10" x2="80" y2="12" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
-                  <line x1="42" y1="8" x2="66" y2="22" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="40" y1="-10" x2="80" y2="12" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="42" y1="8" x2="66" y2="22" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
                 </g>
                 
                 {/* Bond 1: Single bond (right) */}
-                <line x1="80" y1="12" x2="80" y2="60" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="12" x2="80" y2="60" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
                 
                 {/* Bond 2: Double bond (bottom-right) */}
                 <g>
-                  <line x1="80" y1="60" x2="40" y2="82" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
-                  <line x1="66" y1="52" x2="44" y2="65" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="80" y1="60" x2="40" y2="82" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="66" y1="52" x2="44" y2="65" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
                 </g>
                 
                 {/* Bond 3: Single bond (bottom-left) */}
-                <line x1="40" y1="82" x2="0" y2="60" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="82" x2="0" y2="60" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
                 
                 {/* Bond 4: Double bond (left) */}
                 <g>
-                  <line x1="0" y1="60" x2="0" y2="12" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
-                  <line x1="14" y1="50" x2="14" y2="21" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="0" y1="60" x2="0" y2="12" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="14" y1="50" x2="14" y2="21" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
                 </g>
                 
                 {/* Bond 5: Single bond (top-left) */}
-                <line x1="0" y1="12" x2="40" y2="-10" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="12" x2="40" y2="-10" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
               </g>
             </svg>
           </button>
@@ -7542,8 +7639,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclohexane' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: selectedPreset === 'cyclohexane' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7551,20 +7648,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'cyclohexane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclohexane') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclohexane') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Cyclohexane Ring"
@@ -7574,12 +7671,12 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               {/* Cyclohexane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in hexagon pattern */}
-                <line x1="40" y1="-10" x2="80" y2="12" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
-                <line x1="80" y1="12" x2="80" y2="60" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
-                <line x1="80" y1="60" x2="40" y2="82" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
-                <line x1="40" y1="82" x2="0" y2="60" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
-                <line x1="0" y1="60" x2="0" y2="12" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
-                <line x1="0" y1="12" x2="40" y2="-10" stroke="#fff" strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="-10" x2="80" y2="12" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="12" x2="80" y2="60" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="60" x2="40" y2="82" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="82" x2="0" y2="60" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="60" x2="0" y2="12" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="12" x2="40" y2="-10" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
 
               </g>
             </svg>
@@ -7591,8 +7688,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclopentane' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: selectedPreset === 'cyclopentane' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7600,20 +7697,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'cyclopentane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclopentane') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclopentane') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Cyclopentane Ring"
@@ -7623,11 +7720,11 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               {/* Cyclopentane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in pentagon pattern */}
-                <line x1="40" y1="0" x2="80" y2="30" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="80" y1="30" x2="66" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="66" y1="80" x2="20" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="0" y1="30" x2="16" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="40" y1="0" x2="0" y2="30" stroke="#fff" strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="40" y1="0" x2="80" y2="30" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="80" y1="30" x2="66" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="66" y1="80" x2="20" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="0" y1="30" x2="16" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="40" y1="0" x2="0" y2="30" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
               </g>
             </svg>
           </button>
@@ -7638,8 +7735,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclobutane' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: selectedPreset === 'cyclobutane' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7647,20 +7744,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'cyclobutane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclobutane') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclobutane') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Cyclobutane Ring"
@@ -7670,10 +7767,10 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               {/* Cyclobutane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in square pattern */}
-                <line x1="0" y1="0" x2="80" y2="0" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
-                <line x1="80" y1="0" x2="80" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
-                <line x1="80" y1="80" x2="0" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
-                <line x1="0" y1="80" x2="0" y2="0" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="0" x2="80" y2="0" stroke={selectedPreset === 'cyclobutane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="0" x2="80" y2="80" stroke={selectedPreset === 'cyclobutane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="80" x2="0" y2="80" stroke={selectedPreset === 'cyclobutane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="0" y2="0" stroke={selectedPreset === 'cyclobutane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
               </g>
             </svg>
           </button>
@@ -7684,8 +7781,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclopropane' ? 'rgb(54,98,227)' : '#23395d',
-              border: 'none',
+              backgroundColor: selectedPreset === 'cyclopropane' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7693,20 +7790,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'cyclopropane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclopropane') {
-                e.target.style.backgroundColor = '#3554a0';
-                e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#dee2e6';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclopropane') {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title="Cyclopropane Ring"
@@ -7716,9 +7813,9 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               {/* Cyclopropane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in triangle pattern */}
-                <line x1="80" y1="80" x2="40" y2="0" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
-                <line x1="0" y1="80" x2="80" y2="80" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
-                <line x1="0" y1="80" x2="40" y2="0" stroke="#fff" strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="80" x2="40" y2="0" stroke={selectedPreset === 'cyclopropane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="80" y2="80" stroke={selectedPreset === 'cyclopropane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="40" y2="0" stroke={selectedPreset === 'cyclopropane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
               </g>
             </svg>
           </button>
@@ -7731,24 +7828,24 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: '#23395d',
-              border: 'none',
+              backgroundColor: '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
-              color: '#888',
+              color: '#666',
               fontSize: 'max(10px, min(14px, calc(min(280px, 25vw) * 0.05)))',
               fontWeight: '600',
             }}
             onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#3554a0';
-              e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              e.target.style.backgroundColor = '#dee2e6';
+              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
             }}
             onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#23395d';
-              e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              e.target.style.backgroundColor = '#e9ecef';
+              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
             }}
             title="Coming Soon"
           >
@@ -7762,24 +7859,24 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: '#23395d',
-              border: 'none',
+              backgroundColor: '#e9ecef',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               outline: 'none',
               padding: 0,
-              color: '#888',
+              color: '#666',
               fontSize: 'max(10px, min(14px, calc(min(280px, 25vw) * 0.05)))',
               fontWeight: '600',
             }}
             onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#3554a0';
-              e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              e.target.style.backgroundColor = '#dee2e6';
+              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
             }}
             onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#23395d';
-              e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              e.target.style.backgroundColor = '#e9ecef';
+              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
             }}
             title="Coming Soon"
           >
@@ -7801,12 +7898,12 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             style={{
               flex: 1,
               padding: 'calc(min(280px, 25vw) * 0.019) 0',
-              backgroundColor: '#23395d',
-              color: '#fff',
-              border: 'none',
+              backgroundColor: '#e9ecef',
+              color: '#333',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.025)',
               cursor: 'pointer',
-              boxShadow: '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
               fontWeight: 700,
               marginTop: 0,
@@ -7818,15 +7915,17 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             }}
             onMouseEnter={(e) => {
               e.target.style.backgroundColor = '#dc3545';
+              e.target.style.color = '#fff';
               e.target.style.boxShadow = '0 6px 16px rgba(220,53,69,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
             }}
             onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#23395d';
-              e.target.style.boxShadow = '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)';
+              e.target.style.backgroundColor = '#e9ecef';
+              e.target.style.color = '#333';
+              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
             }}
           >
             {/* Taller Trash Can SVG */}
-            <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(24px, calc(min(280px, 25vw) * 0.094))" viewBox="0 0 26 30" fill="none" stroke="#fff" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
+            <svg width="max(20px, calc(min(280px, 25vw) * 0.081))" height="max(24px, calc(min(280px, 25vw) * 0.094))" viewBox="0 0 26 30" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
               <rect x="4" y="8" width="18" height="18" rx="2.5"/>
               <path d="M9 8V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3"/>
               <line x1="11" y1="13" x2="11" y2="22"/>
@@ -7843,14 +7942,14 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             style={{
               flex: 1,
               padding: 'calc(min(280px, 25vw) * 0.019) 0',
-              backgroundColor: historyIndex <= 0 ? '#555' : '#23395d',
-              color: historyIndex <= 0 ? '#999' : '#fff',
-              border: 'none',
+              backgroundColor: historyIndex <= 0 ? '#f8f9fa' : '#e9ecef',
+              color: historyIndex <= 0 ? '#999' : '#333',
+              border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.025)',
               cursor: historyIndex <= 0 ? 'not-allowed' : 'pointer',
               boxShadow: historyIndex <= 0 ? 
-                '0 2px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.05)' :
-                '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)',
+                '0 1px 2px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)' :
+                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
               fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
               fontWeight: 700,
               marginTop: 0,
@@ -7864,13 +7963,15 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (historyIndex > 0) {
                 e.target.style.backgroundColor = '#ffc107';
+                e.target.style.color = '#000';
                 e.target.style.boxShadow = '0 6px 16px rgba(255,193,7,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
               }
             }}
             onMouseLeave={(e) => {
               if (historyIndex > 0) {
-                e.target.style.backgroundColor = '#23395d';
-                e.target.style.boxShadow = '0 4px 12px rgba(35,57,93,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.15)';
+                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.color = '#333';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
               }
             }}
             title={`Undo${historyIndex <= 0 ? ' (No actions to undo)' : ''}`}
@@ -7995,7 +8096,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
                 width: '70%',
                 height: '100%',
                 padding: 0,
-                border: 'none',
+                border: '1px solid #e3e7eb',
                 background: 'transparent',
                 color: 'transparent',
                 caretColor: 'black', // Only the caret is visible
@@ -8077,7 +8178,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               zIndex: 4,
               backgroundColor: 'rgb(54, 98, 227)',
               color: 'white',
-              border: 'none',
+              border: '1px solid #e3e7eb',
               borderRadius: '6px',
               padding: '6px 12px',
               fontSize: '13px',
@@ -8218,9 +8319,9 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               onClick={() => setShowAboutPopup(false)}
               style={{
                 marginTop: '25px',
-                backgroundColor: '#23395d',
+                backgroundColor: '#e9ecef',
                 color: 'white',
-                border: 'none',
+                border: '1px solid #e3e7eb',
                 borderRadius: '8px',
                 padding: '10px 20px',
                 fontSize: '14px',
@@ -8229,8 +8330,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
                 boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
                 transition: 'background 0.2s',
               }}
-              onMouseEnter={(e) => e.target.style.backgroundColor = '#3554a0'}
-              onMouseLeave={(e) => e.target.style.backgroundColor = '#23395d'}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#dee2e6'}
+              onMouseLeave={(e) => e.target.style.backgroundColor = '#e9ecef'}
             >
               Close
             </button>
@@ -8238,7 +8339,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         </>
       )}
       
-      {/* Bottom Right Toolbar - Export, Grid Breaking Debug, and About */}
+      {/* Bottom Right Toolbar - Export and Grid Breaking Debug */}
       <div style={{
         position: 'fixed',
         bottom: '20px',
@@ -8257,11 +8358,11 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
           style={{
             width: '80px',
             height: '36px',
-            backgroundColor: '#23395d',
-            border: 'none',
+            backgroundColor: '#e9ecef',
+            border: '1px solid #e3e7eb',
             borderRadius: '6px',
             cursor: 'pointer',
-            boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
             outline: 'none',
             padding: 0,
             display: 'flex',
@@ -8269,17 +8370,17 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             justifyContent: 'center',
             fontSize: '14px',
             fontWeight: '600',
-            color: '#fff',
+            color: '#333',
             fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
           }}
           title="Export"
           onMouseEnter={(e) => {
-            e.target.style.backgroundColor = '#3554a0';
-            e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+            e.target.style.backgroundColor = '#dee2e6';
+            e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
           }}
           onMouseLeave={(e) => {
-            e.target.style.backgroundColor = '#23395d';
-            e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+            e.target.style.backgroundColor = '#e9ecef';
+            e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
           }}
         >
           Export
@@ -8293,13 +8394,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
           style={{
             width: '80px',
             height: '36px',
-            backgroundColor: gridBreakingEnabled ? 'rgb(54,98,227)' : '#23395d',
-            border: 'none',
+            backgroundColor: gridBreakingEnabled ? 'rgb(54,98,227)' : '#e9ecef',
+            border: '1px solid #e3e7eb',
             borderRadius: '6px',
             cursor: 'pointer',
             boxShadow: gridBreakingEnabled ? 
               '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-              '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+              '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
             outline: 'none',
             padding: 0,
             display: 'flex',
@@ -8307,60 +8408,24 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             justifyContent: 'center',
             fontSize: '12px',
             fontWeight: '600',
-            color: '#fff',
+            color: gridBreakingEnabled ? '#fff' : '#333',
             fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
           }}
           title={`Grid Breaking Debug: ${gridBreakingEnabled ? 'ON' : 'OFF'} (${gridBreakingAnalysis.totalOffGrid} off-grid vertices)`}
           onMouseEnter={(e) => {
             if (!gridBreakingEnabled) {
-              e.target.style.backgroundColor = '#3554a0';
-              e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+              e.target.style.backgroundColor = '#dee2e6';
+              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
             }
           }}
           onMouseLeave={(e) => {
             if (!gridBreakingEnabled) {
-              e.target.style.backgroundColor = '#23395d';
-              e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+              e.target.style.backgroundColor = '#e9ecef';
+              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
             }
           }}
         >
           Debug GB
-        </button>
-        
-        <button
-          onClick={() => {
-            setShowAboutPopup(true);
-          }}
-          className="toolbar-button"
-          style={{
-            width: '80px',
-            height: '36px',
-            backgroundColor: '#23395d',
-            border: 'none',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
-            outline: 'none',
-            padding: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '14px',
-            fontWeight: '600',
-            color: '#fff',
-            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-          }}
-          title="About"
-          onMouseEnter={(e) => {
-            e.target.style.backgroundColor = '#3554a0';
-            e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.backgroundColor = '#23395d';
-            e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
-          }}
-        >
-          About
         </button>
       </div>
     </div>
@@ -8389,95 +8454,101 @@ function arrowheadPoints(x, y, angle, size = ARROWHEAD_SIZE) {
   return `${x},${y} ${x2},${y2} ${x3},${y3}`;
 }
 // 1. Counterclockwise Semicircle (Top Left)
-function ArrowCCWSemicircleTopLeft() {
+function ArrowCCWSemicircleTopLeft({ mode }) {
   // manually made
   const angle = -3 * Math.PI / 4;
+  const color = mode === 'curve2' ? '#fff' : '#666';
   return (
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-      <path d="M14 34 A14 14 0 1 1 36 20" stroke="white" 
+      <path d="M14 34 A14 14 0 1 1 36 20" stroke={color} 
       strokeWidth="3.5" 
       fill="none" 
       strokeLinecap="round"/>
-      <polygon points="29,20 43,20 36,28" fill="white"/>
+      <polygon points="29,20 43,20 36,28" fill={color}/>
     </svg>
   );
 }
 // 2. Clockwise Semicircle (Top Center)
-function ArrowCWSemicircleTopCenter() {
+function ArrowCWSemicircleTopCenter({ mode }) {
   // manually made
   const angle = -3 * Math.PI / 4;
+  const color = mode === 'curve1' ? '#fff' : '#666';
   return (
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-      <path d="M12 24 A12 12 0 0 1 36 24" stroke="white"
+      <path d="M12 24 A12 12 0 0 1 36 24" stroke={color}
       strokeWidth="3.5"
       fill="none"
       strokeLinecap="round"/>
-      <polygon points="29,24 43,20 38,29" fill="white"/>
+      <polygon points="29,24 43,20 38,29" fill={color}/>
     </svg>
   );
 }
 // 3. Clockwise Quarter-circle (Top Right)
-function ArrowCWQuarterTopRight() {
+function ArrowCWQuarterTopRight({ mode }) {
   // manually made
   const angle = -3 * Math.PI / 4;
+  const color = mode === 'curve0' ? '#fff' : '#666';
   return (
     <svg width="48" height="48" viewBox="0 6 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-      <path d="M10 32 A22 22 0 0 1 38 32" stroke="white"
+      <path d="M10 32 A22 22 0 0 1 38 32" stroke={color}
        strokeWidth="3.5"
         fill="none"
        strokeLinecap="round"/>
-      <polygon points="31,35 40,25 42,35" fill="white"/>
+      <polygon points="31,35 40,25 42,35" fill={color}/>
     </svg>
 
   );
 }
 // 4. Counterclockwise Semicircle (Bottom Left)
-function ArrowCCWSemicircleBottomLeft() {
+function ArrowCCWSemicircleBottomLeft({ mode }) {
+  const color = mode === 'curve5' ? '#fff' : '#666';
   return (
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <g transform="scale(1,-1) translate(0,-45)">
         <path d="M14 34 A14 14 0 1 1 36 20" 
-          stroke="white"
+          stroke={color}
           strokeWidth="3.5"
           fill="none"
           strokeLinecap="round"/>
-        <polygon points="29,20 43,20 36,28" fill="white"/>
+        <polygon points="29,20 43,20 36,28" fill={color}/>
       </g>
     </svg>
   );
 }
 // 5. Clockwise Semicircle (Bottom Center)
-function ArrowCWSemicircleBottomCenter() {
+function ArrowCWSemicircleBottomCenter({ mode }) {
   // Arc: start at (10,34), end at (34,10), r=16, large-arc, sweep=1
   // Arrowhead at (34,10), tangent is -45deg
   const angle = -Math.PI/4;
+  const color = mode === 'curve4' ? '#fff' : '#666';
   return (
     <svg width="48" height="48" viewBox="0 4 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       {/* Arc remains the same */}
       <path d="M12 24 A12 12 0 0 0 36 24"
-        stroke="white"
+        stroke={color}
         strokeWidth="3.5"
         fill="none"
         strokeLinecap="round"/>
       {/* Arrowhead flipped downward */}
-      <polygon points="29,24 38,19 42,28" fill="white"/>
+      <polygon points="29,24 38,19 42,28" fill={color}/>
     </svg>
   );
 }
 // 6. Clockwise Quarter-circle (Bottom Right)
-function ArrowCWQuarterBottomRight() {
+function ArrowCWQuarterBottomRight({ mode }) {
   // Arc: start at (10,22), end at (34,34), r=12, large-arc=0, sweep=1
   // Arrowhead at (34,34), tangent is 30deg
   const angle = Math.atan2(12,24); // 26.56deg
+  const color = mode === 'curve3' ? '#fff' : '#666';
   return (
     <svg width="48" height="48" viewBox="0 15 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <path d="M10 38 A22 22 0 0 0 38 38"
-        stroke="white"
+        stroke={color}
         strokeWidth="3.5"
         fill="none"
         strokeLinecap="round"/>
       {/* Arrowhead flipped downward */}
-      <polygon points="33,33 43,43 43,33" fill="white"/>
+      <polygon points="33,33 43,43 43,33" fill={color}/>
     </svg>
   );
 }

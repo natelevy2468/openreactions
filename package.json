@@ -140,7 +140,10 @@
     "gh-pages": "^6.3.0"
   },
   "scripts": {
-  "deploy": "gh-pages -d draw/dist"
+    "build": "cd draw && npm run build",
+    "predeploy": "npm run build && mkdir -p deploy && cp index.html deploy/ && cp -r draw/dist deploy/draw && echo openreactions.com > deploy/CNAME",
+    "deploy": "gh-pages -d deploy",
+    "clean": "rm -rf deploy"
   },
   "repository": {
     "type": "git",
