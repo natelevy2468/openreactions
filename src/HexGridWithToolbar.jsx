@@ -17,9 +17,12 @@ import { handleArrowMouseMove, handleArrowClick } from './handlers/ArrowHandlers
 import { formatAtomText } from './utils/TextUtils.jsx';
 import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview, isVertexInLinearSystem, getLinearAxis } from './utils/GridBreakingUtils.js';
 
-const HexGridWithToolbar = () => {
-  const canvasRef = useRef(null);
-  // segments store base coordinates and bondOrder: 0 (none), 1 (single), 2 (double)
+  const HexGridWithToolbar = () => {
+    const canvasRef = useRef(null);
+    // Add tab state - starts with 'draw' as the default
+    const [activeTab, setActiveTab] = useState('draw');
+    
+    // segments store base coordinates and bondOrder: 0 (none), 1 (single), 2 (double)
   // bondType: null (normal), 'wedge', 'dash', 'ambiguous'
   // bondDirection: 1 (default/forward), -1 (reversed/flipped)
   const [segments, setSegments] = useState([]);
@@ -72,9 +75,7 @@ const HexGridWithToolbar = () => {
   const [atomInputValue, setAtomInputValue] = useState('');
   const [atomInputPosition, setAtomInputPosition] = useState({ x: 0, y: 0 });
   const [showAboutPopup, setShowAboutPopup] = useState(false);
-  // Preset menu state
-  const [isPresetMenuExpanded, setIsPresetMenuExpanded] = useState(false);
-  const [presetMenuVisualState, setPresetMenuVisualState] = useState(false); // Controls visual appearance (border radius, etc.)
+  // Preset state
   const [selectedPreset, setSelectedPreset] = useState(null); // Track which preset is currently selected ('benzene', 'cyclohexane', etc.)
   // Ring detection state (invisible to user)
   const [detectedRings, setDetectedRings] = useState([]);
@@ -1097,7 +1098,7 @@ const HexGridWithToolbar = () => {
         }
       }
       
-      if (seg.bondOrder === 0 && !inBreakingZone) {
+      if (seg.bondOrder === 0 && !inBreakingZone && activeTab !== 'animate') {
         const sx1 = seg.x1 + offset.x;
         const sy1 = seg.y1 + offset.y;
         const sx2 = seg.x2 + offset.x;
@@ -1220,7 +1221,7 @@ const HexGridWithToolbar = () => {
     ctx.save();
     
     bondPreviews.forEach(preview => {
-      if (preview.isVisible) {
+      if (preview.isVisible && activeTab !== 'animate') {
         const isHovered = hoverBondPreview?.id === preview.id;
         // Use white color: lighter when normal, darker when hovered
         ctx.strokeStyle = isHovered ? '#cccccc' : '#ffffff';
@@ -2977,7 +2978,7 @@ const HexGridWithToolbar = () => {
     });
     
     // Draw arrow preview if necessary
-    if (arrowPreview && (mode === 'arrow' || mode === 'equil' || mode.startsWith('curve'))) {
+    if (arrowPreview && (mode === 'arrow' || mode === 'equil' || mode === 'drawAnimationArrow' || mode.startsWith('curve'))) {
       // For curved arrows with both start and end points
       if (arrowPreview.isCurved) {
         // Draw a curved arrow from start point to current mouse position
@@ -3024,6 +3025,27 @@ const HexGridWithToolbar = () => {
           const previewX2 = x + 40;
           const previewY2 = y;
           drawArrowOnCanvas(ctx, previewX1, previewY1, previewX2, previewY2, 'rgba(0,0,0,0.4)', 3, mode);
+        } else if (mode === 'drawAnimationArrow') {
+          const previewX1 = x - 40;
+          const previewY1 = y;
+          const previewX2 = x + 40;
+          const previewY2 = y;
+          // Draw animation arrow preview with visual distinction
+          drawArrowOnCanvas(ctx, previewX1, previewY1, previewX2, previewY2, 'rgba(54,98,227,0.6)', 3, mode);
+          
+          // Add small animation indicator dots above the arrow
+          ctx.save();
+          ctx.fillStyle = 'rgba(54,98,227,0.4)';
+          ctx.beginPath();
+          ctx.arc(x - 20, y - 8, 2, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(x, y - 8, 2, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(x + 20, y - 8, 2, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.restore();
         } else if (mode === 'equil') {
           const previewX1 = x - 40;
           const previewY1 = y;
@@ -5084,7 +5106,7 @@ const HexGridWithToolbar = () => {
           }
         }
       }
-    } else if (mode === 'arrow' || mode === 'equil' || mode.startsWith('curve')) {
+    } else if (mode === 'arrow' || mode === 'equil' || mode === 'drawAnimationArrow' || mode.startsWith('curve')) {
       // Arrow modes: don't do anything on click - arrows are handled separately
       // Arrow placement is handled by handleArrowClick via mouse up events
       return;
@@ -6243,7 +6265,7 @@ const HexGridWithToolbar = () => {
     const y = event.clientY - rect.top;
     
     // Only capture state if we're actually going to create an arrow
-    if (mode === 'arrow' || mode === 'equil' || mode.startsWith('curve')) {
+    if (mode === 'arrow' || mode === 'equil' || mode === 'drawAnimationArrow' || mode.startsWith('curve')) {
       captureState();
     }
     
@@ -6351,7 +6373,7 @@ const HexGridWithToolbar = () => {
     }
   }, [vertices, history.length, captureState]);
 
-  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow, bondPreviews, hoverBondPreview, epoxideVertices]);
+  useEffect(() => drawGrid(), [segments, vertices, vertexAtoms, vertexTypes, offset, arrowPreview, mode, drawGrid, fourthBondPreview, fourthBondMode, fourthBondSource, hoverCurvedArrow, bondPreviews, hoverBondPreview, epoxideVertices, activeTab]);
 
   // Erase all handler
   const handleEraseAll = () => {
@@ -6415,7 +6437,7 @@ const HexGridWithToolbar = () => {
 
   // When mode changes away from arrow modes, clear preview:
   useEffect(() => { 
-    if (mode !== 'arrow' && mode !== 'equil' && !mode.startsWith('curve')) {
+    if (mode !== 'arrow' && mode !== 'equil' && mode !== 'drawAnimationArrow' && !mode.startsWith('curve')) {
       setArrowPreview(null);
       setCurvedArrowStartPoint(null);
     }
@@ -6571,6 +6593,95 @@ const HexGridWithToolbar = () => {
       overflow: 'hidden',
       zIndex: 0
     }}>
+      {/* Tab Bar at the top */}
+      <div style={{
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: '50px',
+        background: 'linear-gradient(to right, rgb(19,26,38), rgb(21,28,40))',
+        borderBottom: '2px solid #000',
+        display: 'flex',
+        alignItems: 'center',
+        paddingLeft: '20px',
+        zIndex: 10,
+        boxShadow: '0 2px 8px rgba(0,0,0,0.1)'
+      }}>
+        <button
+          onClick={() => {
+            setActiveTab('draw');
+            // Only switch to draw mode if we're coming from animate tab
+            if (activeTab === 'animate') {
+              selectMode('draw');
+            }
+          }}
+          style={{
+            backgroundColor: activeTab === 'draw' ? 'rgb(54,98,227)' : 'transparent',
+            color: activeTab === 'draw' ? '#fff' : '#bbb',
+            border: 'none',
+            padding: '8px 20px',
+            marginRight: '8px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: '600',
+            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+            transition: 'all 0.2s ease',
+            outline: 'none',
+          }}
+          onMouseEnter={(e) => {
+            if (activeTab !== 'draw') {
+              e.target.style.backgroundColor = 'rgba(255,255,255,0.1)';
+              e.target.style.color = '#fff';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (activeTab !== 'draw') {
+              e.target.style.backgroundColor = 'transparent';
+              e.target.style.color = '#bbb';
+            }
+          }}
+        >
+          Draw
+        </button>
+        <button
+          onClick={() => {
+            setActiveTab('animate');
+            // Automatically switch to drawAnimationArrow mode when entering animate tab
+            selectMode('drawAnimationArrow');
+          }}
+          style={{
+            backgroundColor: activeTab === 'animate' ? 'rgb(54,98,227)' : 'transparent',
+            color: activeTab === 'animate' ? '#fff' : '#bbb',
+            border: 'none',
+            padding: '8px 20px',
+            marginRight: '8px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '14px',
+            fontWeight: '600',
+            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+            transition: 'all 0.2s ease',
+            outline: 'none',
+          }}
+          onMouseEnter={(e) => {
+            if (activeTab !== 'animate') {
+              e.target.style.backgroundColor = 'rgba(255,255,255,0.1)';
+              e.target.style.color = '#fff';
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (activeTab !== 'animate') {
+              e.target.style.backgroundColor = 'transparent';
+              e.target.style.color = '#bbb';
+            }
+          }}
+        >
+          Animate
+        </button>
+      </div>
+      
       <style>{`
         .toolbar-button {
           transition: all 0.15s ease-out;
@@ -6582,34 +6693,32 @@ const HexGridWithToolbar = () => {
       `}</style>
       {/* Toolbar */}
       <div style={{
-        width: 'min(240px, 25vw)',
-        minWidth: '160px',
+        width: 'min(240px, 22vw)',
+        minWidth: '200px',
         maxWidth: '100vw',
-        height: 'auto',
-        minHeight: '92vh',
+        height: '100vh',
         background: 'linear-gradient(to bottom, rgb(19,26,38), rgb(15,40,30))',
         backgroundImage: `
           linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
           linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
           linear-gradient(to bottom, rgb(21,28,40), rgb(15,40,32))`,
-        backgroundSize: 'calc(min(280px, 25vw) * 0.28) calc(min(280px, 25vw) * 0.28), calc(min(280px, 25vw) * 0.28) calc(min(280px, 25vw) * 0.28), 100% 100%',
-        backgroundPosition: '0 0, calc(min(280px, 25vw) * 0.14) calc(min(280px, 25vw) * 0.14), 0 0',
-        padding: 'calc(min(280px, 25vw) * 0.031) calc(min(280px, 25vw) * 0.0375) calc(min(280px, 25vw) * 0.0625) calc(min(280px, 25vw) * 0.0375)',
+        backgroundSize: 'calc(min(240px, 22vw) * 0.28) calc(min(240px, 22vw) * 0.28), calc(min(240px, 22vw) * 0.28) calc(min(240px, 22vw) * 0.28), 100% 100%',
+        backgroundPosition: '0 0, calc(min(240px, 22vw) * 0.14) calc(min(240px, 22vw) * 0.14), 0 0',
+        padding: 'calc(50px + 16px) 16px 16px 16px', // Top padding accounts for tab bar
         boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
-        gap: 'max(4px, min(calc(min(280px, 25vw) * 0.031), 2vh))',
-        position: 'absolute',
-        top: '2vh',
-        left: 'max(calc(4vw - 28px), 8px)',
-        bottom: '4vh',
-        borderRadius: presetMenuVisualState 
-          ? 'calc(min(280px, 25vw) * 0.031) calc(min(280px, 25vw) * 0.031) 0 calc(min(280px, 25vw) * 0.031)' // Square off bottom-right when expanded
-          : 'calc(min(280px, 25vw) * 0.031)', // Normal rounded corners when collapsed
-        boxShadow: '0 8px 32px rgba(0,0,0,0.28)',
-        border: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)',
+        gap: 'max(8px, min(calc(min(240px, 22vw) * 0.031), 2vh))',
+        position: 'fixed',
+        top: 0,
+        left: 0,
+        bottom: 0,
+        borderRadius: 0, // Remove border radius for full-height sidebar
+        boxShadow: 'none', // Remove shadow
+        border: 'none', // Remove border
+        borderRight: '2px solid #000', // Add subtle right border
         zIndex: 2,
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start', // Change from space-between to flex-start
         alignItems: 'stretch',
         touchAction: 'none',
         overflowY: 'auto',
@@ -6626,7 +6735,11 @@ const HexGridWithToolbar = () => {
           marginBottom: 'calc(min(280px, 25vw) * 0.001)',
           textAlign: 'left',
           userSelect: 'none',
-        }}>Create</div>
+        }}>{activeTab === 'draw' ? 'Create' : 'Animate'}</div>
+        
+        {/* Toolbar Content - only show in Draw mode */}
+        {activeTab === 'draw' && (
+        <>
         {/* Draw/Erase Buttons as icon buttons side by side */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0 }}>
           <button
@@ -6906,7 +7019,7 @@ const HexGridWithToolbar = () => {
               justifyContent: 'center',
               backgroundColor: mode === 'lone' ? 'rgb(54,98,227)' : '#23395d',
               border: 'none',
-              borderRadius: 'calc(min(320px, 33.33vw) * 0.019)',
+              borderRadius: 'calc(min(240px, 22vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'lone' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
@@ -7755,7 +7868,7 @@ const HexGridWithToolbar = () => {
           </button>
         </div>
         
-        <div style={{ flex: 1, minHeight: '10px' }} />
+        <div style={{ flex: 1, minHeight: '20px' }} />
         
         {/* Undo and Erase All Buttons Side by Side */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 'max(6px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))' }}>
@@ -7851,159 +7964,132 @@ const HexGridWithToolbar = () => {
             Undo
           </button>
         </div>
-      </div>
-      
-
-
-      {/* Preset Menu - expands to the right */}
-      <div style={{
-        width: isPresetMenuExpanded ? '650px' : '0px', // Animate from 0 to full width
-        minWidth: '0px', // Ensure it can collapse to 0
-        height: '160px', // Much shorter than main toolbar
-        overflow: 'hidden', // Hide content during slide animation
-        pointerEvents: isPresetMenuExpanded ? 'auto' : 'none', // Disable interactions when collapsed
-          background: 'linear-gradient(to bottom, rgb(16,32,34), rgb(15,40,30))',
-          backgroundImage: `
-            linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
-            linear-gradient(45deg, rgba(255,255,255,0.015) 25%, transparent 25%, transparent 75%, rgba(255,255,255,0.015) 75%),
-            linear-gradient(to bottom, rgb(17,35,36), rgb(15,40,32))`,
-          backgroundSize: 'calc(min(280px, 25vw) * 0.28) calc(min(280px, 25vw) * 0.28), calc(min(280px, 25vw) * 0.28) calc(min(280px, 25vw) * 0.28), 100% 100%',
-          backgroundPosition: 'calc(-1 * (min(240px, 25vw) + max(calc(4vw - 28px), 8px)) + -2.2px) calc(-1 * (92vh - 160px - 4vh) + -8px), calc(-1 * (min(240px, 25vw) + max(calc(4vw - 28px), 8px)) + calc(min(280px, 25vw) * 0.14) + -2.2px) calc(-1 * (92vh - 160px - 4vh) + calc(min(280px, 25vw) * 0.14) + -8px), 0 0',
-          padding: '12px 16px',
-          boxSizing: 'border-box',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          position: 'absolute',
-          bottom: '4vh', // Align with bottom of toolbar
-          left: `calc(min(240px, 25vw) + max(calc(4vw - 28px), 8px) - 2.2px)`, // Overlap the main toolbar by 8px
-          visibility: isPresetMenuExpanded ? 'visible' : 'hidden', // Completely hide when collapsed
-          borderRadius: '0 8px 8px 0', // Square off top-left and bottom-left corners to connect seamlessly with main toolbar
-          border: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)',
-          borderLeft: 'none', // Remove left border to seamlessly attach to main toolbar
-          zIndex: 4, // Above main toolbar (which is zIndex: 2) and button (which is zIndex: 3)
-          touchAction: 'none',
-          transition: 'all 0.5s ease-out', // Smooth slide animation
-        }}>
-          {/* Preset Menu Title */}
-          <div style={{
-            color: '#888',
-            fontWeight: 600,
-            fontSize: '14px',
-            letterSpacing: '0.04em',
-            textAlign: 'left',
-            userSelect: 'none',
-            marginBottom: '0px',
-            whiteSpace: 'nowrap', // Prevent text wrapping during animation
-          }}>Presets</div>
-          
-          {/* Empty content area - preset buttons are now in main toolbar */}
-          <div style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '8px',
-            flex: 1,
-            minWidth: '0',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: '#888',
-            fontSize: '14px',
-            fontWeight: '500',
-            textAlign: 'center',
-            padding: '20px',
-            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-          }}>
-            <div>Preset buttons are now</div>
-            <div>available in the main toolbar</div>
-            <div style={{ marginTop: '8px', fontSize: '12px', opacity: '0.7' }}>
-              This space reserved for future features
-            </div>
-          </div>
-        </div>
+        </>
+        )}
         
-        {/* Vertical Preset Menu Toggle Button - attached to toolbar */}
-      <button
-        onClick={() => {
-          if (isPresetMenuExpanded) {
-            // Collapsing: Start animation immediately, change visual state after animation
-            setIsPresetMenuExpanded(false);
-            setTimeout(() => setPresetMenuVisualState(false), 500);
-          } else {
-            // Expanding: Change visual state immediately, start animation
-            setPresetMenuVisualState(true);
-            setIsPresetMenuExpanded(true);
-          }
-        }}
-        className="toolbar-button"
-        style={{
-          position: 'absolute',
-          bottom: '5vh', // Position just above the bottom of the toolbar
-          left: isPresetMenuExpanded 
-            ? `calc(min(240px, 25vw) + max(calc(4vw - 28px), 8px) + 650px - 2.2px)` // When expanded, move to right side of preset menu (650px width) minus 2.2px
-            : `calc(min(240px, 25vw) + max(calc(4vw - 28px), 8px) - 2.2px)`, // When collapsed, attach to main toolbar minus 2.2px
-          transform: 'translateY(-10px)', // Small offset to sit just above the toolbar bottom
-          width: '16px',
-          height: '130px', // Shorter than before (was 170px)
-          background: isPresetMenuExpanded ? 'rgb(54,98,227)' : 'linear-gradient(to bottom, rgb(35, 52, 69), rgb(28, 74, 56))',
-          borderTop: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)', // Dark green border matching toolbar
-          borderRight: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)', // Dark green border matching toolbar
-          borderBottom: 'calc(min(280px, 25vw) * 0.009) solid rgba(0, 208, 24, 0.53)', // Dark green border matching toolbar
-          borderLeft: isPresetMenuExpanded ? 'none' : 'none', // No left border to seamlessly attach (to toolbar or preset menu)
-          borderRadius: '0 8px 8px 0', // Always round the right side
-          cursor: 'pointer',
-          boxShadow: isPresetMenuExpanded ? 
-            '0 6px 20px rgba(54,98,227,0.4), inset 0 1px 0 rgba(255,255,255,0.2)' :
-            '0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.1)',
-          transition: 'background 0.2s, left 0.5s ease-out', // Smooth background and position transitions
-          outline: 'none',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '0',
-          zIndex: 3,
-        }}
-        onMouseEnter={(e) => {
-          if (!isPresetMenuExpanded) {
-            e.target.style.background = 'linear-gradient(to bottom, rgb(42, 68, 112), rgb(35, 95, 71))';
-            e.target.style.boxShadow = '0 6px 20px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.15)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          if (!isPresetMenuExpanded) {
-            e.target.style.background = 'linear-gradient(to bottom, rgb(35, 52, 69), rgb(28, 74, 56))';
-            e.target.style.boxShadow = '0 4px 16px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.1)';
-          }
-        }}
-        title={isPresetMenuExpanded ? "Collapse Presets" : "Expand Presets"}
-      >
-        {/* Small white triangle pointing right */}
-        <svg 
-          width="10" 
-          height="10" 
-          viewBox="0 0 24 24" 
-          fill="none" 
-          xmlns="http://www.w3.org/2000/svg"
-          style={{
-            transform: isPresetMenuExpanded ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 0.2s',
-            pointerEvents: 'none',
-          }}
-        >
-          <path
-            d="M9 18L15 12L9 6"
-            stroke="#fff"
-            strokeWidth="2.5"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      </button>
+        {/* Animate Tab Content */}
+        {activeTab === 'animate' && (
+          <>
+            {/* Draw Animation Arrow Button */}
+            <button
+              onClick={() => {
+                const newMode = mode === 'drawAnimationArrow' ? 'draw' : 'drawAnimationArrow';
+                selectMode(newMode);
+              }}
+              className="toolbar-button"
+              style={{
+                width: '100%',
+                height: 'min(44px, 7vh)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                backgroundColor: mode === 'drawAnimationArrow' ? 'rgb(54,98,227)' : '#23395d',
+                border: 'none',
+                borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+                cursor: 'pointer',
+                boxShadow: mode === 'drawAnimationArrow' ? 
+                  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                  '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                outline: 'none',
+                padding: 0,
+                color: '#fff',
+                fontSize: 'max(12px, min(calc(min(280px, 25vw) * 0.05), 2vh))',
+                fontWeight: '600',
+                fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+                gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+              }}
+              onMouseEnter={(e) => {
+                if (mode !== 'drawAnimationArrow') {
+                  e.target.style.backgroundColor = '#3554a0';
+                  e.target.style.boxShadow = '0 4px 12px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.15)';
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (mode !== 'drawAnimationArrow') {
+                  e.target.style.backgroundColor = '#23395d';
+                  e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+                }
+              }}
+              title="Draw Animation Arrow"
+            >
+              {/* Animation Arrow SVG */}
+              <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
+                <line x1="6" y1="13" x2="32" y2="13" stroke="#fff" strokeWidth="3" strokeLinecap="round" />
+                <polygon points="32,7 44,13 32,19" fill="white" />
+                {/* Add animation indicator - small circles */}
+                <circle cx="12" cy="8" r="1.5" fill="white" opacity="0.8" />
+                <circle cx="18" cy="8" r="1.5" fill="white" opacity="0.6" />
+                <circle cx="24" cy="8" r="1.5" fill="white" opacity="0.4" />
+              </svg>
+              Draw Animation Arrow
+                         </button>
+             
+             {/* Add Step Button */}
+             <button
+               onClick={() => {
+                 // TODO: Implement add step functionality
+                 console.log('Add step clicked');
+               }}
+               className="toolbar-button"
+               style={{
+                 width: '100%',
+                 height: 'min(44px, 7vh)',
+                 display: 'flex',
+                 alignItems: 'center',
+                 justifyContent: 'center',
+                 backgroundColor: '#23395d',
+                 border: 'none',
+                 borderRadius: 'calc(min(280px, 25vw) * 0.019)',
+                 cursor: 'pointer',
+                 boxShadow: '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)',
+                 outline: 'none',
+                 padding: 0,
+                 color: '#fff',
+                 fontSize: 'max(12px, min(calc(min(280px, 25vw) * 0.05), 2vh))',
+                 fontWeight: '600',
+                 fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+                 gap: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+                 marginTop: 'max(8px, calc(min(280px, 25vw) * 0.03))',
+               }}
+               onMouseEnter={(e) => {
+                 e.target.style.backgroundColor = '#28a745';
+                 e.target.style.boxShadow = '0 4px 12px rgba(40,167,69,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
+               }}
+               onMouseLeave={(e) => {
+                 e.target.style.backgroundColor = '#23395d';
+                 e.target.style.boxShadow = '0 3px 8px rgba(0,0,0,0.15), inset 0 1px 0 rgba(255,255,255,0.1)';
+               }}
+               title="Add Step"
+             >
+               {/* Plus icon for Add Step */}
+               <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
+                 <line x1="12" y1="5" x2="12" y2="19"></line>
+                 <line x1="5" y1="12" x2="19" y2="12"></line>
+               </svg>
+               Add Step
+             </button>
+             
+             {/* Future animation controls can be added here */}
+             <div style={{
+               color: '#888',
+               fontWeight: 400,
+               fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.045), 2vh))',
+               textAlign: 'center',
+               marginTop: 'max(20px, calc(min(280px, 25vw) * 0.05))',
+               fontStyle: 'italic',
+               lineHeight: '1.4',
+             }}>
+               More animation tools coming soon...
+             </div>
+          </>
+        )}
+      </div>
       
       {/* Canvas wrapper fills all except toolbar area */}
       <div style={{
         position: 'absolute',
-        top: 0,
-        left: 0,
+        top: '50px', // Account for tab bar
+        left: 'min(240px, 22vw)', // Start after the sidebar
         right: 0,
         bottom: 0,
         zIndex: 1,
@@ -8218,7 +8304,7 @@ const HexGridWithToolbar = () => {
         <div
           style={{
             position: 'fixed',
-            top: '20px',
+            top: '70px',
             right: '20px',
             zIndex: 10,
             backgroundColor: showSnapPreview ? '#4CAF50' : '#FF9800',
