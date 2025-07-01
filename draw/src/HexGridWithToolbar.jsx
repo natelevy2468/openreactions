@@ -18,6 +18,7 @@ import { createEscapeKeyHandler, createGeneralEscapeHandler, createFourthBondKey
 import { handleArrowMouseMove, handleArrowClick } from './handlers/ArrowHandlers.js';
 import { formatAtomText } from './utils/TextUtils.jsx';
 import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview, isVertexInLinearSystem, getLinearAxis } from './utils/GridBreakingUtils.js';
+import { generateChairPreset, createChairIcon } from './utils/ChairConformation.js';
 import MolecularProperties from './components/MolecularProperties.jsx';
 
   const HexGridWithToolbar = () => {
@@ -76,6 +77,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
   const [atomInputValue, setAtomInputValue] = useState('');
   const [atomInputPosition, setAtomInputPosition] = useState({ x: 0, y: 0 });
   const [showAboutPopup, setShowAboutPopup] = useState(false);
+  const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
   // Preset state
   const [selectedPreset, setSelectedPreset] = useState(null); // Track which preset is currently selected ('benzene', 'cyclohexane', etc.)
   // Ring detection state (invisible to user)
@@ -267,7 +269,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
   
   // Prevent duplicate captureState calls within a short time window
   const [lastCaptureTime, setLastCaptureTime] = useState(0);
-  
+
   // Molecule tracking state
   const [activeMoleculeId, setActiveMoleculeId] = useState(null);
   const [lastEditedVertex, setLastEditedVertex] = useState(null);
@@ -847,7 +849,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                 }
               }
               
-              // Render each segment with proper positioning
+              // Calculate positions for all segments first
+              const segmentPositions = [];
               let currentX = vx - totalWidth / 2;
               const baseYOffset = 2;
               
@@ -857,23 +860,16 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                 const yOffset = isNumber ? 4 : 0;
                 
                 ctx.font = font;
-                ctx.textAlign = 'left';
-                ctx.textBaseline = 'middle';
-                
-                // Add a thick white outline to make text stand out over bonds
-                ctx.shadowColor = 'rgba(255,255,255,0.85)';
-                ctx.shadowBlur = 4;
-                ctx.lineWidth = 5;
-                ctx.strokeStyle = '#fff';
-                
-                ctx.strokeText(segment.text, currentX, vy + baseYOffset + yOffset);
-                ctx.shadowBlur = 0;
-                
-                ctx.fillStyle = '#1a1a1a';
-                ctx.fillText(segment.text, currentX, vy + baseYOffset + yOffset);
-                
-                // Calculate width and move to next position
                 const segmentWidth = ctx.measureText(segment.text).width;
+                
+                segmentPositions.push({
+                  text: segment.text,
+                  font: font,
+                  x: currentX,
+                  y: vy + baseYOffset + yOffset,
+                  isNumber: isNumber
+                });
+                
                 currentX += segmentWidth;
                 
                 // Apply kerning for numbers following letters
@@ -896,6 +892,42 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                     }
                   }
                 }
+              }
+              
+              // Render in three passes to prevent overlap issues
+              // For single characters, use center alignment for better centering
+              if (segmentPositions.length === 1 && !segmentPositions[0].isNumber) {
+                ctx.textAlign = 'center';
+                // Update the single segment position to use vertex center
+                segmentPositions[0].x = vx;
+              } else {
+                ctx.textAlign = 'left';
+              }
+              ctx.textBaseline = 'middle';
+              
+              // Pass 1: Draw all white strokes
+              ctx.shadowColor = 'rgba(255,255,255,0.85)';
+              ctx.shadowBlur = 4;
+              ctx.lineWidth = 5;
+              ctx.strokeStyle = '#fff';
+              for (const pos of segmentPositions) {
+                ctx.font = pos.font;
+                ctx.strokeText(pos.text, pos.x, pos.y);
+              }
+              ctx.shadowBlur = 0;
+              
+              // Pass 2: Draw all white fills to fill holes in letters
+              ctx.fillStyle = '#ffffff';
+              for (const pos of segmentPositions) {
+                ctx.font = pos.font;
+                ctx.fillText(pos.text, pos.x, pos.y);
+              }
+              
+              // Pass 3: Draw all final colored text
+              ctx.fillStyle = '#1a1a1a';
+              for (const pos of segmentPositions) {
+                ctx.font = pos.font;
+                ctx.fillText(pos.text, pos.x, pos.y);
               }
               
               ctx.shadowBlur = 0;
@@ -1054,189 +1086,104 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     setLastEditedVertex(vertex);
   }, []);
 
-  // Vertex merging function - merges overlapping vertices
-  const mergeOverlappingVertices = useCallback((mergeThreshold = 10) => {
-    console.log('🔄 Running vertex merge check...');
+  // Fast vertex merging - only checks a new vertex against existing ones
+  const checkAndMergeNewVertex = useCallback((newVertex, currentVertices, mergeThreshold = 15) => {
+    // Find any existing vertex that's close enough to merge with the new one
+    let closestVertex = null;
+    let minDistance = mergeThreshold;
+    let closestIndex = -1;
     
-    // Find pairs of vertices that are close enough to merge
-    const toMerge = [];
-    for (let i = 0; i < vertices.length; i++) {
-      for (let j = i + 1; j < vertices.length; j++) {
-        const v1 = vertices[i];
-        const v2 = vertices[j];
-        const distance = Math.sqrt((v1.x - v2.x) ** 2 + (v1.y - v2.y) ** 2);
-        
-        if (distance <= mergeThreshold) {
-          toMerge.push({ v1, v2, v1Index: i, v2Index: j, distance });
+    for (let i = 0; i < currentVertices.length; i++) {
+      const existing = currentVertices[i];
+      const distance = Math.sqrt((existing.x - newVertex.x) ** 2 + (existing.y - newVertex.y) ** 2);
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestVertex = existing;
+        closestIndex = i;
+      }
+    }
+    
+    // If no close vertex found, no merging needed
+    if (!closestVertex) {
+      return { shouldMerge: false, newVertices: [...currentVertices, newVertex] };
+    }
+    
+    // Determine which vertex to keep (prefer one with atom label)
+    const newKey = `${newVertex.x.toFixed(2)},${newVertex.y.toFixed(2)}`;
+    const existingKey = `${closestVertex.x.toFixed(2)},${closestVertex.y.toFixed(2)}`;
+    const newHasAtom = !!vertexAtoms[newKey];
+    const existingHasAtom = !!vertexAtoms[existingKey];
+    
+    let keepVertex, removeVertex, keepKey, removeKey;
+    if (newHasAtom && !existingHasAtom) {
+      keepVertex = newVertex;
+      removeVertex = closestVertex;
+      keepKey = newKey;
+      removeKey = existingKey;
+    } else if (existingHasAtom && !newHasAtom) {
+      keepVertex = closestVertex;
+      removeVertex = newVertex;
+      keepKey = existingKey;
+      removeKey = newKey;
+    } else {
+      // Both have atoms or neither - merge to average position
+      const mergedX = (newVertex.x + closestVertex.x) / 2;
+      const mergedY = (newVertex.y + closestVertex.y) / 2;
+      keepVertex = { ...closestVertex, x: mergedX, y: mergedY };
+      removeVertex = newVertex;
+      keepKey = existingKey;
+      removeKey = newKey;
+    }
+    
+    // Update vertices array
+    const newVertices = [...currentVertices];
+    newVertices[closestIndex] = keepVertex;
+    
+    // Update segments that reference the removed vertex
+    setSegments(prevSegments => 
+      prevSegments.map(seg => {
+        let updated = seg;
+        if (Math.abs(seg.x1 - removeVertex.x) < 0.01 && Math.abs(seg.y1 - removeVertex.y) < 0.01) {
+          updated = { ...updated, x1: keepVertex.x, y1: keepVertex.y };
         }
-      }
-    }
-    
-    if (toMerge.length === 0) {
-      console.log('✅ No overlapping vertices found');
-      return false; // No merging needed
-    }
-    
-    console.log(`🔗 Found ${toMerge.length} pairs of vertices to merge`);
-    
-    // Sort by distance (merge closest pairs first)
-    toMerge.sort((a, b) => a.distance - b.distance);
-    
-    // Track which vertices have been merged to avoid double-processing
-    const mergedIndices = new Set();
-    const mergeActions = [];
-    
-    for (const { v1, v2, v1Index, v2Index } of toMerge) {
-      // Skip if either vertex has already been merged
-      if (mergedIndices.has(v1Index) || mergedIndices.has(v2Index)) {
-        continue;
-      }
-      
-      // Determine which vertex to keep (prefer vertex with atom label, or the first one)
-      const v1Key = `${v1.x.toFixed(2)},${v1.y.toFixed(2)}`;
-      const v2Key = `${v2.x.toFixed(2)},${v2.y.toFixed(2)}`;
-      const v1HasAtom = !!vertexAtoms[v1Key];
-      const v2HasAtom = !!vertexAtoms[v2Key];
-      
-      let keepVertex, removeVertex, keepIndex, removeIndex;
-      if (v1HasAtom && !v2HasAtom) {
-        keepVertex = v1; removeVertex = v2; keepIndex = v1Index; removeIndex = v2Index;
-      } else if (v2HasAtom && !v1HasAtom) {
-        keepVertex = v2; removeVertex = v1; keepIndex = v2Index; removeIndex = v1Index;
-      } else {
-        // Both have atoms or neither has atoms - keep the first one
-        keepVertex = v1; removeVertex = v2; keepIndex = v1Index; removeIndex = v2Index;
-      }
-      
-      // Calculate merged position (average of the two positions)
-      const mergedX = (keepVertex.x + removeVertex.x) / 2;
-      const mergedY = (keepVertex.y + removeVertex.y) / 2;
-      
-      mergeActions.push({
-        keepVertex: { ...keepVertex, x: mergedX, y: mergedY },
-        removeVertex,
-        keepIndex,
-        removeIndex,
-        keepKey: `${keepVertex.x.toFixed(2)},${keepVertex.y.toFixed(2)}`,
-        removeKey: `${removeVertex.x.toFixed(2)},${removeVertex.y.toFixed(2)}`,
-        mergedKey: `${mergedX.toFixed(2)},${mergedY.toFixed(2)}`
-      });
-      
-      mergedIndices.add(keepIndex);
-      mergedIndices.add(removeIndex);
-    }
-    
-    if (mergeActions.length === 0) {
-      console.log('✅ No vertices to merge after filtering');
-      return false;
-    }
-    
-    console.log(`🔗 Performing ${mergeActions.length} vertex merges`);
-    
-    // Apply all merge actions
-    setVertices(prevVertices => {
-      let newVertices = [...prevVertices];
-      
-      // Sort by removeIndex in descending order to avoid index shifting issues
-      const sortedActions = [...mergeActions].sort((a, b) => b.removeIndex - a.removeIndex);
-      
-      for (const action of sortedActions) {
-        // Update the kept vertex position
-        if (action.keepIndex < newVertices.length) {
-          newVertices[action.keepIndex] = action.keepVertex;
+        if (Math.abs(seg.x2 - removeVertex.x) < 0.01 && Math.abs(seg.y2 - removeVertex.y) < 0.01) {
+          updated = { ...updated, x2: keepVertex.x, y2: keepVertex.y };
         }
-        
-        // Remove the duplicate vertex
-        if (action.removeIndex < newVertices.length) {
-          newVertices.splice(action.removeIndex, 1);
-        }
-      }
-      
-      return newVertices;
-    });
+        return updated;
+      })
+    );
     
-    // Update segments to reference the merged vertices
-    setSegments(prevSegments => {
-      let newSegments = [...prevSegments];
-      
-      for (const action of mergeActions) {
-        newSegments = newSegments.map(seg => {
-          let updated = seg;
-          
-          // Update x1, y1 if it matches the removed vertex
-          if (Math.abs(seg.x1 - action.removeVertex.x) < 0.01 && Math.abs(seg.y1 - action.removeVertex.y) < 0.01) {
-            updated = { ...updated, x1: action.keepVertex.x, y1: action.keepVertex.y };
-          }
-          
-          // Update x2, y2 if it matches the removed vertex
-          if (Math.abs(seg.x2 - action.removeVertex.x) < 0.01 && Math.abs(seg.y2 - action.removeVertex.y) < 0.01) {
-            updated = { ...updated, x2: action.keepVertex.x, y2: action.keepVertex.y };
-          }
-          
-          return updated;
-        });
-      }
-      
-      return newSegments;
-    });
-    
-    // Update vertex atoms by merging properties
+    // Merge atom properties if both have them
     setVertexAtoms(prevAtoms => {
-      let newAtoms = { ...prevAtoms };
+      const newAtoms = { ...prevAtoms };
+      const keepAtom = newAtoms[keepKey];
+      const removeAtom = newAtoms[removeKey];
       
-      for (const action of mergeActions) {
-        const keepAtom = newAtoms[action.keepKey];
-        const removeAtom = newAtoms[action.removeKey];
-        
-        // Merge atom properties
-        let mergedAtom = null;
-        if (keepAtom && removeAtom) {
-          // Both have atoms - merge them intelligently
-          mergedAtom = {
-            symbol: keepAtom.symbol || removeAtom.symbol || '',
-            charge: keepAtom.charge || removeAtom.charge || 0,
-            lonePairs: Math.max(keepAtom.lonePairs || 0, removeAtom.lonePairs || 0),
-            lonePairOrder: keepAtom.lonePairOrder || removeAtom.lonePairOrder
-          };
-        } else if (keepAtom) {
-          mergedAtom = keepAtom;
-        } else if (removeAtom) {
-          mergedAtom = removeAtom;
-        }
-        
-        // Remove old atom entries
-        delete newAtoms[action.keepKey];
-        delete newAtoms[action.removeKey];
-        
-        // Add merged atom if it exists
-        if (mergedAtom) {
-          newAtoms[action.mergedKey] = mergedAtom;
-        }
+      if (keepAtom && removeAtom) {
+        // Merge properties intelligently
+        const mergedKey = `${keepVertex.x.toFixed(2)},${keepVertex.y.toFixed(2)}`;
+        newAtoms[mergedKey] = {
+          symbol: keepAtom.symbol || removeAtom.symbol || '',
+          charge: (keepAtom.charge || 0) + (removeAtom.charge || 0) || undefined,
+          lonePairs: Math.max(keepAtom.lonePairs || 0, removeAtom.lonePairs || 0) || undefined,
+          lonePairOrder: keepAtom.lonePairOrder || removeAtom.lonePairOrder
+        };
+        // Clean up
+        delete newAtoms[keepKey];
+        delete newAtoms[removeKey];
+      } else if (removeAtom && !keepAtom) {
+        // Move atom data to merged position
+        const mergedKey = `${keepVertex.x.toFixed(2)},${keepVertex.y.toFixed(2)}`;
+        newAtoms[mergedKey] = removeAtom;
+        delete newAtoms[removeKey];
       }
       
       return newAtoms;
     });
     
-    // Update free floating vertices set
-    setFreeFloatingVertices(prevSet => {
-      let newSet = new Set(prevSet);
-      
-      for (const action of mergeActions) {
-        newSet.delete(action.keepKey);
-        newSet.delete(action.removeKey);
-        
-        // If either vertex was free-floating, make the merged one free-floating
-        if (prevSet.has(action.keepKey) || prevSet.has(action.removeKey)) {
-          newSet.add(action.mergedKey);
-        }
-      }
-      
-      return newSet;
-    });
-    
-    console.log(`✅ Successfully merged ${mergeActions.length} vertex pairs`);
-    return true; // Merging occurred
-  }, [vertices, segments, vertexAtoms]);
+    return { shouldMerge: true, newVertices };
+  }, [vertexAtoms]);
 
   // Generate unique segments and vertices based on view size
   const generateGrid = useCallback((width, height, existingVertices = [], existingVertexAtoms = {}, existingSegments = []) => {
@@ -1724,8 +1671,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
   const calculateGridAlignment = useCallback((pastedVertices, clickX, clickY) => {
     if (!pastedVertices || pastedVertices.length === 0 || !clipboard || !clipboard.segments) return null;
     
-    // Don't try to align small ring presets to hexagonal grid - they won't fit properly
-    if (selectedPreset === 'cyclopentane' || selectedPreset === 'cyclobutane' || selectedPreset === 'cyclopropane') {
+    // Don't try to align small ring presets and chair conformations to hexagonal grid - they won't fit properly
+    if (selectedPreset === 'cyclopentane' || selectedPreset === 'cyclobutane' || selectedPreset === 'cyclopropane' || selectedPreset === 'chair') {
       return null;
     }
     
@@ -2829,57 +2776,121 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           }
         }
         
-        // Render each segment with proper positioning
-        let currentX = vx - totalWidth / 2;
-        const baseYOffset = 2; // Move entire text down by 2 pixels (reduced from 4 to move text upward)
-        
-        for (const segment of segments) {
-          const isNumber = segment.isNumber;
-          const font = isNumber ? '40 15px "Inter", "Segoe UI", "Arial", sans-serif' : '40 26px "Inter", "Segoe UI", "Arial", sans-serif';
-          const yOffset = isNumber ? 4 : 0; // Numbers positioned 4px below baseline
+        // For single characters like "O", use simple center alignment
+        if (segments.length === 1 && !segments[0].isNumber) {
+          const segment = segments[0];
+          const font = '40 26px "Inter", "Segoe UI", "Arial", sans-serif';
+          const baseYOffset = 2;
           
-          ctx.font = font;
+          const segmentPositions = [{
+            text: segment.text,
+            font: font,
+            x: vx, // Use vertex center for simple centering
+            y: vy + baseYOffset,
+            isNumber: false
+          }];
+          
+          // Render in three passes to prevent overlap issues
+          ctx.textAlign = 'center'; // Use center alignment for single atoms
+          ctx.textBaseline = 'middle';
+          
+          // Pass 1: Draw all white strokes
+          ctx.shadowColor = 'rgba(255,255,255,0.85)';
+          ctx.shadowBlur = 4;
+          ctx.lineWidth = 5;
+          ctx.strokeStyle = '#fff';
+          for (const pos of segmentPositions) {
+            ctx.font = pos.font;
+            ctx.strokeText(pos.text, pos.x, pos.y);
+          }
+          ctx.shadowBlur = 0;
+          
+          // Pass 2: Draw all white fills to fill holes in letters
+          ctx.fillStyle = '#ffffff';
+          for (const pos of segmentPositions) {
+            ctx.font = pos.font;
+            ctx.fillText(pos.text, pos.x, pos.y);
+          }
+          
+          // Pass 3: Draw all final colored text
+          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          for (const pos of segmentPositions) {
+            ctx.font = pos.font;
+            ctx.fillText(pos.text, pos.x, pos.y);
+          }
+        } else {
+          // Complex positioning for multi-segment atoms (e.g. H2O, CH4)
+          const segmentPositions = [];
+          let currentX = vx - totalWidth / 2;
+          const baseYOffset = 2; // Move entire text down by 2 pixels (reduced from 4 to move text upward)
+          
+          for (const segment of segments) {
+            const isNumber = segment.isNumber;
+            const font = isNumber ? '40 15px "Inter", "Segoe UI", "Arial", sans-serif' : '40 26px "Inter", "Segoe UI", "Arial", sans-serif';
+            const yOffset = isNumber ? 4 : 0; // Numbers positioned 4px below baseline
+            
+            ctx.font = font;
+            const segmentWidth = ctx.measureText(segment.text).width;
+            
+            segmentPositions.push({
+              text: segment.text,
+              font: font,
+              x: currentX,
+              y: vy + baseYOffset + yOffset,
+              isNumber: isNumber
+            });
+            
+            currentX += segmentWidth;
+            
+            // Apply kerning for numbers following letters
+            if (isNumber && segments.indexOf(segment) > 0) {
+              const prevSegment = segments[segments.indexOf(segment) - 1];
+              if (prevSegment && !prevSegment.isNumber) {
+                const lastChar = prevSegment.text.slice(-1);
+                if (['C', 'O'].includes(lastChar)) {
+                  currentX -= 3;
+                } else if (['F', 'P', 'S'].includes(lastChar)) {
+                  currentX -= 2.8;
+                } else if (['N', 'E', 'B'].includes(lastChar)) {
+                  currentX -= 2.5;
+                } else if (['H', 'T', 'I', 'L'].includes(lastChar)) {
+                  currentX -= 1.7;
+                } else if (['l', 'i'].includes(lastChar)) {
+                  currentX -= 1.3;
+                } else {
+                  currentX -= 2.3;
+                }
+              }
+            }
+          }
+          
+          // Render in three passes to prevent overlap issues
           ctx.textAlign = 'left';
           ctx.textBaseline = 'middle';
           
-          // Add a thick white outline to make text stand out over bonds
+          // Pass 1: Draw all white strokes
           ctx.shadowColor = 'rgba(255,255,255,0.85)';
           ctx.shadowBlur = 4;
-          ctx.lineWidth = 5; // Thick outline to prevent bonds showing through letters with holes
+          ctx.lineWidth = 5;
           ctx.strokeStyle = '#fff';
-          
-          // Draw shadow/stroke
-          ctx.strokeText(segment.text, currentX, vy + baseYOffset + yOffset);
+          for (const pos of segmentPositions) {
+            ctx.font = pos.font;
+            ctx.strokeText(pos.text, pos.x, pos.y);
+          }
           ctx.shadowBlur = 0;
           
-          // Set color: blue for selected, black for normal
+          // Pass 2: Draw all white fills to fill holes in letters
+          ctx.fillStyle = '#ffffff';
+          for (const pos of segmentPositions) {
+            ctx.font = pos.font;
+            ctx.fillText(pos.text, pos.x, pos.y);
+          }
+          
+          // Pass 3: Draw all final colored text
           ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
-          
-          ctx.fillText(segment.text, currentX, vy + baseYOffset + yOffset);
-          
-          // Calculate width and move to next position
-          const segmentWidth = ctx.measureText(segment.text).width;
-          currentX += segmentWidth;
-          
-          // Apply kerning for numbers following letters
-          if (isNumber && segments.indexOf(segment) > 0) {
-            const prevSegment = segments[segments.indexOf(segment) - 1];
-            if (prevSegment && !prevSegment.isNumber) {
-              const lastChar = prevSegment.text.slice(-1);
-              if (['C', 'O'].includes(lastChar)) {
-                currentX -= 3;
-              } else if (['F', 'P', 'S'].includes(lastChar)) {
-                currentX -= 2.8;
-              } else if (['N', 'E', 'B'].includes(lastChar)) {
-                currentX -= 2.5;
-              } else if (['H', 'T', 'I', 'L'].includes(lastChar)) {
-                currentX -= 1.7;
-              } else if (['l', 'i'].includes(lastChar)) {
-                currentX -= 1.3;
-              } else {
-                currentX -= 2.3;
-              }
-            }
+          for (const pos of segmentPositions) {
+            ctx.font = pos.font;
+            ctx.fillText(pos.text, pos.x, pos.y);
           }
         }
         
@@ -4092,7 +4103,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               }
             }
             
-            // Render each segment with proper positioning (same as main rendering)
+            // Calculate positions for all segments first (same as main rendering)
+            const segmentPositions = [];
             let currentX = vx + offset.x - totalWidth / 2;
             const baseYOffset = 2;
             
@@ -4102,22 +4114,16 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               const yOffset = isNumber ? 4 : 0;
               
               ctx.font = font;
-              ctx.textAlign = 'left';
-              ctx.textBaseline = 'middle';
-              
-              // Add outline for readability (same as main rendering)
-              ctx.shadowColor = 'rgba(255,255,255,0.85)';
-              ctx.shadowBlur = 4;
-              ctx.lineWidth = 5;
-              ctx.strokeStyle = '#fff';
-              
-              ctx.strokeText(segment.text, currentX, vy + offset.y + baseYOffset + yOffset);
-              ctx.shadowBlur = 0;
-              ctx.fillStyle = '#888'; // Gray for preview
-              ctx.fillText(segment.text, currentX, vy + offset.y + baseYOffset + yOffset);
-              
-              // Move to next position
               const segmentWidth = ctx.measureText(segment.text).width;
+              
+              segmentPositions.push({
+                text: segment.text,
+                font: font,
+                x: currentX,
+                y: vy + offset.y + baseYOffset + yOffset,
+                isNumber: isNumber
+              });
+              
               currentX += segmentWidth;
               
               // Apply kerning
@@ -4140,6 +4146,42 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   }
                 }
               }
+            }
+            
+            // Render in three passes to prevent overlap issues (same as main rendering)
+            // For single characters, use center alignment for better centering
+            if (segments.length === 1 && !segments[0].isNumber) {
+              ctx.textAlign = 'center';
+              // Update the single segment position to use vertex center
+              segmentPositions[0].x = vx + offset.x;
+            } else {
+              ctx.textAlign = 'left';
+            }
+            ctx.textBaseline = 'middle';
+            
+            // Pass 1: Draw all white strokes
+            ctx.shadowColor = 'rgba(255,255,255,0.85)';
+            ctx.shadowBlur = 4;
+            ctx.lineWidth = 5;
+            ctx.strokeStyle = '#fff';
+            for (const pos of segmentPositions) {
+              ctx.font = pos.font;
+              ctx.strokeText(pos.text, pos.x, pos.y);
+            }
+            ctx.shadowBlur = 0;
+            
+            // Pass 2: Draw all white fills to fill holes in letters
+            ctx.fillStyle = '#ffffff';
+            for (const pos of segmentPositions) {
+              ctx.font = pos.font;
+              ctx.fillText(pos.text, pos.x, pos.y);
+            }
+            
+            // Pass 3: Draw all final colored text
+            ctx.fillStyle = '#888'; // Gray for preview
+            for (const pos of segmentPositions) {
+              ctx.font = pos.font;
+              ctx.fillText(pos.text, pos.x, pos.y);
             }
             
             // Draw charge if present (same position logic as main rendering)
@@ -5018,6 +5060,52 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     selectPreset('cyclopropane', cyclopropaneData);
   }, [selectPreset, generateCyclopropanePreset]);
 
+  // Generate chair conformation preset data
+  const generateChairConformationPreset = useCallback(() => {
+    // Use manual coordinates for perfect chair shape
+    return generateChairPreset(hexRadius, calculateBondDirection, {
+      manualCoordinates: [
+        { x: -30, y: 30 },   // Vertex 0: Bottom-left
+        { x: -50, y: -10 },    // Vertex 1: Bottom-right
+        { x: 20, y: 20 },   // Vertex 2: Top-right elevated
+        { x: -20, y: -20 },   // Vertex 3: Top-right
+        { x: 30, y: 30 },  // Vertex 4: Top-left
+        { x: -30, y: -30 }   // Vertex 5: Top-left elevated
+      ]
+    });
+    
+    // TO MANUALLY ADJUST CHAIR GEOMETRY, replace the above line with one of these:
+    
+    // Option 1: Use predefined presets
+    // return generateChairPreset(hexRadius, calculateBondDirection, chairPresets.wide);
+    // return generateChairPreset(hexRadius, calculateBondDirection, chairPresets.adjusted);
+    
+    // Option 2: Specify exact coordinates manually
+    // return generateChairPreset(hexRadius, calculateBondDirection, {
+    //   manualCoordinates: [
+    //     { x: -40, y: 15 },  // Vertex 0: Bottom-left
+    //     { x: 40, y: 15 },   // Vertex 1: Bottom-right
+    //     { x: 60, y: -20 },  // Vertex 2: Top-right slant  
+    //     { x: 20, y: -35 },  // Vertex 3: Top-right
+    //     { x: -20, y: -35 }, // Vertex 4: Top-left
+    //     { x: -60, y: -20 }  // Vertex 5: Top-left slant
+    //   ]
+    // });
+    
+    // Option 3: Adjust scaling and parameters
+    // return generateChairPreset(hexRadius, calculateBondDirection, {
+    //   widthScale: 1.2,    // Make wider
+    //   heightScale: 0.8,   // Make shorter
+    //   symmetryOffset: 5   // Shift horizontally
+    // });
+  }, [hexRadius, calculateBondDirection]);
+
+  // Toggle chair conformation preset selection
+  const toggleChairPreset = useCallback(() => {
+    const chairData = generateChairConformationPreset();
+    selectPreset('chair', chairData);
+  }, [selectPreset, generateChairConformationPreset]);
+
   // Function to detect off-grid vertices in small rings (cyclopropane, cyclobutane, cyclopentane) attached to bonds
   const detectEpoxideVertices = useCallback(() => {
     console.log('🔍 Running small ring off-grid vertex detection...');
@@ -5161,8 +5249,6 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     
     // Run small ring off-grid vertex detection after pasting (with small delay to ensure state is updated)
     setTimeout(detectEpoxideVertices, 10);
-    // Run vertex merging after pasting
-    setTimeout(mergeOverlappingVertices, 15);
   }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState, selectedPreset, detectEpoxideVertices, trackVertexEdit]);
 
   // Set mode (draw/erase/arrow/text/etc.) - must be defined before setModeAndClearSelection
@@ -5209,6 +5295,18 @@ import MolecularProperties from './components/MolecularProperties.jsx';
   useEffect(() => {
     updateSelection();
   }, [updateSelection, selectionEnd]);
+
+  // Close settings dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (showSettingsDropdown && !event.target.closest('[data-settings-dropdown]')) {
+        setShowSettingsDropdown(false);
+      }
+    };
+
+    document.addEventListener('click', handleClickOutside);
+    return () => document.removeEventListener('click', handleClickOutside);
+  }, [showSettingsDropdown]);
 
   // Distance to a vertex
   const distanceToVertex = (px, py, vx, vy) => {
@@ -5469,10 +5567,16 @@ import MolecularProperties from './components/MolecularProperties.jsx';
       
       if (!vertexExists) {
         setVertices(prevVertices => {
+          // Use targeted merging for new off-grid vertex
+          if (newEndpointVertex.isOffGrid) {
+            const result = checkAndMergeNewVertex(newEndpointVertex, prevVertices);
+            setTimeout(detectRings, 0);
+            return result.newVertices;
+          } else {
           const newVertices = [...prevVertices, newEndpointVertex];
           setTimeout(detectRings, 0);
-          setTimeout(mergeOverlappingVertices, 0);
           return newVertices;
+          }
         });
       }
       
@@ -5635,8 +5739,12 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           });
           
           if (!vertexExists) {
-            updateVerticesWithTracking(prevVertices => [...prevVertices, newVertex], newVertex);
-            setTimeout(mergeOverlappingVertices, 0);
+            // Use targeted merging for new off-grid vertex from bond preview
+            setVertices(prevVertices => {
+              const result = checkAndMergeNewVertex(newVertex, prevVertices);
+              return result.newVertices;
+            });
+            trackVertexEdit(newVertex);
           }
           
           // Run ring detection after adding bond/vertex
@@ -5992,9 +6100,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         // Create a new vertex at the exact click position (on-grid)
         const newVertex = { x: gridX, y: gridY, isOffGrid: false };
         
-        // Add the new vertex and track it
+        // Add the new vertex and track it - no merging needed for text mode vertices
         updateVerticesWithTracking(prevVertices => [...prevVertices, newVertex], newVertex);
-        setTimeout(mergeOverlappingVertices, 0);
         
         // Add the new text mode vertex to freeFloatingVertices set so it can be moved
         const newVertexKey = `${gridX.toFixed(2)},${gridY.toFixed(2)}`;
@@ -6331,15 +6438,15 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   // Only mark as needing vertex updates if we need to force off-grid behavior
                   // If both vertices are on grid, keep them on grid
                   if (!v1OnGrid || !v2OnGrid) {
-                    updatedSegment._needsVertexUpdate = {
-                      newOtherX: seg.x2, // Keep original coordinates
-                      newOtherY: seg.y2,
-                      originalX1: seg.x1,
-                      originalY1: seg.y1,
-                      originalX2: seg.x2,
+                  updatedSegment._needsVertexUpdate = {
+                    newOtherX: seg.x2, // Keep original coordinates
+                    newOtherY: seg.y2,
+                    originalX1: seg.x1,
+                    originalY1: seg.y1,
+                    originalX2: seg.x2,
                       originalY2: seg.y2,
                       respectGrid: true // Flag to indicate we should respect grid positions
-                    };
+                  };
                   }
                   
                   return updatedSegment;
@@ -6465,24 +6572,24 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                     });
                   } else {
                     // Fallback for other cases - mark all vertices as off-grid
-                    newVertices = newVertices.map(vertex => {
-                      const v1Match = Math.abs(vertex.x - update.originalX1) < 0.01 && Math.abs(vertex.y - update.originalY1) < 0.01;
-                      const v2Match = Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01;
-                      const newVertexMatch = Math.abs(vertex.x - update.newOtherX) < 0.01 && Math.abs(vertex.y - update.newOtherY) < 0.01;
-                      
-                      if (v1Match || v2Match || newVertexMatch) {
-                        return { ...vertex, isOffGrid: true };
-                      }
-                      return vertex;
-                    }).filter(vertex => {
-                      // Remove vertices that are being repositioned (if they match the old position that's being moved)
-                      // Only remove if the new position is different from the old position
-                      const isBeingMoved = (
-                        (Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01) &&
-                        (Math.abs(update.originalX2 - update.newOtherX) > 0.01 || Math.abs(update.originalY2 - update.newOtherY) > 0.01)
-                      );
-                      return !isBeingMoved;
-                    });
+                  newVertices = newVertices.map(vertex => {
+                    const v1Match = Math.abs(vertex.x - update.originalX1) < 0.01 && Math.abs(vertex.y - update.originalY1) < 0.01;
+                    const v2Match = Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01;
+                    const newVertexMatch = Math.abs(vertex.x - update.newOtherX) < 0.01 && Math.abs(vertex.y - update.newOtherY) < 0.01;
+                    
+                    if (v1Match || v2Match || newVertexMatch) {
+                      return { ...vertex, isOffGrid: true };
+                    }
+                    return vertex;
+                  }).filter(vertex => {
+                    // Remove vertices that are being repositioned (if they match the old position that's being moved)
+                    // Only remove if the new position is different from the old position
+                    const isBeingMoved = (
+                      (Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01) &&
+                      (Math.abs(update.originalX2 - update.newOtherX) > 0.01 || Math.abs(update.originalY2 - update.newOtherY) > 0.01)
+                    );
+                    return !isBeingMoved;
+                  });
                   }
                 }
                 
@@ -7117,7 +7224,6 @@ import MolecularProperties from './components/MolecularProperties.jsx';
       fourthBondMode,
       // Functions
       handleArrowClickLocal,
-      mergeOverlappingVertices,
       // Setters
       setIsSelecting,
       setIsDragging,
@@ -7248,15 +7354,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     if (!isDraggingVertex) {
       const newVertexTypes = determineVertexTypes(vertices, segments, vertexAtoms);
       setVertexTypes(newVertexTypes);
-      
-      // Also run vertex merging after any vertex changes (with small delay to allow state to settle)
-      const timeoutId = setTimeout(() => {
-        mergeOverlappingVertices();
-      }, 100);
-      
-      return () => clearTimeout(timeoutId);
     }
-  }, [vertices, segments, vertexAtoms, isDraggingVertex, mergeOverlappingVertices]);
+  }, [vertices, segments, vertexAtoms, isDraggingVertex]);
 
 
 
@@ -7488,7 +7587,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
       overflow: 'hidden',
       zIndex: 0
     }}>
-            {/* Tab Bar at the top */}
+            {/* Navigation Bar at the top */}
       <div style={{
         position: 'fixed',
         top: 0,
@@ -7496,7 +7595,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         right: 0,
         height: '50px',
         background: '#c4c4c4',
-        borderBottom: '1px solidrgb(191, 191, 191)',
+        borderBottom: '1px solid rgb(191, 191, 191)',
         display: 'flex',
         alignItems: 'center',
         paddingLeft: '20px',
@@ -7506,7 +7605,11 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         justifyContent: 'space-between'
       }}>
         {/* Left side buttons */}
-        <div style={{ display: 'flex', alignItems: 'center' }}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          marginTop: '3px'
+        }}>
           <a
             href="https://openreactions.com/"
             style={{
@@ -7514,19 +7617,27 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               color: '#333',
               textDecoration: 'none',
               border: 'none',
-              padding: '8px 16px',
-              marginRight: '8px',
+              padding: '10px 12px',
+              marginRight: '2px',
               marginLeft: '-16px',
               borderRadius: '6px',
               fontSize: '16px',
-              fontWeight: '600',
-              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+              fontWeight: '400',
+              fontFamily: 'Roboto, sans-serif',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               gap: '8px',
+              transition: 'all 0.15s ease-out'
             }}
-   
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = 'rgba(54, 98, 227, 0.2)';
+              e.target.style.transform = 'scale(1.02)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = 'transparent';
+              e.target.style.transform = 'scale(1)';
+            }}
           >
             <img 
               src={logoFinal3} 
@@ -7549,20 +7660,47 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               backgroundColor: 'rgba(54, 98, 227, 0.7)',
               color: '#fff',
               border: 'none',
-              padding: '8px 20px',
-              marginRight: '8px',
+              padding: '10px 12px',
+              marginRight: '2px',
               borderRadius: '6px',
-              fontSize: '14px',
-              fontWeight: '600',
-              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+              fontSize: '16px',
+              fontWeight: '400',
+              fontFamily: 'Roboto, sans-serif',
             }}
           >
             Draw
           </div>
         </div>
         
+        {/* Center title */}
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center',
+          justifyContent: 'center',
+          flex: 1,
+          marginTop: '3px'
+        }}>
+          <span style={{
+            fontSize: '28px',
+            fontWeight: '300',
+            background: 'linear-gradient(135deg, #1042e8 0%, #7921f3 50%, #9C27B0 100%)',
+            WebkitBackgroundClip: 'text',
+            WebkitTextFillColor: 'transparent',
+            backgroundClip: 'text',
+            fontFamily: 'Roboto, sans-serif',
+            letterSpacing: '-0.5px'
+          }}>
+            OpenReactions
+          </span>
+        </div>
+        
         {/* Right side buttons */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '8px',
+          marginTop: '3px'
+        }}>
           <button
             onClick={() => setShowAboutPopup(true)}
             style={{
@@ -7570,11 +7708,12 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               color: '#333',
               textDecoration: 'none',
               border: 'none',
-              padding: '8px 20px',
+              padding: '10px 12px',
+              marginRight: '2px',
               borderRadius: '6px',
-              fontSize: '14px',
-              fontWeight: '600',
-              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+              fontSize: '16px',
+              fontWeight: '400',
+              fontFamily: 'Roboto, sans-serif',
               cursor: 'pointer',
               transition: 'all 0.15s ease-out',
             }}
@@ -7589,34 +7728,76 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           >
             About
           </button>
-          <div
-            style={{
-              backgroundColor: 'transparent',
-              color: '#333',
-              textDecoration: 'none',
-              border: 'none',
-              padding: '0px 0px',
-              borderRadius: '6px',
-              fontSize: '14px',
-              fontWeight: '600',
-              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-              cursor: 'default',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-            title="Settings"
-          >
-            <img 
-              src={gearIcon} 
-              alt="Settings" 
+          <div style={{ position: 'relative', display: 'inline-block' }} data-settings-dropdown>
+            <button
+              onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
               style={{
-                width: '50px',
-                height: '50px',
-                pointerEvents: 'none',
-                filter: 'brightness(0) saturate(100%) invert(27%) sepia(0%) saturate(1567%) hue-rotate(184deg) brightness(95%) contrast(87%)'
+                backgroundColor: 'transparent',
+                color: '#333',
+                textDecoration: 'none',
+                border: 'none',
+                padding: '0px 0px',
+                borderRadius: '6px',
+                fontSize: '14px',
+                fontWeight: '400',
+                fontFamily: 'Roboto, sans-serif',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
               }}
-            />
+              title="Settings"
+            >
+              <img 
+                src={gearIcon} 
+                alt="Settings" 
+                style={{
+                  width: '50px',
+                  height: '50px',
+                  pointerEvents: 'none',
+                  filter: 'brightness(0) saturate(100%) invert(27%) sepia(0%) saturate(1567%) hue-rotate(184deg) brightness(95%) contrast(87%)'
+                }}
+              />
+            </button>
+            {/* Settings Dropdown */}
+            {showSettingsDropdown && (
+              <div style={{
+                position: 'absolute',
+                right: 0,
+                top: '100%',
+                backgroundColor: 'white',
+                minWidth: '280px',
+                boxShadow: '0 8px 16px rgba(0,0,0,0.1)',
+                borderRadius: '8px',
+                border: '1px solid #ddd',
+                zIndex: 1000,
+                marginTop: '8px',
+                padding: '16px',
+                fontSize: '14px',
+                lineHeight: '1.4',
+                fontFamily: 'Roboto, sans-serif',
+                animation: 'fadeIn 0.2s ease-out'
+              }}>
+                <div style={{
+                  position: 'absolute',
+                  top: '-8px',
+                  right: '20px',
+                  width: 0,
+                  height: 0,
+                  borderLeft: '8px solid transparent',
+                  borderRight: '8px solid transparent',
+                  borderBottom: '8px solid white'
+                }} />
+                <div style={{
+                  color: '#666',
+                  fontSize: '12px',
+                  fontWeight: '500',
+                  marginBottom: '8px'
+                }}>
+                  Settings menu coming soon...
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -7628,6 +7809,11 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         
         .toolbar-button:hover {
           transform: scale(1.02);
+        }
+        
+        @keyframes fadeIn {
+          from { opacity: 0; transform: translateY(-10px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
       {/* Toolbar */}
@@ -7668,6 +7854,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           marginBottom: 'calc(min(280px, 25vw) * 0.001)',
           textAlign: 'left',
           userSelect: 'none',
+          fontFamily: 'Roboto, sans-serif',
         }}>Create</div>
         
         {/* Toolbar Content - always show since we only have Draw mode */}
@@ -7992,6 +8179,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           marginTop: 'max(0px, min(calc(min(280px, 25vw) * 0.001), 0vh))',
           textAlign: 'left',
           userSelect: 'none',
+          fontFamily: 'Roboto, sans-serif',
         }}>Reactions</div>
         {/* Arrow and Equilibrium Arrow Buttons side by side */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(6px, calc(min(280px, 25vw) * 0.025))' }}>
@@ -8291,6 +8479,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           marginTop: 'max(0px, min(calc(min(280px, 25vw) * 0.001), 0vh))',
           textAlign: 'left',
           userSelect: 'none',
+          fontFamily: 'Roboto, sans-serif',
         }}>Stereochemistry</div>
         {/* Stereochemistry buttons - wedge, dash, ambiguous */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(6px, calc(min(280px, 25vw) * 0.025))' }}>
@@ -8431,6 +8620,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           marginTop: 'max(0px, min(calc(min(280px, 25vw) * 0.001), 0vh))',
           textAlign: 'left',
           userSelect: 'none',
+          fontFamily: 'Roboto, sans-serif',
         }}>Special</div>
         
         {/* Special buttons in 2x4 grid */}
@@ -8736,36 +8926,47 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             </svg>
           </button>
           
-          {/* Placeholder button (Coming Soon) */}
+          {/* Chair Conformation preset button */}
           <button
+            onClick={toggleChairPreset}
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
+              backgroundColor: selectedPreset === 'chair' ? 'rgb(54,98,227)' : '#e9ecef',
+              border: '1px solid #e3e7eb',
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: '#e9ecef',
-              border: '1px solid #e3e7eb',
-              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+              boxShadow: selectedPreset === 'chair' ? 
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
-              padding: 0,
-              color: '#666',
-              fontSize: 'max(10px, min(14px, calc(min(280px, 25vw) * 0.05)))',
-              fontWeight: '600',
+              padding: '4px',
             }}
             onMouseEnter={(e) => {
+              if (selectedPreset !== 'chair') {
               e.target.style.backgroundColor = '#dee2e6';
-              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+              }
             }}
             onMouseLeave={(e) => {
+              if (selectedPreset !== 'chair') {
               e.target.style.backgroundColor = '#e9ecef';
-              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+              }
             }}
-            title="Coming Soon"
+            title="Chair Conformation"
           >
-            7
+            {/* Chair conformation SVG preview */}
+            <svg width="32" height="32" viewBox="0 0 16 16" fill="none" style={{ pointerEvents: 'none' }}>
+              {/* Proper chair with 3 sets of parallel lines */}
+              <g stroke={selectedPreset === 'chair' ? '#fff' : '#666'} strokeWidth="1.4" fill="none" strokeLinecap="round">
+                {/* Chair shape: bottom flat, then up-slants, top flat, then down-slants */}
+                <path d="M3 11 L9 11 L12 7 L10 4 L4 4 L1 7 Z"/>
+              </g>
+            </svg>
           </button>
           
           <button
@@ -9148,7 +9349,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             )}
           </div>
           <div style={{ fontSize: '12px', opacity: '0.9' }}>
-            {(selectedPreset === 'cyclopentane' || selectedPreset === 'cyclobutane' || selectedPreset === 'cyclopropane') ? 
+            {(selectedPreset === 'cyclopentane' || selectedPreset === 'cyclobutane' || selectedPreset === 'cyclopropane' || selectedPreset === 'chair') ? 
              (snapAlignment && snapAlignment.type === 'bond' ? 'Snapping to bond' : 'Move near bond to snap') : 
              selectedPreset ? 'Click to place multiple' : 'Press G to toggle'}
           </div>
@@ -9254,7 +9455,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           </div>
         </>
       )}
-
+      
       {/* Export Popup */}
       {showExportPopup && exportImageUrl && (
         <>
@@ -9262,11 +9463,11 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           <div
             onClick={() => setShowExportPopup(false)}
             style={{
-              position: 'fixed',
+        position: 'fixed',
               inset: 0,
               zIndex: 15,
               backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              display: 'flex',
+        display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
             }}
@@ -9328,9 +9529,9 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               gap: '12px',
               justifyContent: 'center',
               marginBottom: '16px',
-            }}>
-              <button
-                onClick={() => {
+      }}>
+        <button
+          onClick={() => {
                   // Create download link with smart filename
                   const link = document.createElement('a');
                   link.href = exportImageUrl;
@@ -9343,7 +9544,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   link.click();
                   document.body.removeChild(link);
                 }}
-                style={{
+          style={{
                   backgroundColor: '#4CAF50',
                   color: 'white',
                   border: 'none',
@@ -9351,10 +9552,10 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   padding: '12px 20px',
                   fontSize: '14px',
                   fontWeight: '600',
-                  cursor: 'pointer',
+            cursor: 'pointer',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                  display: 'flex',
-                  alignItems: 'center',
+            display: 'flex',
+            alignItems: 'center',
                   gap: '8px',
                   transition: 'all 0.2s ease',
                 }}
@@ -9406,8 +9607,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   border: 'none',
                   borderRadius: '8px',
                   padding: '12px 20px',
-                  fontSize: '14px',
-                  fontWeight: '600',
+            fontSize: '14px',
+            fontWeight: '600',
                   cursor: 'pointer',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
                   display: 'flex',
@@ -9415,11 +9616,11 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   gap: '8px',
                   transition: 'all 0.2s ease',
                 }}
-                onMouseEnter={(e) => {
+          onMouseEnter={(e) => {
                   e.target.style.backgroundColor = '#1976D2';
                   e.target.style.transform = 'translateY(-1px)';
-                }}
-                onMouseLeave={(e) => {
+          }}
+          onMouseLeave={(e) => {
                   e.target.style.backgroundColor = '#2196F3';
                   e.target.style.transform = 'translateY(0)';
                 }}
@@ -9429,7 +9630,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
                 </svg>
                 Copy Image
-              </button>
+        </button>
             </div>
             
             <div style={{
@@ -9446,8 +9647,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                 'High-quality PNG export • Clean background • No grid lines'
               )}
             </div>
-            
-            <button
+        
+        <button
               onClick={() => setShowExportPopup(false)}
               style={{
                 backgroundColor: '#e9ecef',

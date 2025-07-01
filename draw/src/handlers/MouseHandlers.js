@@ -48,8 +48,7 @@ export const handleMouseMove = (
   isPointInArrowCircle,
   isPointInCurvedArrowCircle,
   distanceToVertex,
-  isPointInVertexBox,
-  mergeOverlappingVertices
+  isPointInVertexBox
 ) => {
   const rect = canvasRef.current.getBoundingClientRect();
   const x = event.clientX - rect.left;
@@ -914,7 +913,6 @@ export const handleMouseUp = (
   fourthBondMode,
   // Functions
   handleArrowClick,
-  mergeOverlappingVertices,
   // Setters
   setIsSelecting,
   setIsDragging,
@@ -947,9 +945,6 @@ export const handleMouseUp = (
   if (draggingVertex) {
     setDraggingVertex(null);
     setIsDraggingVertex(false);
-    
-    // After dragging a vertex, check for and merge any overlapping vertices
-    setTimeout(() => mergeOverlappingVertices(), 50);
   }
   
   // Reset arrow dragging state if we were dragging an arrow

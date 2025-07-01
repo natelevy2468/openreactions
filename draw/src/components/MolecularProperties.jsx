@@ -91,11 +91,54 @@ const MolecularProperties = ({ vertices, bonds, onExpandedChange }) => {
   const [properties, setProperties] = useState(null);
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Helper function to count bond order at a specific vertex
+  const countBondOrderAtVertex = (vertex, allBonds) => {
+    if (!allBonds || !vertex) return 0;
+    
+    let totalBondOrder = 0;
+    const tolerance = 0.02; // Slightly larger tolerance for coordinate matching
+    
+    allBonds.forEach(bond => {
+      // Parse coordinates from bond 'from' and 'to' strings
+      const [fromX, fromY] = bond.from.split(',').map(parseFloat);
+      const [toX, toY] = bond.to.split(',').map(parseFloat);
+      
+      // Check if this bond is connected to the vertex with more robust coordinate matching
+      const isConnectedToFrom = Math.abs(fromX - vertex.x) < tolerance && 
+                               Math.abs(fromY - vertex.y) < tolerance;
+      const isConnectedToTo = Math.abs(toX - vertex.x) < tolerance && 
+                             Math.abs(toY - vertex.y) < tolerance;
+      
+      if (isConnectedToFrom || isConnectedToTo) {
+        // Add bond order (single=1, double=2, triple=3)
+        if (bond.bondType === 'single') totalBondOrder += 1;
+        else if (bond.bondType === 'double') totalBondOrder += 2;
+        else if (bond.bondType === 'triple') totalBondOrder += 3;
+        else totalBondOrder += 1; // Default to single bond
+      }
+    });
+    
+    return totalBondOrder;
+  };
+
+  // Calculate implicit hydrogens for carbon atoms
+  const calculateImplicitHydrogens = (vertex, allBonds) => {
+    const element = vertex.element || 'C';
+    
+    // Only calculate implicit hydrogens for carbon atoms (or unlabeled vertices which default to carbon)
+    if (element !== 'C') return 0;
+    
+    const bondOrder = countBondOrderAtVertex(vertex, allBonds);
+    // Carbon typically forms 4 bonds, so implicit H = 4 - existing bonds
+    // Special case: isolated carbon (no bonds) becomes CH4
+    const implicitHydrogens = Math.max(0, 4 - bondOrder);
+    
+    return implicitHydrogens;
+  };
+
   // Calculate simple properties client-side with proper formula parsing
   const calculateBasicProperties = async () => {
     if (!vertices || vertices.length === 0) return null;
-
-
 
     // Count all elements from all vertices
     const totalElementCount = {};
@@ -113,6 +156,13 @@ const MolecularProperties = ({ vertices, bonds, onExpandedChange }) => {
         totalElementCount[element] = (totalElementCount[element] || 0) + count;
         totalAtoms += count;
       });
+      
+      // Calculate and add implicit hydrogens for carbon atoms
+      const implicitHydrogens = calculateImplicitHydrogens(vertex, bonds);
+      if (implicitHydrogens > 0) {
+        totalElementCount['H'] = (totalElementCount['H'] || 0) + implicitHydrogens;
+        totalAtoms += implicitHydrogens;
+      }
     }
 
     // Build molecular formula (C first, then H, then alphabetical)
@@ -271,6 +321,9 @@ const MolecularProperties = ({ vertices, bonds, onExpandedChange }) => {
         </div>
         <div>
           <strong>Structure:</strong> {properties.atomCount} atoms, {properties.bondCount} bonds
+        </div>
+        <div style={{ fontSize: '12px', color: '#888', marginTop: '4px', fontStyle: 'italic' }}>
+          * Implicit hydrogens on carbon automatically included
         </div>
       </div>
 
