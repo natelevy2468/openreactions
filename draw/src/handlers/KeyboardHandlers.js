@@ -163,15 +163,21 @@ export const createEnterKeyHandler = (
       return;
     }
     
-    // Enter key in draw mode to edit hovered vertex - only if text box is NOT already open
-    if (e.key === 'Enter' && mode === 'draw' && hoverVertex && !showAtomInput) {
+    // Enter key in draw or stereochemistry modes to edit hovered vertex - only if text box is NOT already open
+    if (e.key === 'Enter' && (mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && hoverVertex && !showAtomInput) {
       e.preventDefault();
       
       const key = `${hoverVertex.x.toFixed(2)},${hoverVertex.y.toFixed(2)}`;
       setMenuVertexKey(key);
       
       // Position the input box at the vertex position
-      setAtomInputPosition({ x: hoverVertex.x + offset.x, y: hoverVertex.y + offset.y });
+      // Account for the toolbar offset: 50px top for tab bar + sidebar width from left
+      const toolbarWidth = Math.min(240, window.innerWidth * 0.22); // min(240px, 22vw)
+      const toolbarHeight = 50; // top offset for tab bar
+      setAtomInputPosition({ 
+        x: hoverVertex.x + offset.x + toolbarWidth, 
+        y: hoverVertex.y + offset.y + toolbarHeight 
+      });
       
       // Set initial value if there's an existing atom
       const existingAtom = vertexAtoms[key];
@@ -201,11 +207,11 @@ export const createElementShortcutHandler = (
       return;
     }
     
-    // Element shortcuts: O, N, F, S, C, H - only in draw mode, when hovering, and text box not open
+    // Element shortcuts: O, N, F, S, C, H - only in draw or stereochemistry modes, when hovering, and text box not open
     const elementKeys = ['o', 'n', 'f', 's', 'c', 'h'];
     const key = e.key.toLowerCase();
     
-    if (elementKeys.includes(key) && mode === 'draw' && hoverVertex && !showAtomInput) {
+    if (elementKeys.includes(key) && (mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && hoverVertex && !showAtomInput) {
       e.preventDefault();
       
       // Capture state before modifying atom

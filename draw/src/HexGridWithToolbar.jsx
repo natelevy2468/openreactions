@@ -18,6 +18,7 @@ import { createEscapeKeyHandler, createGeneralEscapeHandler, createFourthBondKey
 import { handleArrowMouseMove, handleArrowClick } from './handlers/ArrowHandlers.js';
 import { formatAtomText } from './utils/TextUtils.jsx';
 import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview, isVertexInLinearSystem, getLinearAxis } from './utils/GridBreakingUtils.js';
+import MolecularProperties from './components/MolecularProperties.jsx';
 
   const HexGridWithToolbar = () => {
     const canvasRef = useRef(null);
@@ -261,8 +262,797 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
   const [history, setHistory] = useState([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
   
+  // Track molecular properties panel state
+  const [isPropertiesPanelExpanded, setIsPropertiesPanelExpanded] = useState(false);
+  
   // Prevent duplicate captureState calls within a short time window
   const [lastCaptureTime, setLastCaptureTime] = useState(0);
+  
+  // Molecule tracking state
+  const [activeMoleculeId, setActiveMoleculeId] = useState(null);
+  const [lastEditedVertex, setLastEditedVertex] = useState(null);
+
+  // Export popup state
+  const [showExportPopup, setShowExportPopup] = useState(false);
+  const [exportImageUrl, setExportImageUrl] = useState(null);
+  const [exportMetadata, setExportMetadata] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Molecule detection and tracking functions
+  const detectSeparateMolecules = useCallback(() => {
+    // Build a graph of vertices connected by bonds
+    const actualBonds = segments.filter(s => s.bondOrder > 0);
+    const vertexConnections = new Map();
+    
+    // Initialize vertex connections
+    vertices.forEach(vertex => {
+      const key = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+      vertexConnections.set(key, new Set());
+    });
+    
+    // Add connections from bonds
+    actualBonds.forEach(bond => {
+      const v1Key = `${bond.x1.toFixed(2)},${bond.y1.toFixed(2)}`;
+      const v2Key = `${bond.x2.toFixed(2)},${bond.y2.toFixed(2)}`;
+      
+      if (vertexConnections.has(v1Key) && vertexConnections.has(v2Key)) {
+        vertexConnections.get(v1Key).add(v2Key);
+        vertexConnections.get(v2Key).add(v1Key);
+      }
+    });
+    
+    // Find connected components using BFS
+    const visited = new Set();
+    const molecules = [];
+    
+    for (const [vertexKey, connections] of vertexConnections) {
+      if (!visited.has(vertexKey)) {
+        // Start a new molecule from this unvisited vertex
+        const molecule = new Set();
+        const queue = [vertexKey];
+        
+        while (queue.length > 0) {
+          const currentKey = queue.shift();
+          if (visited.has(currentKey)) continue;
+          
+          visited.add(currentKey);
+          molecule.add(currentKey);
+          
+          // Add connected vertices to queue
+          const connectedVertices = vertexConnections.get(currentKey);
+          if (connectedVertices) {
+            for (const connectedKey of connectedVertices) {
+              if (!visited.has(connectedKey)) {
+                queue.push(connectedKey);
+              }
+            }
+          }
+        }
+        
+        // Include all vertices that are part of actual bonds OR have atom labels
+        // A molecule is valid if it has actual bonds connecting vertices OR standalone labeled atoms
+        const moleculeVertexKeys = Array.from(molecule);
+        const hasActualBonds = actualBonds.some(bond => {
+          const v1Key = `${bond.x1.toFixed(2)},${bond.y1.toFixed(2)}`;
+          const v2Key = `${bond.x2.toFixed(2)},${bond.y2.toFixed(2)}`;
+          return moleculeVertexKeys.includes(v1Key) && moleculeVertexKeys.includes(v2Key);
+        });
+        const hasLabeledAtoms = moleculeVertexKeys.some(vKey => vertexAtoms[vKey]);
+        
+        if (hasActualBonds || hasLabeledAtoms) {
+          molecules.push({
+            id: `molecule_${molecules.length}`,
+            vertexKeys: moleculeVertexKeys
+          });
+        }
+      }
+    }
+    
+    return molecules;
+  }, [vertices, segments, vertexAtoms]);
+  
+  const findMoleculeContainingVertex = useCallback((targetVertex) => {
+    const molecules = detectSeparateMolecules();
+    const targetKey = `${targetVertex.x.toFixed(2)},${targetVertex.y.toFixed(2)}`;
+    
+    return molecules.find(molecule => 
+      molecule.vertexKeys.includes(targetKey)
+    );
+  }, [detectSeparateMolecules]);
+  
+  const getActiveMolecule = useCallback(() => {
+    const molecules = detectSeparateMolecules();
+    
+    // If we have a last edited vertex, find its molecule
+    if (lastEditedVertex) {
+      const molecule = findMoleculeContainingVertex(lastEditedVertex);
+      if (molecule) {
+        return molecule;
+      }
+    }
+    
+    // If no last edited vertex, return the first molecule or null
+    return molecules.length > 0 ? molecules[0] : null;
+  }, [detectSeparateMolecules, findMoleculeContainingVertex, lastEditedVertex]);
+  
+  // Minimal canvas rendering function for export (only captures edited content)
+  const renderCleanCanvas = useCallback(async (scaleFactor = 2) => {
+    return new Promise((resolve) => {
+      // Use requestAnimationFrame to avoid blocking the UI
+      requestAnimationFrame(() => {
+        try {
+          const exportCanvas = document.createElement('canvas');
+          const canvas = canvasRef.current;
+          if (!canvas || !exportCanvas) {
+            resolve(null);
+            return;
+          }
+
+          // Find bounds of all EDITED content only (exclude empty grid vertices)
+          const allPoints = [];
+          
+          // Add all bond endpoints (these are definitely edited content)
+          segments.filter(s => s.bondOrder > 0).forEach(seg => {
+            allPoints.push({ x: seg.x1 + offset.x, y: seg.y1 + offset.y });
+            allPoints.push({ x: seg.x2 + offset.x, y: seg.y2 + offset.y });
+          });
+
+          // Only add vertices that are actually part of the molecular structure
+          vertices.forEach(v => {
+            const vx = v.x;
+            const vy = v.y;
+            const key = `${vx.toFixed(2)},${vy.toFixed(2)}`;
+            
+            // Check if this vertex has an atom label
+            const hasAtomLabel = !!vertexAtoms[key];
+            
+            // Check if this vertex is connected to any bonds (including double bonds)
+            const hasConnectedBonds = segments.some(seg => 
+              seg.bondOrder > 0 && (
+                (Math.abs(seg.x1 - vx) < 0.1 && Math.abs(seg.y1 - vy) < 0.1) ||
+                (Math.abs(seg.x2 - vx) < 0.1 && Math.abs(seg.y2 - vy) < 0.1)
+              )
+            );
+            
+            // Only include vertices that have atom labels OR are connected to bonds
+            if (hasAtomLabel || hasConnectedBonds) {
+              allPoints.push({ x: v.x + offset.x, y: v.y + offset.y });
+            }
+          });
+
+          // Add all arrow endpoints
+          arrows.forEach(arrow => {
+            allPoints.push({ x: arrow.x1 + offset.x, y: arrow.y1 + offset.y });
+            allPoints.push({ x: arrow.x2 + offset.x, y: arrow.y2 + offset.y });
+          });
+
+          // If no content, return null
+          if (allPoints.length === 0) {
+            // Simple debug check ONLY when export fails
+            console.log('🚫 EXPORT FAILED - NO CONTENT DETECTED');
+            console.log('📊 Current state:');
+            console.log(`   - Total vertices: ${vertices.length}`);
+            console.log(`   - Total bonds: ${segments.filter(s => s.bondOrder > 0).length}`);
+            console.log(`   - Double bonds: ${segments.filter(s => s.bondOrder === 2).length}`);
+            console.log(`   - Atoms with labels: ${Object.keys(vertexAtoms).length}`);
+            
+            if (segments.some(s => s.bondOrder === 2)) {
+              console.log('⚠️ Double bonds exist but no vertices detected - checking bond endpoints:');
+              segments.filter(s => s.bondOrder === 2).forEach((seg, i) => {
+                console.log(`   Double bond ${i+1}: (${seg.x1.toFixed(1)}, ${seg.y1.toFixed(1)}) → (${seg.x2.toFixed(1)}, ${seg.y2.toFixed(1)})`);
+                // Check if we have matching vertices
+                const v1Match = vertices.find(v => Math.abs(v.x - seg.x1) < 0.1 && Math.abs(v.y - seg.y1) < 0.1);
+                const v2Match = vertices.find(v => Math.abs(v.x - seg.x2) < 0.1 && Math.abs(v.y - seg.y2) < 0.1);
+                console.log(`     Vertex matches: v1=${!!v1Match}, v2=${!!v2Match}`);
+              });
+            }
+            resolve(null);
+            return;
+          }
+
+          // Find the bounding box
+          let minX = Math.min(...allPoints.map(p => p.x));
+          let maxX = Math.max(...allPoints.map(p => p.x));
+          let minY = Math.min(...allPoints.map(p => p.y));
+          let maxY = Math.max(...allPoints.map(p => p.y));
+
+          // Add padding for text, bonds, charges, etc.
+          const padding = 40;
+          minX -= padding;
+          maxX += padding;
+          minY -= padding;
+          maxY += padding;
+
+          // Calculate canvas dimensions
+          const cropWidth = maxX - minX;
+          const cropHeight = maxY - minY;
+          
+          exportCanvas.width = cropWidth * scaleFactor;
+          exportCanvas.height = cropHeight * scaleFactor;
+          const ctx = exportCanvas.getContext('2d');
+
+          // Set up high-quality rendering
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.scale(scaleFactor, scaleFactor);
+
+          // Fill white background
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, cropWidth, cropHeight);
+
+          // Offset all drawing to account for the crop
+          const offsetX = -minX;
+          const offsetY = -minY;
+
+          // Render content with cropping offset - FULL QUALITY to match main canvas
+          // Note: All coordinates are already adjusted for offsetX/offsetY
+          
+          // Draw bonds with same logic as main canvas
+          ctx.strokeStyle = '#000000';
+          ctx.lineWidth = 3;
+          segments.forEach((seg, segIdx) => {
+                          if (seg.bondOrder >= 1) {
+               const x1b = seg.x1;
+               const y1b = seg.y1;
+               const x2b = seg.x2;
+               const y2b = seg.y2;
+               const key1 = `${x1b.toFixed(2)},${y1b.toFixed(2)}`;
+               const key2 = `${x2b.toFixed(2)},${y2b.toFixed(2)}`;
+               const hasAtom1 = !!vertexAtoms[key1];
+               const hasAtom2 = !!vertexAtoms[key2];
+               let sx1 = x1b + offset.x + offsetX;
+               let sy1 = y1b + offset.y + offsetY;
+               let sx2 = x2b + offset.x + offsetX;
+               let sy2 = y2b + offset.y + offsetY;
+              const shrink = 14;
+              const dx = sx2 - sx1;
+              const dy = sy2 - sy1;
+              const length = Math.hypot(dx, dy);
+              const ux = dx / length;
+              const uy = dy / length;
+              if (hasAtom1) {
+                sx1 += ux * shrink;
+                sy1 += uy * shrink;
+              }
+              if (hasAtom2) {
+                sx2 -= ux * shrink;
+                sy2 -= uy * shrink;
+              }
+              
+              ctx.strokeStyle = '#000000';
+              
+              // Calculate perpendicular vectors for all bond types
+              const perpX = -uy; 
+              const perpY = ux;
+              
+              if (seg.bondOrder === 1) {
+                
+                if (seg.bondType === 'wedge') {
+                  // Full wedge bond rendering
+                  ctx.beginPath();
+                  const wedgeWidth = 8;
+                  const direction = seg.bondDirection || 1;
+                  
+                  if (direction === 1) {
+                    ctx.moveTo(sx1, sy1);
+                    ctx.lineTo(sx2 + perpX * wedgeWidth, sy2 + perpY * wedgeWidth);
+                    ctx.lineTo(sx2 - perpX * wedgeWidth, sy2 - perpY * wedgeWidth);
+                  } else {
+                    ctx.moveTo(sx2, sy2);
+                    ctx.lineTo(sx1 + perpX * wedgeWidth, sy1 + perpY * wedgeWidth);
+                    ctx.lineTo(sx1 - perpX * wedgeWidth, sy1 - perpY * wedgeWidth);
+                  }
+                  
+                  ctx.closePath();
+                  ctx.fillStyle = '#000000';
+                  ctx.fill();
+                } else if (seg.bondType === 'dash') {
+                  // Full dash bond rendering
+                  const minDashWidth = 4;
+                  const maxDashWidth = 13;
+                  const totalDashes = 6;
+                  const direction = seg.bondDirection || 1;
+                  
+                  ctx.strokeStyle = '#000000';
+                  ctx.lineWidth = 3;
+                  ctx.lineCap = 'round';
+                  
+                  for (let i = 0; i < totalDashes; i++) {
+                    const t = i / (totalDashes - 1);
+                    const effectiveT = direction === 1 ? t : 1 - t;
+                    
+                    const dashX = sx1 + (sx2 - sx1) * t;
+                    const dashY = sy1 + (sy2 - sy1) * t;
+                    const dashWidth = minDashWidth + (maxDashWidth - minDashWidth) * effectiveT;
+                    
+                    ctx.beginPath();
+                    ctx.moveTo(dashX - perpX * dashWidth/2, dashY - perpY * dashWidth/2);
+                    ctx.lineTo(dashX + perpX * dashWidth/2, dashY + perpY * dashWidth/2);
+                    ctx.stroke();
+                  }
+                } else if (seg.bondType === 'ambiguous') {
+                  // Full ambiguous bond rendering
+                  ctx.beginPath();
+                  const waveWidth = 4.5;
+                  const waveFrequency = 4.5;
+                  const waveSegments = 100;
+                  const direction = seg.bondDirection || 1;
+                  const phaseShift = direction === 1 ? 0 : Math.PI;
+                  
+                  ctx.strokeStyle = '#000000';
+                  ctx.lineWidth = 2;
+                  
+                  for (let i = 0; i <= waveSegments; i++) {
+                    const t = i / waveSegments;
+                    const x = sx1 + (sx2 - sx1) * t;
+                    const y = sy1 + (sy2 - sy1) * t;
+                    
+                    const wave = Math.sin(t * Math.PI * 2 * waveFrequency + phaseShift) * waveWidth;
+                    const waveX = x + perpX * wave;
+                    const waveY = y + perpY * wave;
+                    
+                    if (i === 0) {
+                      ctx.moveTo(waveX, waveY);
+                    } else {
+                      ctx.lineTo(waveX, waveY);
+                    }
+                  }
+                  
+                  ctx.stroke();
+                } else {
+                  // Regular single bond
+                  const ext = 1;
+                  ctx.beginPath();
+                  ctx.moveTo(sx1 - ux * ext, sy1 - uy * ext);
+                  ctx.lineTo(sx2 + ux * ext, sy2 + uy * ext);
+                  ctx.stroke();
+                }
+              } else if (seg.bondOrder === 2) {
+                // --- FULL Double bond rendering with proper shorter line logic ---
+                function getOtherBonds(vx, vy, excludeIdx) {
+                  return segments.filter((s, idx) => 
+                    idx !== segIdx && 
+                    ((Math.abs(s.x1 - vx) < 0.01 && Math.abs(s.y1 - vy) < 0.01) ||
+                     (Math.abs(s.x2 - vx) < 0.01 && Math.abs(s.y2 - vy) < 0.01)) && 
+                    s.bondOrder > 0
+                  );
+                }
+                
+                const bondsAtStart = getOtherBonds(x1b, y1b, segIdx);
+                const bondsAtEnd = getOtherBonds(x2b, y2b, segIdx);
+                
+                function getBondDirectionVector(bond, fromX, fromY) {
+                  let toX, toY;
+                  if (Math.abs(bond.x1 - fromX) < 0.01 && Math.abs(bond.y1 - fromY) < 0.01) {
+                    toX = bond.x2; toY = bond.y2;
+                  } else {
+                    toX = bond.x1; toY = bond.y1;
+                  }
+                  const dx = toX - fromX;
+                  const dy = toY - fromY;
+                  const len = Math.hypot(dx, dy);
+                  if (len === 0) return [0, 0];
+                  return [dx / len, dy / len];
+                }
+                
+                const dirMain = [x2b - x1b, y2b - y1b];
+                const lenMain = Math.hypot(dirMain[0], dirMain[1]);
+                const dirMainNorm = lenMain === 0 ? [0, 0] : [dirMain[0] / lenMain, dirMain[1] / lenMain];
+                
+                const offset = 5;
+                const ext = 6;
+                
+                const noBondsAtBothEnds = bondsAtStart.length === 0 && bondsAtEnd.length === 0;
+                const shorten = noBondsAtBothEnds ? -2 : -3;
+                
+                let counts = { left: 0, right: 0 };
+                [...bondsAtStart, ...bondsAtEnd].forEach(bond => {
+                    const isStart = bondsAtStart.includes(bond);
+                    const dir = getBondDirectionVector(bond, isStart ? x1b : x2b, isStart ? y1b : y2b);
+                    const cross = perpX * dir[1] - perpY * dir[0];
+                    if (cross < 0) counts.left++;
+                    else if (cross > 0) counts.right++;
+                });
+                
+                let shouldFlipPerpendicular = counts.right > counts.left;
+                let ringInteriorOverride = false;
+                
+                // Ring orientation logic (using seg properties if available)
+                if (seg.isInRing && seg.ringOrientation !== undefined) {
+                  shouldFlipPerpendicular = seg.ringOrientation;
+                  ringInteriorOverride = true;
+                } else if (seg.ringOrientation !== undefined) {
+                  shouldFlipPerpendicular = seg.ringOrientation;
+                }
+                
+                let finalPerpX, finalPerpY;
+                if (seg.isSpecialBond === true) {
+                  if (seg.direction === 'vertical') {
+                    finalPerpX = Math.abs(perpX);
+                    finalPerpY = 0;
+                  } else if (seg.direction === 'topLeftFacing') {
+                    finalPerpX = Math.abs(perpX);
+                    finalPerpY = -Math.abs(perpY);
+                  } else if (seg.direction === 'topRightFacing') {
+                    finalPerpX = -Math.abs(perpX);
+                    finalPerpY = -Math.abs(perpY);
+                  } else {
+                    finalPerpX = shouldFlipPerpendicular ? -perpX : perpX;
+                    finalPerpY = shouldFlipPerpendicular ? -perpY : perpY;
+                  }
+                } else {
+                  finalPerpX = shouldFlipPerpendicular ? -perpX : perpX;
+                  finalPerpY = shouldFlipPerpendicular ? -perpY : perpY;
+                }
+                
+                const hasNeighborsAtStart = bondsAtStart.length > 0;
+                const hasNeighborsAtEnd = bondsAtEnd.length > 0;
+                
+                let shortenStart = hasNeighborsAtStart ? 8 : 0;
+                let shortenEnd = hasNeighborsAtEnd ? 8 : 0;
+                
+                let shorterLineOnPositiveSide = counts.left > counts.right;
+                
+                if (seg.isSpecialBond === true) {
+                  if (seg.direction === 'vertical' || seg.direction === 'topLeftFacing') {
+                    shorterLineOnPositiveSide = true;
+                  } else if (seg.direction === 'topRightFacing') {
+                    shorterLineOnPositiveSide = true;
+                  } else {
+                    shorterLineOnPositiveSide = false;
+                  }
+                } else if (seg.flipSmallerLine) {
+                  shorterLineOnPositiveSide = !shorterLineOnPositiveSide;
+                }
+                
+                const upperVertexUnconnected = seg.upperVertex && segments.filter((s, idx) => 
+                  idx !== segIdx && s.bondOrder > 0 && 
+                  ((Math.abs(s.x1 - seg.upperVertex.x) < 0.01 && Math.abs(s.y1 - seg.upperVertex.y) < 0.01) ||
+                   (Math.abs(s.x2 - seg.upperVertex.x) < 0.01 && Math.abs(s.y2 - seg.upperVertex.y) < 0.01))
+                ).length === 0;
+                
+                const lowerVertexUnconnected = seg.lowerVertex && segments.filter((s, idx) => 
+                  idx !== segIdx && s.bondOrder > 0 && 
+                  ((Math.abs(s.x1 - seg.lowerVertex.x) < 0.01 && Math.abs(s.y1 - seg.lowerVertex.y) < 0.01) ||
+                   (Math.abs(s.x2 - seg.lowerVertex.x) < 0.01 && Math.abs(s.y2 - seg.lowerVertex.y) < 0.01))
+                ).length === 0;
+                
+                if (upperVertexUnconnected || lowerVertexUnconnected) {
+                  // Two equal parallel lines, both offset from center
+                  ctx.beginPath();
+                  ctx.moveTo(sx1 - finalPerpX * offset - ux * (ext + shorten), sy1 - finalPerpY * offset - uy * (ext + shorten));
+                  ctx.lineTo(sx2 - finalPerpX * offset + ux * (ext + shorten), sy2 - finalPerpY * offset + uy * (ext + shorten));
+                  ctx.stroke();
+                  
+                  ctx.beginPath();
+                  ctx.moveTo(sx1 + finalPerpX * offset - ux * (ext + shorten), sy1 + finalPerpY * offset - uy * (ext + shorten));
+                  ctx.lineTo(sx2 + finalPerpX * offset + ux * (ext + shorten), sy2 + finalPerpY * offset + uy * (ext + shorten));
+                  ctx.stroke();
+                } else {
+                  // One shorter line, one longer line
+                  const longerLineShorten = 3;
+                  
+                  if (shorterLineOnPositiveSide) {
+                    // First line (aligned with grid - longer)
+                    ctx.beginPath();
+                    ctx.moveTo(sx1 - ux * (ext + shorten - longerLineShorten), sy1 - uy * (ext + shorten - longerLineShorten));
+                    ctx.lineTo(sx2 + ux * (ext + shorten - longerLineShorten), sy2 + uy * (ext + shorten - longerLineShorten));
+                    ctx.stroke();
+                    
+                    // Second line (positive side offset - shorter)
+                    ctx.beginPath();
+                    ctx.moveTo(sx1 + finalPerpX * offset * 2 - ux * (ext + shorten - shortenStart), sy1 + finalPerpY * offset * 2 - uy * (ext + shorten - shortenStart));
+                    ctx.lineTo(sx2 + finalPerpX * offset * 2 + ux * (ext + shorten - shortenEnd), sy2 + finalPerpY * offset * 2 + uy * (ext + shorten - shortenEnd));
+                    ctx.stroke();
+                  } else {
+                    // First line (negative side offset - shorter)
+                    ctx.beginPath();
+                    ctx.moveTo(sx1 - finalPerpX * offset * 2 - ux * (ext + shorten - shortenStart), sy1 - finalPerpY * offset * 2 - uy * (ext + shorten - shortenStart));
+                    ctx.lineTo(sx2 - finalPerpX * offset * 2 + ux * (ext + shorten - shortenEnd), sy2 - finalPerpY * offset * 2 + uy * (ext + shorten - shortenEnd));
+                    ctx.stroke();
+                    
+                    // Second line (aligned with grid - longer)
+                    ctx.beginPath();
+                    ctx.moveTo(sx1 - ux * (ext + shorten - longerLineShorten), sy1 - uy * (ext + shorten - longerLineShorten));
+                    ctx.lineTo(sx2 + ux * (ext + shorten - longerLineShorten), sy2 + uy * (ext + shorten - longerLineShorten));
+                    ctx.stroke();
+                  }
+                }
+              } else if (seg.bondOrder === 3) {
+                // Full triple bond rendering
+                const offset = 6;
+                
+                // Center line
+                ctx.beginPath();
+                ctx.moveTo(sx1, sy1);
+                ctx.lineTo(sx2, sy2);
+                ctx.stroke();
+                
+                // Top and bottom lines
+                ctx.beginPath();
+                ctx.moveTo(sx1 + perpX * offset, sy1 + perpY * offset);
+                ctx.lineTo(sx2 + perpX * offset, sy2 + perpY * offset);
+                ctx.stroke();
+                
+                ctx.beginPath();
+                ctx.moveTo(sx1 - perpX * offset, sy1 - perpY * offset);
+                ctx.lineTo(sx2 - perpX * offset, sy2 - perpY * offset);
+                ctx.stroke();
+              }
+            }
+          });
+
+          // Draw atoms with same logic as main canvas (full quality)
+          vertices.forEach((v, vIdx) => {
+            const vx = v.x + offset.x + offsetX;
+            const vy = v.y + offset.y + offsetY;
+            const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+            const atom = vertexAtoms[key];
+            
+            if (atom) {
+              ctx.save();
+              let symbol = atom.symbol || atom;
+              
+              // Advanced canvas text rendering with proper subscript support (same as main canvas)
+              const segments = [];
+              let currentSegment = '';
+              let isCurrentNumber = false;
+              
+              for (let i = 0; i < symbol.length; i++) {
+                const char = symbol[i];
+                const isNumber = /[0-9]/.test(char);
+                
+                if (i === 0 || isNumber !== isCurrentNumber) {
+                  if (currentSegment) {
+                    segments.push({ text: currentSegment, isNumber: isCurrentNumber });
+                  }
+                  currentSegment = char;
+                  isCurrentNumber = isNumber;
+                } else {
+                  currentSegment += char;
+                }
+              }
+              
+              if (currentSegment) {
+                segments.push({ text: currentSegment, isNumber: isCurrentNumber });
+              }
+              
+              // Calculate total width for centering
+              let totalWidth = 0;
+              for (const segment of segments) {
+                const font = segment.isNumber ? '300 15px "Roboto", sans-serif' : '300 26px "Roboto", sans-serif';
+                ctx.font = font;
+                const segmentWidth = ctx.measureText(segment.text).width;
+                totalWidth += segmentWidth;
+                
+                // Apply kerning adjustment for numbers following letters
+                if (segment.isNumber && segments.indexOf(segment) > 0) {
+                  const prevSegment = segments[segments.indexOf(segment) - 1];
+                  if (prevSegment && !prevSegment.isNumber) {
+                    const lastChar = prevSegment.text.slice(-1);
+                    if (['C', 'O'].includes(lastChar)) {
+                      totalWidth -= 3;
+                    } else if (['F', 'P', 'S'].includes(lastChar)) {
+                      totalWidth -= 2.8;
+                    } else if (['N', 'E', 'B'].includes(lastChar)) {
+                      totalWidth -= 2.5;
+                    } else if (['H', 'T', 'I', 'L'].includes(lastChar)) {
+                      totalWidth -= 1.7;
+                    } else if (['l', 'i'].includes(lastChar)) {
+                      totalWidth -= 1.3;
+                    } else {
+                      totalWidth -= 2.3;
+                    }
+                  }
+                }
+              }
+              
+              // Render each segment with proper positioning
+              let currentX = vx - totalWidth / 2;
+              const baseYOffset = 2;
+              
+              for (const segment of segments) {
+                const isNumber = segment.isNumber;
+                const font = isNumber ? '40 15px "Inter", "Segoe UI", "Arial", sans-serif' : '40 26px "Inter", "Segoe UI", "Arial", sans-serif';
+                const yOffset = isNumber ? 4 : 0;
+                
+                ctx.font = font;
+                ctx.textAlign = 'left';
+                ctx.textBaseline = 'middle';
+                
+                // Add a thick white outline to make text stand out over bonds
+                ctx.shadowColor = 'rgba(255,255,255,0.85)';
+                ctx.shadowBlur = 4;
+                ctx.lineWidth = 5;
+                ctx.strokeStyle = '#fff';
+                
+                ctx.strokeText(segment.text, currentX, vy + baseYOffset + yOffset);
+                ctx.shadowBlur = 0;
+                
+                ctx.fillStyle = '#1a1a1a';
+                ctx.fillText(segment.text, currentX, vy + baseYOffset + yOffset);
+                
+                // Calculate width and move to next position
+                const segmentWidth = ctx.measureText(segment.text).width;
+                currentX += segmentWidth;
+                
+                // Apply kerning for numbers following letters
+                if (isNumber && segments.indexOf(segment) > 0) {
+                  const prevSegment = segments[segments.indexOf(segment) - 1];
+                  if (prevSegment && !prevSegment.isNumber) {
+                    const lastChar = prevSegment.text.slice(-1);
+                    if (['C', 'O'].includes(lastChar)) {
+                      currentX -= 3;
+                    } else if (['F', 'P', 'S'].includes(lastChar)) {
+                      currentX -= 2.8;
+                    } else if (['N', 'E', 'B'].includes(lastChar)) {
+                      currentX -= 2.5;
+                    } else if (['H', 'T', 'I', 'L'].includes(lastChar)) {
+                      currentX -= 1.7;
+                    } else if (['l', 'i'].includes(lastChar)) {
+                      currentX -= 1.3;
+                    } else {
+                      currentX -= 2.3;
+                    }
+                  }
+                }
+              }
+              
+              ctx.shadowBlur = 0;
+              // Draw charge if present (same as main canvas)
+              if (atom.charge) {
+                ctx.save();
+                
+                const chargeX = vx - 18;
+                const chargeY = vy - 20;
+                
+                // White background circle
+                ctx.beginPath();
+                ctx.arc(chargeX, chargeY, 8, 0, 2 * Math.PI);
+                ctx.fillStyle = '#ffffff';
+                ctx.fill();
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 1;
+                ctx.stroke();
+                
+                // Charge symbol
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillStyle = '#1a1a1a';
+                
+                if (atom.charge > 0) {
+                  ctx.font = '18px "Inter", "Segoe UI", "Arial", sans-serif';
+                  ctx.fillText('+', chargeX + 0.1, chargeY + 1.5);
+                } else {
+                  ctx.font = '24px "Inter", "Segoe UI", "Arial", sans-serif';
+                  ctx.fillText('-', chargeX + 0.4, chargeY - 0.4);
+                }
+                ctx.restore();
+              }
+              
+              // Draw lone pairs if present (same as main canvas)
+              if (atom.lonePairs) {
+                ctx.save();
+                ctx.fillStyle = '#1a1a1a';
+                const n = atom.lonePairs;
+                const dotR = 2.6;
+                const baseRadius = 14;
+                const padding = 6;
+                const r = Math.max(baseRadius, totalWidth / 2 + padding);
+                const verticalOffset = 16;
+                const baseHorizontalOffset = 16;
+                const horizontalOffset = baseHorizontalOffset;
+                
+                // Fixed positions for lone pairs
+                const positions = [
+                  { x: vx, y: vy - verticalOffset },     // top
+                  { x: vx + horizontalOffset, y: vy },   // right
+                  { x: vx, y: vy + verticalOffset },     // bottom
+                  { x: vx - horizontalOffset, y: vy }    // left
+                ];
+                
+                // Draw lone pair dots
+                for (let i = 0; i < n && i < positions.length; i++) {
+                  const pos = positions[i];
+                  
+                  if (n - i === 1) {
+                    // Single dot
+                    ctx.beginPath();
+                    ctx.arc(pos.x, pos.y, dotR, 0, 2 * Math.PI);
+                    ctx.fill();
+                  } else if (n - i >= 2) {
+                    // Two dots
+                    const offset = 5;
+                    if (i === 0 || i === 2) { // top/bottom
+                      ctx.beginPath();
+                      ctx.arc(pos.x - offset, pos.y, dotR, 0, 2 * Math.PI);
+                      ctx.fill();
+                      ctx.beginPath();
+                      ctx.arc(pos.x + offset, pos.y, dotR, 0, 2 * Math.PI);
+                      ctx.fill();
+                    } else { // left/right
+                      ctx.beginPath();
+                      ctx.arc(pos.x, pos.y - offset, dotR, 0, 2 * Math.PI);
+                      ctx.fill();
+                      ctx.beginPath();
+                      ctx.arc(pos.x, pos.y + offset, dotR, 0, 2 * Math.PI);
+                      ctx.fill();
+                    }
+                    i++; // Skip next position since we placed two dots
+                  }
+                }
+                ctx.restore();
+              }
+              
+              ctx.restore();
+            }
+          });
+
+          // Draw arrows with same logic as main canvas (full quality)
+          arrows.forEach((arrow, index) => {
+            const { x1, y1, x2, y2, type } = arrow;
+            const ox1 = x1 + offset.x + offsetX;
+            const oy1 = y1 + offset.y + offsetY;
+            const ox2 = x2 + offset.x + offsetX;
+            const oy2 = y2 + offset.y + offsetY;
+            
+            if (!type || type === 'arrow') {
+              drawArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, '#000', 3, 'export');
+            } else if (type === 'equil') {
+              // Use independent arrow coordinates if available
+              const topX1 = arrow.topX1 !== undefined ? arrow.topX1 + offset.x + offsetX : ox1;
+              const topX2 = arrow.topX2 !== undefined ? arrow.topX2 + offset.x + offsetX : ox2;
+              const bottomX1 = arrow.bottomX1 !== undefined ? arrow.bottomX1 + offset.x + offsetX : ox1;
+              const bottomX2 = arrow.bottomX2 !== undefined ? arrow.bottomX2 + offset.x + offsetX : ox2;
+              
+              // Provide dummy function for export context
+              const dummyHoverCheck = () => ({ index: -1, part: null });
+              
+              drawEquilArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, '#000', 3, 
+                topX1, topX2, bottomX1, bottomX2, index, 'export', dummyHoverCheck, { x: 0, y: 0 });
+            } else if (type.startsWith('curve')) {
+              const peakX = arrow.peakX !== undefined ? arrow.peakX + offset.x + offsetX : null;
+              const peakY = arrow.peakY !== undefined ? arrow.peakY + offset.y + offsetY : null;
+              
+              // Provide dummy hover state for export context
+              const dummyHoverState = { index: -1, part: null };
+              
+              drawCurvedArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, type, '#000', index, peakX, peakY, arrows, 'export', dummyHoverState);
+            }
+          });
+
+          const imageUrl = exportCanvas.toDataURL('image/png', 1.0);
+          
+          // Return metadata with the new approach
+          resolve({
+            imageUrl,
+            width: Math.round(cropWidth),
+            height: Math.round(cropHeight),
+            scaleFactor,
+            exportWidth: Math.round(cropWidth * scaleFactor),
+            exportHeight: Math.round(cropHeight * scaleFactor)
+          });
+        } catch (error) {
+          console.error('🚫 EXPORT RENDERING ERROR:', error.message);
+          console.error('   Stack:', error.stack);
+          resolve(null);
+        }
+      });
+    });
+  }, [vertices, segments, vertexAtoms, arrows, offset]);
+  
+  // Helper function to update vertices and track the last edited vertex
+  const updateVerticesWithTracking = useCallback((updater, trackedVertex = null) => {
+    setVertices(updater);
+    if (trackedVertex) {
+      setLastEditedVertex(trackedVertex);
+    }
+  }, []);
+  
+  // Helper function to set the last edited vertex when a vertex is clicked/modified
+  const trackVertexEdit = useCallback((vertex) => {
+    setLastEditedVertex(vertex);
+  }, []);
 
   // Vertex merging function - merges overlapping vertices
   const mergeOverlappingVertices = useCallback((mergeThreshold = 10) => {
@@ -2007,7 +2797,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         let totalWidth = 0;
         let maxHeight = 0; // Track max height for background rectangle
         for (const segment of segments) {
-          const font = segment.isNumber ? '400 15px "Inter", "Segoe UI", "Arial", sans-serif' : '40 26px "Inter", "Segoe UI", "Arial", sans-serif';
+          const font = segment.isNumber ? '300 15px "Roboto", sans-serif' : '300 26px "Roboto", sans-serif';
           ctx.font = font;
           const segmentWidth = ctx.measureText(segment.text).width;
           totalWidth += segmentWidth;
@@ -4322,6 +5112,9 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
 
   // Paste clipboard contents at given position
   const pasteAtPosition = useCallback((x, y) => {
+    // Capture the vertices before pasting to detect new ones
+    const verticesBeforePaste = vertices.map(v => ({ x: v.x, y: v.y }));
+    
     // Capture state before pasting
     captureState();
     
@@ -4348,11 +5141,29 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
       selectedPreset // Pass selectedPreset to ensure presets are made of off-grid vertices when not snapping
     );
     
+    // Track the pasted molecule by finding one of the new vertices
+    setTimeout(() => {
+      setVertices(currentVertices => {
+        // Find a new vertex that wasn't there before pasting
+        const newVertex = currentVertices.find(v => 
+          !verticesBeforePaste.some(oldV => 
+            Math.abs(oldV.x - v.x) < 0.01 && Math.abs(oldV.y - v.y) < 0.01
+          )
+        );
+        
+        if (newVertex) {
+          trackVertexEdit(newVertex);
+        }
+        
+        return currentVertices; // Don't modify vertices, just track
+      });
+    }, 5); // Small delay to ensure vertices are updated
+    
     // Run small ring off-grid vertex detection after pasting (with small delay to ensure state is updated)
     setTimeout(detectEpoxideVertices, 10);
     // Run vertex merging after pasting
     setTimeout(mergeOverlappingVertices, 15);
-  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState, selectedPreset, detectEpoxideVertices]);
+  }, [clipboard, vertices, vertexAtoms, vertexTypes, segments, arrows, offset, snapAlignment, showSnapPreview, calculateDoubleBondVertices, captureState, selectedPreset, detectEpoxideVertices, trackVertexEdit]);
 
   // Set mode (draw/erase/arrow/text/etc.) - must be defined before setModeAndClearSelection
   const selectMode = (m) => {
@@ -4507,6 +5318,15 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
   // Handle atom input submission when user presses Enter or clicks outside
   const handleAtomInputSubmit = () => {
     if (menuVertexKey) {
+      // Track which vertex was edited by finding it from the key
+      const [x, y] = menuVertexKey.split(',').map(parseFloat);
+      const editedVertex = vertices.find(v => 
+        Math.abs(v.x - x) < 0.01 && Math.abs(v.y - y) < 0.01
+      );
+      if (editedVertex) {
+        trackVertexEdit(editedVertex);
+      }
+      
       // Capture state before modifying atom
       captureState();
       
@@ -4515,8 +5335,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         const { [menuVertexKey]: _, ...rest } = vertexAtoms;
         setVertexAtoms(rest);
       } else {
-        // Otherwise, set the atom with the input value
-        setVertexAtoms(prev => ({ ...prev, [menuVertexKey]: atomInputValue.trim() }));
+        // Store the atom as an object with symbol property for consistency
+        const formula = atomInputValue.trim();
+        console.log('🧪 Storing atom formula:', formula, 'for vertex:', menuVertexKey);
+        setVertexAtoms(prev => ({ 
+          ...prev, 
+          [menuVertexKey]: { symbol: formula }
+        }));
       }
     }
     setShowAtomInput(false);
@@ -4538,7 +5363,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
   // Legacy handler for the pop-up menu (no longer used)
   const handleSelectAtom = (symbol) => {
     if (menuVertexKey) {
-      setVertexAtoms(prev => ({ ...prev, [menuVertexKey]: symbol }));
+      setVertexAtoms(prev => ({ ...prev, [menuVertexKey]: { symbol } }));
     }
     setShowMenu(false);
   };
@@ -4610,6 +5435,11 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
 
     // Handle fourth bond confirmation in draw mode and stereochemistry modes (any click confirms the spinning preview)
     if ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && fourthBondSource && fourthBondPreview) {
+      // Track the source vertex being used for fourth bond creation
+      if (fourthBondSource) {
+        trackVertexEdit(fourthBondSource);
+      }
+      
       // Capture state before creating fourth bond
       captureState();
       
@@ -4686,6 +5516,9 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         }
       }
       if (nearestVertex) {
+        // Track the vertex being used for bond creation
+        trackVertexEdit(nearestVertex);
+        
         // All modes (draw, triple, and stereochemistry) implement freebond functionality with spinnable preview
         // If we don't have a source yet, set this vertex as the source and start spinning preview
         if (!fourthBondSource) {
@@ -4755,6 +5588,14 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
     if (bondPreviews.length > 0 && isDrawOrStereochemistryMode) {
       for (const preview of bondPreviews) {
         if (isPointOnBondPreview(x, y, preview, offset)) {
+          // Track which vertex this bond preview starts from
+          const sourceVertex = vertices.find(v => 
+            Math.abs(v.x - preview.x1) < 0.01 && Math.abs(v.y - preview.y1) < 0.01
+          );
+          if (sourceVertex) {
+            trackVertexEdit(sourceVertex);
+          }
+          
           // Capture state before creating bond
           captureState();
           
@@ -4794,7 +5635,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
           });
           
           if (!vertexExists) {
-            setVertices(prevVertices => [...prevVertices, newVertex]);
+            updateVerticesWithTracking(prevVertices => [...prevVertices, newVertex], newVertex);
             setTimeout(mergeOverlappingVertices, 0);
           }
           
@@ -4809,6 +5650,11 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
     // Handle fourth bond mode (triggered by blue triangle) or draw/stereochemistry mode with source
     if (fourthBondMode || ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && fourthBondSource)) {
       if (fourthBondPreview) {
+        // Track the source vertex being used for fourth bond creation
+        if (fourthBondSource) {
+          trackVertexEdit(fourthBondSource);
+        }
+        
         // Capture state before creating fourth bond
         captureState();
         
@@ -4895,6 +5741,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
       }
       if (foundVertex) {
         const key = `${foundVertex.x.toFixed(2)},${foundVertex.y.toFixed(2)}`;
+        // Track that this vertex was last edited
+        trackVertexEdit(foundVertex);
         // Capture state before modifying charges/lone pairs
         captureState();
         setVertexAtoms(prev => {
@@ -5105,16 +5953,24 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
       
       if (nearestVertex) {
         // Clicking on existing vertex - edit its text
+        trackVertexEdit(nearestVertex);
         const key = `${nearestVertex.x.toFixed(2)},${nearestVertex.y.toFixed(2)}`;
         setMenuVertexKey(key);
         
         // Position the input box at the vertex position
-        setAtomInputPosition({ x: nearestVertex.x + offset.x, y: nearestVertex.y + offset.y });
+        // Account for the toolbar offset: 50px top for tab bar + sidebar width from left
+        const toolbarWidth = Math.min(240, window.innerWidth * 0.22); // min(240px, 22vw)
+        const toolbarHeight = 50; // top offset for tab bar
+        setAtomInputPosition({ 
+          x: nearestVertex.x + offset.x + toolbarWidth, 
+          y: nearestVertex.y + offset.y + toolbarHeight 
+        });
         
         // Set initial value if there's an existing atom
         const existingAtom = vertexAtoms[key];
         if (existingAtom) {
           const symbol = existingAtom.symbol || existingAtom;
+          console.log('📝 Loading existing atom for editing:', symbol, 'from:', existingAtom);
           setAtomInputValue(symbol);
         } else {
           setAtomInputValue('');
@@ -5136,8 +5992,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         // Create a new vertex at the exact click position (on-grid)
         const newVertex = { x: gridX, y: gridY, isOffGrid: false };
         
-        // Add the new vertex
-        setVertices(prevVertices => [...prevVertices, newVertex]);
+        // Add the new vertex and track it
+        updateVerticesWithTracking(prevVertices => [...prevVertices, newVertex], newVertex);
         setTimeout(mergeOverlappingVertices, 0);
         
         // Add the new text mode vertex to freeFloatingVertices set so it can be moved
@@ -5148,7 +6004,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         setMenuVertexKey(newVertexKey);
         
         // Position the input box at the vertex position
-        setAtomInputPosition({ x: x, y: y }); // Use screen coordinates for positioning
+        // Account for the toolbar offset: 50px top for tab bar + sidebar width from left
+        const toolbarWidth = Math.min(240, window.innerWidth * 0.22); // min(240px, 22vw)
+        const toolbarHeight = 50; // top offset for tab bar
+        setAtomInputPosition({ 
+          x: x + toolbarWidth, 
+          y: y + toolbarHeight 
+        });
         
         // Start with empty text
         setAtomInputValue('');
@@ -5198,6 +6060,18 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
         closestIdx = closestBondIdx;
       }
       if (closestIdx !== null) {
+        // Track which vertices are involved in this bond for molecule tracking
+        const segment = segments[closestIdx];
+        if (segment) {
+          // Find and track one of the vertices involved in the bond
+          const v1 = vertices.find(v => 
+            Math.abs(v.x - segment.x1) < 0.01 && Math.abs(v.y - segment.y1) < 0.01
+          );
+          if (v1) {
+            trackVertexEdit(v1);
+          }
+        }
+        
         // Capture state before modifying bonds
         captureState();
         
@@ -5449,15 +6323,24 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
                     flipSmallerLine: false // Default to false
                   };
                   
-                  // Mark both vertices as off-grid when creating new stereochemistry bonds
-                  updatedSegment._needsVertexUpdate = {
-                    newOtherX: seg.x2, // Keep original coordinates
-                    newOtherY: seg.y2,
-                    originalX1: seg.x1,
-                    originalY1: seg.y1,
-                    originalX2: seg.x2,
-                    originalY2: seg.y2
-                  };
+                  // For stereochemistry bonds, respect grid placement if vertices are on grid
+                  // Check if both vertices are on grid positions
+                  const v1OnGrid = findClosestGridVertex(seg.x1, seg.y1, 5) && findClosestGridVertex(seg.x1, seg.y1, 5).distance < 5;
+                  const v2OnGrid = findClosestGridVertex(seg.x2, seg.y2, 5) && findClosestGridVertex(seg.x2, seg.y2, 5).distance < 5;
+                  
+                  // Only mark as needing vertex updates if we need to force off-grid behavior
+                  // If both vertices are on grid, keep them on grid
+                  if (!v1OnGrid || !v2OnGrid) {
+                    updatedSegment._needsVertexUpdate = {
+                      newOtherX: seg.x2, // Keep original coordinates
+                      newOtherY: seg.y2,
+                      originalX1: seg.x1,
+                      originalY1: seg.y1,
+                      originalX2: seg.x2,
+                      originalY2: seg.y2,
+                      respectGrid: true // Flag to indicate we should respect grid positions
+                    };
+                  }
                   
                   return updatedSegment;
                 } else if (seg.bondOrder === 1) {
@@ -5555,25 +6438,52 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
                     return !(isOldMovedVertex && isPositionChanging);
                   });
                 } else {
-                  // Fallback for other cases (stereochemistry bonds, etc.) - mark all vertices as off-grid
-                  newVertices = newVertices.map(vertex => {
-                    const v1Match = Math.abs(vertex.x - update.originalX1) < 0.01 && Math.abs(vertex.y - update.originalY1) < 0.01;
-                    const v2Match = Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01;
-                    const newVertexMatch = Math.abs(vertex.x - update.newOtherX) < 0.01 && Math.abs(vertex.y - update.newOtherY) < 0.01;
-                    
-                    if (v1Match || v2Match || newVertexMatch) {
-                      return { ...vertex, isOffGrid: true };
-                    }
-                    return vertex;
-                  }).filter(vertex => {
-                    // Remove vertices that are being repositioned (if they match the old position that's being moved)
-                    // Only remove if the new position is different from the old position
-                    const isBeingMoved = (
-                      (Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01) &&
-                      (Math.abs(update.originalX2 - update.newOtherX) > 0.01 || Math.abs(update.originalY2 - update.newOtherY) > 0.01)
-                    );
-                    return !isBeingMoved;
-                  });
+                  // Handle stereochemistry bonds and other cases
+                  if (update.respectGrid) {
+                    // For stereochemistry bonds with respectGrid flag, only mark vertices as off-grid if they're not on grid
+                    newVertices = newVertices.map(vertex => {
+                      const v1Match = Math.abs(vertex.x - update.originalX1) < 0.01 && Math.abs(vertex.y - update.originalY1) < 0.01;
+                      const v2Match = Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01;
+                      const newVertexMatch = Math.abs(vertex.x - update.newOtherX) < 0.01 && Math.abs(vertex.y - update.newOtherY) < 0.01;
+                      
+                      if (v1Match || v2Match || newVertexMatch) {
+                        // Check if this vertex is on grid
+                        const closestGrid = findClosestGridVertex(vertex.x, vertex.y, 5);
+                        const isOnGrid = closestGrid && closestGrid.distance < 5;
+                        // Only mark as off-grid if it's not actually on grid
+                        return { ...vertex, isOffGrid: !isOnGrid };
+                      }
+                      return vertex;
+                    }).filter(vertex => {
+                      // Remove vertices that are being repositioned (if they match the old position that's being moved)
+                      // Only remove if the new position is different from the old position
+                      const isBeingMoved = (
+                        (Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01) &&
+                        (Math.abs(update.originalX2 - update.newOtherX) > 0.01 || Math.abs(update.originalY2 - update.newOtherY) > 0.01)
+                      );
+                      return !isBeingMoved;
+                    });
+                  } else {
+                    // Fallback for other cases - mark all vertices as off-grid
+                    newVertices = newVertices.map(vertex => {
+                      const v1Match = Math.abs(vertex.x - update.originalX1) < 0.01 && Math.abs(vertex.y - update.originalY1) < 0.01;
+                      const v2Match = Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01;
+                      const newVertexMatch = Math.abs(vertex.x - update.newOtherX) < 0.01 && Math.abs(vertex.y - update.newOtherY) < 0.01;
+                      
+                      if (v1Match || v2Match || newVertexMatch) {
+                        return { ...vertex, isOffGrid: true };
+                      }
+                      return vertex;
+                    }).filter(vertex => {
+                      // Remove vertices that are being repositioned (if they match the old position that's being moved)
+                      // Only remove if the new position is different from the old position
+                      const isBeingMoved = (
+                        (Math.abs(vertex.x - update.originalX2) < 0.01 && Math.abs(vertex.y - update.originalY2) < 0.01) &&
+                        (Math.abs(update.originalX2 - update.newOtherX) > 0.01 || Math.abs(update.originalY2 - update.newOtherY) > 0.01)
+                      );
+                      return !isBeingMoved;
+                    });
+                  }
                 }
                 
                 // Check if we need to add a new vertex at the new position
@@ -5582,7 +6492,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
                 );
                 
                 if (!newVertexExists) {
-                  newVertices.push({ x: update.newOtherX, y: update.newOtherY, isOffGrid: true });
+                  // For new vertices, check if they should be on grid or off grid
+                  let isOffGrid = true; // Default to off-grid
+                  if (update.respectGrid) {
+                    const closestGrid = findClosestGridVertex(update.newOtherX, update.newOtherY, 5);
+                    isOffGrid = !(closestGrid && closestGrid.distance < 5);
+                  }
+                  newVertices.push({ x: update.newOtherX, y: update.newOtherY, isOffGrid: isOffGrid });
                 }
               });
               
@@ -6773,7 +7689,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'draw' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
@@ -6781,13 +7697,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'draw') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'draw') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Draw Mode"
@@ -6816,7 +7732,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'mouse' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
@@ -6824,13 +7740,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'mouse') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'mouse') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Mouse Mode"
@@ -6859,7 +7775,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'erase' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
@@ -6867,13 +7783,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'erase') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'erase') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Erase Mode"
@@ -6904,7 +7820,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'text' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
@@ -6912,13 +7828,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'text') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'text') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Text Mode"
@@ -6950,7 +7866,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'plus' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
@@ -6958,13 +7874,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'plus') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'plus') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Add Positive Charge"
@@ -6996,7 +7912,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'minus' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
@@ -7004,13 +7920,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'minus') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'minus') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Add Negative Charge"
@@ -7039,7 +7955,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'lone' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               height: 'min(44px, 7vh)',
@@ -7047,13 +7963,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'lone') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'lone') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Add Lone Pair"
@@ -7094,20 +8010,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'arrow' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'arrow') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'arrow') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Arrow"
@@ -7132,20 +8048,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'equil' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'equil') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'equil') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Equilibrium Arrow"
@@ -7179,7 +8095,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'curve2' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7189,13 +8105,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'curve2') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve2') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Counterclockwise semicircle (top left)"
@@ -7212,7 +8128,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'curve1' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7222,13 +8138,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'curve1') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve1') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Clockwise semicircle (top center)"
@@ -7245,7 +8161,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'curve0' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7255,13 +8171,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'curve0') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve0') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Clockwise quarter (top right)"
@@ -7278,7 +8194,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'curve5' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7288,13 +8204,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'curve5') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve5') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Counterclockwise semicircle (bottom left)"
@@ -7311,7 +8227,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'curve4' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7321,13 +8237,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'curve4') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve4') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Clockwise semicircle (bottom center)"
@@ -7344,7 +8260,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'curve3' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               display: 'flex',
@@ -7354,13 +8270,13 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseEnter={(e) => {
               if (mode !== 'curve3') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve3') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Clockwise quarter (bottom right)"
@@ -7393,20 +8309,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'wedge' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'wedge') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'wedge') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Wedge Bond"
@@ -7430,20 +8346,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'dash' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'dash') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'dash') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Dash Bond"
@@ -7476,20 +8392,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'ambiguous' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'ambiguous') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'ambiguous') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Ambiguous Bond"
@@ -7540,20 +8456,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: mode === 'triple' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
             }}
             onMouseEnter={(e) => {
               if (mode !== 'triple') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'triple') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Triple Bond"
@@ -7581,20 +8497,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'benzene' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'benzene') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'benzene') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Benzene Ring"
@@ -7648,20 +8564,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'cyclohexane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclohexane') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclohexane') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Cyclohexane Ring"
@@ -7697,20 +8613,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'cyclopentane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclopentane') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclopentane') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Cyclopentane Ring"
@@ -7744,20 +8660,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'cyclobutane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclobutane') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclobutane') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Cyclobutane Ring"
@@ -7790,20 +8706,20 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               cursor: 'pointer',
               boxShadow: selectedPreset === 'cyclopropane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclopropane') {
                 e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclopropane') {
                 e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title="Cyclopropane Ring"
@@ -7832,7 +8748,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               color: '#666',
@@ -7841,11 +8757,11 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             }}
             onMouseEnter={(e) => {
               e.target.style.backgroundColor = '#dee2e6';
-              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
             }}
             onMouseLeave={(e) => {
               e.target.style.backgroundColor = '#e9ecef';
-              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
             }}
             title="Coming Soon"
           >
@@ -7863,7 +8779,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
               color: '#666',
@@ -7872,11 +8788,11 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             }}
             onMouseEnter={(e) => {
               e.target.style.backgroundColor = '#dee2e6';
-              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
             }}
             onMouseLeave={(e) => {
               e.target.style.backgroundColor = '#e9ecef';
-              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
             }}
             title="Coming Soon"
           >
@@ -7903,7 +8819,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               border: '1px solid #e3e7eb',
               borderRadius: 'calc(min(280px, 25vw) * 0.025)',
               cursor: 'pointer',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
               fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
               fontWeight: 700,
               marginTop: 0,
@@ -7921,7 +8837,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             onMouseLeave={(e) => {
               e.target.style.backgroundColor = '#e9ecef';
               e.target.style.color = '#333';
-              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
             }}
           >
             {/* Taller Trash Can SVG */}
@@ -7948,8 +8864,8 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               borderRadius: 'calc(min(280px, 25vw) * 0.025)',
               cursor: historyIndex <= 0 ? 'not-allowed' : 'pointer',
               boxShadow: historyIndex <= 0 ? 
-                '0 1px 2px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)' :
-                '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+                '0 1px 2px rgba(0,0,0,0.05)' :
+                '0 2px 4px rgba(0,0,0,0.05)',
               fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
               fontWeight: 700,
               marginTop: 0,
@@ -7971,7 +8887,7 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
               if (historyIndex > 0) {
                 e.target.style.backgroundColor = '#e9ecef';
                 e.target.style.color = '#333';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
               }
             }}
             title={`Undo${historyIndex <= 0 ? ' (No actions to undo)' : ''}`}
@@ -8338,31 +9254,292 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
           </div>
         </>
       )}
+
+      {/* Export Popup */}
+      {showExportPopup && exportImageUrl && (
+        <>
+          {/* Overlay for dismissing popup by clicking outside */}
+          <div
+            onClick={() => setShowExportPopup(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 15,
+              backgroundColor: 'rgba(0, 0, 0, 0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              position: 'fixed',
+              top: '50%',
+              left: '50%',
+              transform: 'translate(-50%, -50%)',
+              zIndex: 16,
+              pointerEvents: 'auto',
+              width: '500px',
+              maxWidth: '90vw',
+              backgroundColor: 'white',
+              borderRadius: '12px',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+              border: '2px solid #e0e0e0',
+              padding: '30px',
+              textAlign: 'center',
+              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+            }}
+          >
+            <div style={{
+              fontSize: '24px',
+              fontWeight: '600',
+              color: '#1a1a1a',
+              marginBottom: '20px',
+            }}>
+              Export Molecular Structure
+            </div>
+            
+            {/* Image Preview */}
+            <div style={{
+              marginBottom: '24px',
+              border: '2px solid #e0e0e0',
+              borderRadius: '8px',
+              padding: '16px',
+              backgroundColor: '#f8f9fa',
+            }}>
+              <img
+                src={exportImageUrl}
+                alt="Molecular structure preview"
+                style={{
+                  maxWidth: '100%',
+                  maxHeight: '300px',
+                  objectFit: 'contain',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  backgroundColor: 'white',
+                }}
+              />
+            </div>
+            
+            {/* Action Buttons */}
+            <div style={{
+              display: 'flex',
+              gap: '12px',
+              justifyContent: 'center',
+              marginBottom: '16px',
+            }}>
+              <button
+                onClick={() => {
+                  // Create download link with smart filename
+                  const link = document.createElement('a');
+                  link.href = exportImageUrl;
+                  
+                  const date = new Date().toISOString().split('T')[0];
+                  const sizeInfo = exportMetadata ? `_${exportMetadata.width}x${exportMetadata.height}` : '';
+                  link.download = `molecule_${date}${sizeInfo}.png`;
+                  
+                  document.body.appendChild(link);
+                  link.click();
+                  document.body.removeChild(link);
+                }}
+                style={{
+                  backgroundColor: '#4CAF50',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '12px 20px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#45a049';
+                  e.target.style.transform = 'translateY(-1px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#4CAF50';
+                  e.target.style.transform = 'translateY(0)';
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                  <polyline points="7,10 12,15 17,10"/>
+                  <line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Save as PNG
+              </button>
+              
+              <button
+                onClick={async () => {
+                  try {
+                    // Convert data URL to blob
+                    const response = await fetch(exportImageUrl);
+                    const blob = await response.blob();
+                    
+                    // Copy to clipboard
+                    await navigator.clipboard.write([
+                      new ClipboardItem({ 'image/png': blob })
+                    ]);
+                    
+                    // Show success feedback
+                    const btn = event.target;
+                    const originalText = btn.innerHTML;
+                    btn.innerHTML = '✅ Copied!';
+                    btn.style.backgroundColor = '#28a745';
+                    setTimeout(() => {
+                      btn.innerHTML = originalText;
+                      btn.style.backgroundColor = '#2196F3';
+                    }, 1500);
+                  } catch (error) {
+                    alert('Clipboard copy failed. Please use "Save as PNG" instead.');
+                  }
+                }}
+                style={{
+                  backgroundColor: '#2196F3',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '8px',
+                  padding: '12px 20px',
+                  fontSize: '14px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  transition: 'all 0.2s ease',
+                }}
+                onMouseEnter={(e) => {
+                  e.target.style.backgroundColor = '#1976D2';
+                  e.target.style.transform = 'translateY(-1px)';
+                }}
+                onMouseLeave={(e) => {
+                  e.target.style.backgroundColor = '#2196F3';
+                  e.target.style.transform = 'translateY(0)';
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                </svg>
+                Copy Image
+              </button>
+            </div>
+            
+            <div style={{
+              fontSize: '13px',
+              color: '#666',
+              marginBottom: '20px',
+              lineHeight: '1.4',
+            }}>
+              {exportMetadata ? (
+                <>
+                  Smart cropped: {exportMetadata.width}×{exportMetadata.height}px • {exportMetadata.scaleFactor}x resolution • Clean background
+                </>
+              ) : (
+                'High-quality PNG export • Clean background • No grid lines'
+              )}
+            </div>
+            
+            <button
+              onClick={() => setShowExportPopup(false)}
+              style={{
+                backgroundColor: '#e9ecef',
+                color: '#333',
+                border: '1px solid #e3e7eb',
+                borderRadius: '8px',
+                padding: '10px 20px',
+                fontSize: '14px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                transition: 'background 0.2s',
+              }}
+              onMouseEnter={(e) => e.target.style.backgroundColor = '#dee2e6'}
+              onMouseLeave={(e) => e.target.style.backgroundColor = '#e9ecef'}
+            >
+              Close
+            </button>
+          </div>
+        </>
+      )}
       
-      {/* Bottom Right Toolbar - Export and Grid Breaking Debug */}
+      {/* Bottom Right Toolbar - Export */}
       <div style={{
         position: 'fixed',
-        bottom: '20px',
+        bottom: (() => {
+          // Use active molecule detection instead of checking all molecules
+          const activeMolecule = getActiveMolecule();
+          const hasValidMolecule = activeMolecule && activeMolecule.vertexKeys.length > 0;
+          
+          if (!hasValidMolecule) {
+            // No active molecule - position at bottom with small margin
+            return '20px';
+          } else if (isPropertiesPanelExpanded) {
+            // Expanded panel - position just above the expanded panel
+            // Panel is at bottom: 20px, expanded height varies 190-290px, so position at 20 + 230px + 8px gap = 258px
+            return '178px';
+          } else {
+            // Collapsed pill - position above the small pill (approx 40px tall) + margin
+            return '70px';
+          }
+        })(),
         right: '20px',
         display: 'flex',
         flexDirection: 'column',
         gap: '8px',
         zIndex: 3,
+        transition: 'bottom 0.3s ease'
       }}>
         <button
-          onClick={() => {
-            // Export functionality will be implemented later
+          onClick={async () => {
+            if (vertices.length === 0 && segments.filter(s => s.bondOrder > 0).length === 0 && arrows.length === 0) {
+              alert('Draw a molecule first!');
+              return;
+            }
+            
+            setIsExporting(true);
+            
+            try {
+              // Generate clean canvas image with smart cropping
+              const result = await renderCleanCanvas(2); // 2x resolution for good quality and performance
+              if (result) {
+                if (typeof result === 'string') {
+                  // Legacy format - just image URL
+                  setExportImageUrl(result);
+                  setExportMetadata(null);
+                } else {
+                  // New format with metadata
+                  setExportImageUrl(result.imageUrl);
+                  setExportMetadata(result);
 
+                }
+                setShowExportPopup(true);
+              } else {
+                alert('No content to export!');
+              }
+            } catch (error) {
+              console.error('Export error:', error);
+              alert('Failed to generate export image. Please try again.');
+            } finally {
+              setIsExporting(false);
+            }
           }}
           className="toolbar-button"
           style={{
             width: '80px',
             height: '36px',
-            backgroundColor: '#e9ecef',
+            backgroundColor: isExporting ? '#f8f9fa' : '#e9ecef',
             border: '1px solid #e3e7eb',
             borderRadius: '6px',
-            cursor: 'pointer',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
+            cursor: isExporting ? 'wait' : 'pointer',
+            boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
             outline: 'none',
             padding: 0,
             display: 'flex',
@@ -8370,64 +9547,89 @@ import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnB
             justifyContent: 'center',
             fontSize: '14px',
             fontWeight: '600',
-            color: '#333',
+            color: isExporting ? '#999' : '#333',
             fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+            opacity: isExporting ? 0.7 : 1,
+            transition: 'all 0.2s ease',
           }}
-          title="Export"
+          title={isExporting ? "Generating image..." : "Export"}
+          disabled={isExporting}
           onMouseEnter={(e) => {
-            e.target.style.backgroundColor = '#dee2e6';
-            e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
-          }}
-          onMouseLeave={(e) => {
-            e.target.style.backgroundColor = '#e9ecef';
-            e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
-          }}
-        >
-          Export
-        </button>
-        
-        <button
-          onClick={() => {
-            setGridBreakingEnabled(!gridBreakingEnabled);
-          }}
-          className="toolbar-button"
-          style={{
-            width: '80px',
-            height: '36px',
-            backgroundColor: gridBreakingEnabled ? 'rgb(54,98,227)' : '#e9ecef',
-            border: '1px solid #e3e7eb',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            boxShadow: gridBreakingEnabled ? 
-              '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-              '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)',
-            outline: 'none',
-            padding: 0,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '12px',
-            fontWeight: '600',
-            color: gridBreakingEnabled ? '#fff' : '#333',
-            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-          }}
-          title={`Grid Breaking Debug: ${gridBreakingEnabled ? 'ON' : 'OFF'} (${gridBreakingAnalysis.totalOffGrid} off-grid vertices)`}
-          onMouseEnter={(e) => {
-            if (!gridBreakingEnabled) {
+            if (!isExporting) {
               e.target.style.backgroundColor = '#dee2e6';
-              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.8)';
+              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
             }
           }}
           onMouseLeave={(e) => {
-            if (!gridBreakingEnabled) {
+            if (!isExporting) {
               e.target.style.backgroundColor = '#e9ecef';
-              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05), inset 0 1px 0 rgba(255,255,255,0.8)';
+              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
             }
           }}
         >
-          Debug GB
+          {isExporting ? '...' : 'Export'}
         </button>
       </div>
+
+      {/* Molecular Properties Display */}
+      <MolecularProperties 
+        vertices={(() => {
+          // Get the active molecule (last edited one)
+          const activeMolecule = getActiveMolecule();
+          if (!activeMolecule) return [];
+          
+          // Only include vertices from the active molecule
+          const molecularVertices = [];
+          
+                      activeMolecule.vertexKeys.forEach(vertexKey => {
+              const [x, y] = vertexKey.split(',').map(parseFloat);
+              const vertex = vertices.find(v => 
+                Math.abs(v.x - x) < 0.01 && Math.abs(v.y - y) < 0.01
+              );
+              if (vertex) {
+                const atomInfo = vertexAtoms[vertexKey];
+                // Handle both string and object formats for atom data
+                // Any vertex in the active molecule without an explicit label is carbon
+                let element = 'C'; // Default to carbon for all molecular vertices
+                if (atomInfo) {
+                  element = atomInfo.symbol || atomInfo || 'C';
+                }
+
+                molecularVertices.push({
+                  ...vertex,
+                  id: vertexKey,
+                  element: element
+                });
+              }
+            });
+          
+          return molecularVertices;
+        })()} 
+        bonds={(() => {
+          // Get the active molecule (last edited one)
+          const activeMolecule = getActiveMolecule();
+          if (!activeMolecule) return [];
+          
+          // Only include bonds within the active molecule
+          const activeMoleculeBonds = segments.filter(s => {
+            if (s.bondOrder <= 0) return false;
+            
+            const v1Key = `${s.x1.toFixed(2)},${s.y1.toFixed(2)}`;
+            const v2Key = `${s.x2.toFixed(2)},${s.y2.toFixed(2)}`;
+            
+            return activeMolecule.vertexKeys.includes(v1Key) && 
+                   activeMolecule.vertexKeys.includes(v2Key);
+          });
+          
+          return activeMoleculeBonds.map(s => ({
+            id: s.id || `${s.x1}-${s.y1}-${s.x2}-${s.y2}`,
+            from: `${s.x1.toFixed(2)},${s.y1.toFixed(2)}`,
+            to: `${s.x2.toFixed(2)},${s.y2.toFixed(2)}`,
+            bondType: s.bondOrder === 2 ? 'double' : s.bondOrder === 3 ? 'triple' : 'single'
+          }));
+        })()} 
+        onExpandedChange={setIsPropertiesPanelExpanded}
+      />
     </div>
   );
 };
