@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
-import logoFinal3 from '/logoFinal3.png';
+import logoFinal4 from '/logoFinal4.png';
 import gearIcon from '/gear.png';
 import { detectSixMemberedRings, isSegmentInRing, getRingInteriorDirection, isSpecialRingBond, getRingInfo, detectThreeMemberedRings, detectFourMemberedRings, detectFiveMemberedRings } from './ringDetection.js';
 import { determineVertexTypes, isTopOfHex, getType, getIfTop } from './vertexDetection.js';
@@ -7640,13 +7640,13 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
           >
             <img 
-              src={logoFinal3} 
+              src={logoFinal4} 
               alt="OpenReactions Logo" 
               style={{
                 height: '38px',
                 width: 'auto',
                 pointerEvents: 'none',
-                filter: 'hue-rotate(0deg) saturate(1.6) brightness(0.5)'
+                filter: 'hue-rotate(0deg) saturate(1.8) brightness(.8)'
               }}
               onError={(e) => {
                 console.error('Logo failed to load:', e);
