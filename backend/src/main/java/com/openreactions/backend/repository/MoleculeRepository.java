@@ -8,12 +8,11 @@ import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Optional;
 
 @Repository
 public interface MoleculeRepository extends JpaRepository<Molecule, Long> {
     
-    // Find molecules by name (case-insensitive)
+    // Find molecules by name (case insensitive)
     List<Molecule> findByNameContainingIgnoreCase(String name);
     
     // Find molecules by molecular formula
@@ -22,20 +21,24 @@ public interface MoleculeRepository extends JpaRepository<Molecule, Long> {
     // Find molecules created after a certain date
     List<Molecule> findByCreatedAtAfter(LocalDateTime date);
     
-    // Find molecules with 3D coordinates
-    List<Molecule> findByHas3dCoordinatesTrue();
+    // Find molecules updated after a certain date
+    List<Molecule> findByUpdatedAtAfter(LocalDateTime date);
     
-    // Custom query to find molecules by SMILES pattern
-    @Query("SELECT m FROM Molecule m WHERE m.smilesNotation LIKE %:pattern%")
-    List<Molecule> findBySmilePattern(@Param("pattern") String pattern);
+    // Find molecules ordered by creation date (newest first)
+    List<Molecule> findAllByOrderByCreatedAtDesc();
     
-    // Find molecules by molecular weight range
-    @Query("SELECT m FROM Molecule m WHERE m.molecularWeight BETWEEN :minWeight AND :maxWeight")
-    List<Molecule> findByMolecularWeightBetween(@Param("minWeight") Double minWeight, @Param("maxWeight") Double maxWeight);
+    // Find molecules by atom count (using custom query)
+    @Query("SELECT m FROM Molecule m WHERE SIZE(m.vertices) = :atomCount")
+    List<Molecule> findByAtomCount(@Param("atomCount") int atomCount);
     
-    // Count molecules by formula
-    Long countByMolecularFormula(String formula);
+    // Find molecules by bond count (using custom query)  
+    @Query("SELECT m FROM Molecule m WHERE SIZE(m.segments) = :bondCount")
+    List<Molecule> findByBondCount(@Param("bondCount") int bondCount);
     
-    // Find the most recently created molecules
-    List<Molecule> findTop10ByOrderByCreatedAtDesc();
+    // Find molecules containing specific elements
+    @Query("SELECT DISTINCT m FROM Molecule m JOIN m.vertices v WHERE v.element = :element")
+    List<Molecule> findByElement(@Param("element") String element);
+    
+    // Find molecules with specific canvas dimensions
+    List<Molecule> findByCanvasWidthAndCanvasHeight(Integer width, Integer height);
 } 

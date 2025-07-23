@@ -1,11 +1,11 @@
+com/openreactions/backend/repository/SegmentRepository.class
 com/openreactions/backend/OpenReactionsBackendApplication.class
-com/openreactions/backend/service/MoleculeService.class
-com/openreactions/backend/config/WebConfig.class
 com/openreactions/backend/controller/MoleculeController.class
+com/openreactions/backend/model/Molecule$MoleculeBounds.class
 com/openreactions/backend/model/Molecule.class
-com/openreactions/backend/service/MolecularGeometryService.class
-com/openreactions/backend/service/MolecularGeometryService$1.class
+com/openreactions/backend/config/WebSocketConfig.class
+com/openreactions/backend/repository/VertexRepository.class
+com/openreactions/backend/model/Segment.class
 com/openreactions/backend/model/Vertex.class
-com/openreactions/backend/model/Bond$BondType.class
+com/openreactions/backend/controller/DrawingWebSocketController.class
 com/openreactions/backend/repository/MoleculeRepository.class
-com/openreactions/backend/model/Bond.class

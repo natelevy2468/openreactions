@@ -1,7 +1,12 @@
 package com.openreactions.backend.model;
 
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
 import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
+
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "vertices")
@@ -10,76 +15,176 @@ public class Vertex {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
     
-    private String vertexId; // Original ID from frontend
-    private String element;
+    @NotNull
+    @Column(name = "x_position")
+    private Double x;
     
-    // 2D coordinates (from frontend)
-    private Double x2d;
-    private Double y2d;
+    @NotNull
+    @Column(name = "y_position")
+    private Double y;
     
-    // 3D coordinates (calculated)
-    private Double x3d;
-    private Double y3d;
-    private Double z3d;
+    @Column(name = "element")
+    private String element = "C"; // Default to Carbon
     
-    // Chemical properties
-    private Integer formalCharge = 0;
-    private Integer implicitHydrogens = 0;
-    private Boolean isAromatic = false;
+    @Column(name = "charge")
+    private Integer charge = 0;
+    
+    @Column(name = "radical_electrons")
+    private Integer radicalElectrons = 0;
+    
+    @Column(name = "lone_pairs")
+    private Integer lonePairs = 0;
+    
+    @Column(name = "is_off_grid")
     private Boolean isOffGrid = false;
+    
+    @Column(name = "vertex_type")
+    private String vertexType = "normal"; // normal, junction, terminal, etc.
     
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "molecule_id")
     @JsonBackReference
     private Molecule molecule;
     
-    // Constructors
+    @OneToMany(mappedBy = "startVertex", cascade = CascadeType.ALL)
+    @JsonManagedReference("vertex-start-segments")
+    private Set<Segment> startingSegments = new HashSet<>();
+    
+    @OneToMany(mappedBy = "endVertex", cascade = CascadeType.ALL)
+    @JsonManagedReference("vertex-end-segments")
+    private Set<Segment> endingSegments = new HashSet<>();
+    
+    // Default constructor
     public Vertex() {}
     
-    public Vertex(String vertexId, String element, Double x2d, Double y2d) {
-        this.vertexId = vertexId;
-        this.element = element;
-        this.x2d = x2d;
-        this.y2d = y2d;
+    // Constructor with coordinates
+    public Vertex(Double x, Double y) {
+        this.x = x;
+        this.y = y;
     }
     
-    // Getters and Setters
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    // Constructor with coordinates and element
+    public Vertex(Double x, Double y, String element) {
+        this.x = x;
+        this.y = y;
+        this.element = element;
+    }
     
-    public String getVertexId() { return vertexId; }
-    public void setVertexId(String vertexId) { this.vertexId = vertexId; }
+    // Getters and setters
+    public Long getId() {
+        return id;
+    }
     
-    public String getElement() { return element; }
-    public void setElement(String element) { this.element = element; }
+    public void setId(Long id) {
+        this.id = id;
+    }
     
-    public Double getX2d() { return x2d; }
-    public void setX2d(Double x2d) { this.x2d = x2d; }
+    public Double getX() {
+        return x;
+    }
     
-    public Double getY2d() { return y2d; }
-    public void setY2d(Double y2d) { this.y2d = y2d; }
+    public void setX(Double x) {
+        this.x = x;
+    }
     
-    public Double getX3d() { return x3d; }
-    public void setX3d(Double x3d) { this.x3d = x3d; }
+    public Double getY() {
+        return y;
+    }
     
-    public Double getY3d() { return y3d; }
-    public void setY3d(Double y3d) { this.y3d = y3d; }
+    public void setY(Double y) {
+        this.y = y;
+    }
     
-    public Double getZ3d() { return z3d; }
-    public void setZ3d(Double z3d) { this.z3d = z3d; }
+    public String getElement() {
+        return element;
+    }
     
-    public Integer getFormalCharge() { return formalCharge; }
-    public void setFormalCharge(Integer formalCharge) { this.formalCharge = formalCharge; }
+    public void setElement(String element) {
+        this.element = element;
+    }
     
-    public Integer getImplicitHydrogens() { return implicitHydrogens; }
-    public void setImplicitHydrogens(Integer implicitHydrogens) { this.implicitHydrogens = implicitHydrogens; }
+    public Integer getCharge() {
+        return charge;
+    }
     
-    public Boolean getIsAromatic() { return isAromatic; }
-    public void setIsAromatic(Boolean isAromatic) { this.isAromatic = isAromatic; }
+    public void setCharge(Integer charge) {
+        this.charge = charge;
+    }
     
-    public Boolean getIsOffGrid() { return isOffGrid; }
-    public void setIsOffGrid(Boolean isOffGrid) { this.isOffGrid = isOffGrid; }
+    public Integer getRadicalElectrons() {
+        return radicalElectrons;
+    }
     
-    public Molecule getMolecule() { return molecule; }
-    public void setMolecule(Molecule molecule) { this.molecule = molecule; }
+    public void setRadicalElectrons(Integer radicalElectrons) {
+        this.radicalElectrons = radicalElectrons;
+    }
+    
+    public Integer getLonePairs() {
+        return lonePairs;
+    }
+    
+    public void setLonePairs(Integer lonePairs) {
+        this.lonePairs = lonePairs;
+    }
+    
+    public Boolean getIsOffGrid() {
+        return isOffGrid;
+    }
+    
+    public void setIsOffGrid(Boolean isOffGrid) {
+        this.isOffGrid = isOffGrid;
+    }
+    
+    public String getVertexType() {
+        return vertexType;
+    }
+    
+    public void setVertexType(String vertexType) {
+        this.vertexType = vertexType;
+    }
+    
+    public Molecule getMolecule() {
+        return molecule;
+    }
+    
+    public void setMolecule(Molecule molecule) {
+        this.molecule = molecule;
+    }
+    
+    public Set<Segment> getStartingSegments() {
+        return startingSegments;
+    }
+    
+    public void setStartingSegments(Set<Segment> startingSegments) {
+        this.startingSegments = startingSegments;
+    }
+    
+    public Set<Segment> getEndingSegments() {
+        return endingSegments;
+    }
+    
+    public void setEndingSegments(Set<Segment> endingSegments) {
+        this.endingSegments = endingSegments;
+    }
+    
+    // Helper method to get all connected segments
+    public Set<Segment> getAllConnectedSegments() {
+        Set<Segment> allSegments = new HashSet<>();
+        allSegments.addAll(startingSegments);
+        allSegments.addAll(endingSegments);
+        return allSegments;
+    }
+    
+    // Helper method to get the number of bonds
+    public int getBondCount() {
+        return getAllConnectedSegments().stream()
+                .mapToInt(segment -> segment.getBondOrder())
+                .sum();
+    }
+    
+    @Override
+    public String toString() {
+        return String.format("Vertex{id=%d, x=%.2f, y=%.2f, element='%s', charge=%d}", 
+                id, x, y, element, charge);
+    }
 } 
