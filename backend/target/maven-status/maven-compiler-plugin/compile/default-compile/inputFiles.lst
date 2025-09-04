@@ -1,9 +1,0 @@
-/Users/nathanlevy/Desktop/openreactions/backend/src/main/java/com/openreactions/backend/controller/MoleculeController.java
-/Users/nathanlevy/Desktop/openreactions/backend/src/main/java/com/openreactions/backend/service/MolecularGeometryService.java
-/Users/nathanlevy/Desktop/openreactions/backend/src/main/java/com/openreactions/backend/model/Vertex.java
-/Users/nathanlevy/Desktop/openreactions/backend/src/main/java/com/openreactions/backend/model/Molecule.java
-/Users/nathanlevy/Desktop/openreactions/backend/src/main/java/com/openreactions/backend/model/Bond.java
-/Users/nathanlevy/Desktop/openreactions/backend/src/main/java/com/openreactions/backend/service/MoleculeService.java
-/Users/nathanlevy/Desktop/openreactions/backend/src/main/java/com/openreactions/backend/config/WebConfig.java
-/Users/nathanlevy/Desktop/openreactions/backend/src/main/java/com/openreactions/backend/OpenReactionsBackendApplication.java
-/Users/nathanlevy/Desktop/openreactions/backend/src/main/java/com/openreactions/backend/repository/MoleculeRepository.java
