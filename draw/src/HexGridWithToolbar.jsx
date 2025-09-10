@@ -79,6 +79,51 @@ import MolecularProperties from './components/MolecularProperties.jsx';
   const [atomInputPosition, setAtomInputPosition] = useState({ x: 0, y: 0 });
   const [showAboutPopup, setShowAboutPopup] = useState(false);
   const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(false);
+  
+  // Color scheme function - returns appropriate colors based on dark mode
+  const getColors = useCallback(() => {
+    if (isDarkMode) {
+      return {
+        background: '#1a1a1a',
+        surface: '#2d2d2d',
+        surfaceHover: '#3a3a3a',
+        border: '#404040',
+        text: '#ffffff',
+        textSecondary: '#b3b3b3',
+        textTertiary: '#808080',
+        button: '#404040',
+        buttonHover: '#4a4a4a',
+        buttonActive: 'rgb(54,98,227)', // Keep accent color the same
+        shadow: 'rgba(0,0,0,0.5)',
+        canvasBackground: '#1a1a1a',
+        gridLines: '#333333',
+        bonds: '#ffffff',
+        atoms: '#ffffff'
+      };
+    } else {
+      return {
+        background: '#ffffff',
+        surface: '#ffffff',
+        surfaceHover: '#f5f5f5',
+        border: '#e3e7eb',
+        text: '#1a1a1a',
+        textSecondary: '#666666',
+        textTertiary: '#999999',
+        button: '#e9ecef',
+        buttonHover: '#dee2e6',
+        buttonActive: 'rgb(54,98,227)',
+        shadow: 'rgba(0,0,0,0.1)',
+        canvasBackground: '#ffffff',
+        gridLines: '#ddd',
+        bonds: '#000000',
+        atoms: '#000000'
+      };
+    }
+  }, [isDarkMode]);
+  
+  const colors = getColors();
+  
   // Preset state
   const [selectedPreset, setSelectedPreset] = useState(null); // Track which preset is currently selected ('benzene', 'cyclohexane', etc.)
   // Ring detection state (invisible to user)
@@ -479,18 +524,19 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           ctx.imageSmoothingQuality = 'high';
           ctx.scale(scaleFactor, scaleFactor);
 
-          // Fill white background
+          // Fill white background (export always uses light mode)
           ctx.fillStyle = '#ffffff';
           ctx.fillRect(0, 0, cropWidth, cropHeight);
 
           // Offset all drawing to account for the crop
-          const offsetX = -minX;
-          const offsetY = -minY;
+          // Round coordinates to ensure pixel-perfect alignment with main canvas
+          const offsetX = Math.round(-minX);
+          const offsetY = Math.round(-minY);
 
           // Render content with cropping offset - FULL QUALITY to match main canvas
           // Note: All coordinates are already adjusted for offsetX/offsetY
           
-          // Draw bonds with same logic as main canvas
+          // Draw bonds with same logic as main canvas (export always uses light mode)
           ctx.strokeStyle = '#000000';
           ctx.lineWidth = 3;
           segments.forEach((seg, segIdx) => {
@@ -503,10 +549,10 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                const key2 = `${x2b.toFixed(2)},${y2b.toFixed(2)}`;
                const hasAtom1 = !!vertexAtoms[key1];
                const hasAtom2 = !!vertexAtoms[key2];
-               let sx1 = x1b + offset.x + offsetX;
-               let sy1 = y1b + offset.y + offsetY;
-               let sx2 = x2b + offset.x + offsetX;
-               let sy2 = y2b + offset.y + offsetY;
+               let sx1 = Math.round(x1b + offset.x + offsetX);
+               let sy1 = Math.round(y1b + offset.y + offsetY);
+               let sx2 = Math.round(x2b + offset.x + offsetX);
+               let sy2 = Math.round(y2b + offset.y + offsetY);
               const shrink = 14;
               const dx = sx2 - sx1;
               const dy = sy2 - sy1;
@@ -522,7 +568,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                 sy2 -= uy * shrink;
               }
               
-              ctx.strokeStyle = '#000000';
+              ctx.strokeStyle = '#000000'; // Export always uses light mode
               
               // Calculate perpendicular vectors for all bond types
               const perpX = -uy; 
@@ -547,7 +593,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   }
                   
                   ctx.closePath();
-                  ctx.fillStyle = '#000000';
+                  ctx.fillStyle = '#000000'; // Export always uses light mode
                   ctx.fill();
                 } else if (seg.bondType === 'dash') {
                   // Full dash bond rendering
@@ -556,7 +602,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   const totalDashes = 6;
                   const direction = seg.bondDirection || 1;
                   
-                  ctx.strokeStyle = '#000000';
+                  ctx.strokeStyle = '#000000'; // Export always uses light mode
                   ctx.lineWidth = 3;
                   ctx.lineCap = 'round';
                   
@@ -582,7 +628,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   const direction = seg.bondDirection || 1;
                   const phaseShift = direction === 1 ? 0 : Math.PI;
                   
-                  ctx.strokeStyle = '#000000';
+                  ctx.strokeStyle = '#000000'; // Export always uses light mode
                   ctx.lineWidth = 2;
                   
                   for (let i = 0; i <= waveSegments; i++) {
@@ -787,8 +833,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
 
           // Draw atoms with same logic as main canvas (full quality)
           vertices.forEach((v, vIdx) => {
-            const vx = v.x + offset.x + offsetX;
-            const vy = v.y + offset.y + offsetY;
+            const vx = Math.round(v.x + offset.x + offsetX);
+            const vy = Math.round(v.y + offset.y + offsetY);
             const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
             const atom = vertexAtoms[key];
             
@@ -906,26 +952,26 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               }
               ctx.textBaseline = 'middle';
               
-              // Pass 1: Draw all white strokes
-              ctx.shadowColor = 'rgba(255,255,255,0.85)';
+              // Pass 1: Draw background strokes for contrast
+              ctx.shadowColor = isDarkMode ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)';
               ctx.shadowBlur = 4;
               ctx.lineWidth = 5;
-              ctx.strokeStyle = '#fff';
+              ctx.strokeStyle = isDarkMode ? '#000' : '#fff';
               for (const pos of segmentPositions) {
                 ctx.font = pos.font;
                 ctx.strokeText(pos.text, pos.x, pos.y);
               }
               ctx.shadowBlur = 0;
               
-              // Pass 2: Draw all white fills to fill holes in letters
-              ctx.fillStyle = '#ffffff';
+              // Pass 2: Draw background fills to fill holes in letters
+              ctx.fillStyle = isDarkMode ? '#000000' : '#ffffff';
               for (const pos of segmentPositions) {
                 ctx.font = pos.font;
                 ctx.fillText(pos.text, pos.x, pos.y);
               }
               
               // Pass 3: Draw all final colored text
-              ctx.fillStyle = '#1a1a1a';
+              ctx.fillStyle = colors.atoms;
               for (const pos of segmentPositions) {
                 ctx.font = pos.font;
                 ctx.fillText(pos.text, pos.x, pos.y);
@@ -944,7 +990,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                 ctx.arc(chargeX, chargeY, 8, 0, 2 * Math.PI);
                 ctx.fillStyle = '#ffffff';
                 ctx.fill();
-                ctx.strokeStyle = '#000000';
+                ctx.strokeStyle = '#000000'; // Export always uses light mode
                 ctx.lineWidth = 1;
                 ctx.stroke();
                 
@@ -1024,19 +1070,19 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           // Draw arrows with same logic as main canvas (full quality)
           arrows.forEach((arrow, index) => {
             const { x1, y1, x2, y2, type } = arrow;
-            const ox1 = x1 + offset.x + offsetX;
-            const oy1 = y1 + offset.y + offsetY;
-            const ox2 = x2 + offset.x + offsetX;
-            const oy2 = y2 + offset.y + offsetY;
+            const ox1 = Math.round(x1 + offset.x + offsetX);
+            const oy1 = Math.round(y1 + offset.y + offsetY);
+            const ox2 = Math.round(x2 + offset.x + offsetX);
+            const oy2 = Math.round(y2 + offset.y + offsetY);
             
             if (!type || type === 'arrow') {
               drawArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, '#000', 3, 'export');
             } else if (type === 'equil') {
               // Use independent arrow coordinates if available
-              const topX1 = arrow.topX1 !== undefined ? arrow.topX1 + offset.x + offsetX : ox1;
-              const topX2 = arrow.topX2 !== undefined ? arrow.topX2 + offset.x + offsetX : ox2;
-              const bottomX1 = arrow.bottomX1 !== undefined ? arrow.bottomX1 + offset.x + offsetX : ox1;
-              const bottomX2 = arrow.bottomX2 !== undefined ? arrow.bottomX2 + offset.x + offsetX : ox2;
+              const topX1 = arrow.topX1 !== undefined ? Math.round(arrow.topX1 + offset.x + offsetX) : ox1;
+              const topX2 = arrow.topX2 !== undefined ? Math.round(arrow.topX2 + offset.x + offsetX) : ox2;
+              const bottomX1 = arrow.bottomX1 !== undefined ? Math.round(arrow.bottomX1 + offset.x + offsetX) : ox1;
+              const bottomX2 = arrow.bottomX2 !== undefined ? Math.round(arrow.bottomX2 + offset.x + offsetX) : ox2;
               
               // Provide dummy function for export context
               const dummyHoverCheck = () => ({ index: -1, part: null });
@@ -1044,8 +1090,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               drawEquilArrowOnCanvas(ctx, ox1, oy1, ox2, oy2, '#000', 3, 
                 topX1, topX2, bottomX1, bottomX2, index, 'export', dummyHoverCheck, { x: 0, y: 0 });
             } else if (type.startsWith('curve')) {
-              const peakX = arrow.peakX !== undefined ? arrow.peakX + offset.x + offsetX : null;
-              const peakY = arrow.peakY !== undefined ? arrow.peakY + offset.y + offsetY : null;
+              const peakX = arrow.peakX !== undefined ? Math.round(arrow.peakX + offset.x + offsetX) : null;
+              const peakY = arrow.peakY !== undefined ? Math.round(arrow.peakY + offset.y + offsetY) : null;
               
               // Provide dummy hover state for export context
               const dummyHoverState = { index: -1, part: null };
@@ -1794,6 +1840,10 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    // Fill canvas background with theme color
+    ctx.fillStyle = colors.canvasBackground;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
 
 
@@ -1938,7 +1988,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           ctx.lineTo(sx2, sy2);
           
           // Use consistent highlighting for all modes: darker gray and thicker when hovered
-          ctx.strokeStyle = isHovered ? '#888' : '#e0e0e0';
+          ctx.strokeStyle = isHovered ? (isDarkMode ? '#555' : '#888') : colors.gridLines;
           ctx.lineWidth = isHovered ? 2.5 : 1.5;
           ctx.stroke();
         }
@@ -1961,8 +2011,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     bondPreviews.forEach(preview => {
       if (preview.isVisible) {
         const isHovered = hoverBondPreview?.id === preview.id;
-        // Use white color: lighter when normal, darker when hovered
-        ctx.strokeStyle = isHovered ? '#cccccc' : '#ffffff';
+        // Use appropriate color for bond previews based on theme
+        ctx.strokeStyle = isHovered ? (isDarkMode ? '#666666' : '#cccccc') : (isDarkMode ? '#555555' : '#ffffff');
         ctx.lineWidth = isHovered ? 2.5 : 1.5; // Thicker when hovered, same as grid lines
         
         const sx1 = preview.x1 + offset.x;
@@ -1980,7 +2030,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     ctx.restore();
 
     // Draw bonds (single + double)
-    ctx.strokeStyle = '#000000';
+    ctx.strokeStyle = colors.bonds;
     ctx.lineWidth = 3;
     segments.forEach((seg, segIdx) => {
       if (seg.bondOrder >= 1) {
@@ -1994,7 +2044,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         } else if (isHoveredSingleBond) {
           ctx.strokeStyle = 'rgb(8, 167, 61)'; // Blue highlight for single bonds that can become double bonds
         } else {
-          ctx.strokeStyle = '#000000';
+          ctx.strokeStyle = colors.bonds;
         }
         const x1b = seg.x1;
         const y1b = seg.y1;
@@ -2043,7 +2093,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             ctx.beginPath();
             ctx.moveTo(sx1 - ux * 1, sy1 - uy * 1);
             ctx.lineTo(sx2 + ux * 1, sy2 + uy * 1);
-            ctx.strokeStyle = '#000000';
+            ctx.strokeStyle = colors.bonds;
             ctx.stroke();
             
             // Draw the stereochemistry preview overlay
@@ -2795,11 +2845,11 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           ctx.textAlign = 'center'; // Use center alignment for single atoms
           ctx.textBaseline = 'middle';
           
-          // Pass 1: Draw all white strokes
-          ctx.shadowColor = 'rgba(255,255,255,0.85)';
+          // Pass 1: Draw background strokes for contrast
+          ctx.shadowColor = isDarkMode ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)';
           ctx.shadowBlur = 4;
           ctx.lineWidth = 5;
-          ctx.strokeStyle = '#fff';
+          ctx.strokeStyle = isDarkMode ? '#000' : '#fff';
           for (const pos of segmentPositions) {
             ctx.font = pos.font;
             ctx.strokeText(pos.text, pos.x, pos.y);
@@ -2814,7 +2864,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           }
           
           // Pass 3: Draw all final colored text
-          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : colors.atoms;
           for (const pos of segmentPositions) {
             ctx.font = pos.font;
             ctx.fillText(pos.text, pos.x, pos.y);
@@ -2869,26 +2919,26 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           ctx.textAlign = 'left';
           ctx.textBaseline = 'middle';
           
-          // Pass 1: Draw all white strokes
-          ctx.shadowColor = 'rgba(255,255,255,0.85)';
+          // Pass 1: Draw background strokes for contrast
+          ctx.shadowColor = isDarkMode ? 'rgba(0,0,0,0.85)' : 'rgba(255,255,255,0.85)';
           ctx.shadowBlur = 4;
           ctx.lineWidth = 5;
-          ctx.strokeStyle = '#fff';
+          ctx.strokeStyle = isDarkMode ? '#000' : '#fff';
           for (const pos of segmentPositions) {
             ctx.font = pos.font;
             ctx.strokeText(pos.text, pos.x, pos.y);
           }
           ctx.shadowBlur = 0;
           
-          // Pass 2: Draw all white fills to fill holes in letters
-          ctx.fillStyle = '#ffffff';
+          // Pass 2: Draw background fills to fill holes in letters
+          ctx.fillStyle = isDarkMode ? '#000000' : '#ffffff';
           for (const pos of segmentPositions) {
             ctx.font = pos.font;
             ctx.fillText(pos.text, pos.x, pos.y);
           }
           
           // Pass 3: Draw all final colored text
-          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : colors.atoms;
           for (const pos of segmentPositions) {
             ctx.font = pos.font;
             ctx.fillText(pos.text, pos.x, pos.y);
@@ -2998,7 +3048,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           // Draw charge symbol
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
-          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : colors.atoms;
           
           if (atom.charge > 0) {
             // Plus sign - perfect do not change.
@@ -3016,7 +3066,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
           ctx.save();
           
           // Set color for lone pairs (blue for selected, black for normal)
-          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+          ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : colors.atoms;
           // Define shadow properties but they will be toggled on/off as needed
           ctx.shadowColor = 'rgba(0,0,0,0.85)';
           ctx.shadowBlur = 2;
@@ -3248,7 +3298,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             ctx.arc(cx, cy, dotR, 0, 2 * Math.PI);
             
             // Set color for lone pair dots (blue for selected, black for normal)
-            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : '#1a1a1a';
+            ctx.fillStyle = isSelected ? 'rgb(54,98,227)' : colors.atoms;
             
             ctx.fill();
           }
@@ -4160,7 +4210,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }
             ctx.textBaseline = 'middle';
             
-            // Pass 1: Draw all white strokes
+            // Pass 1: Draw background strokes for contrast (export uses light mode)
             ctx.shadowColor = 'rgba(255,255,255,0.85)';
             ctx.shadowBlur = 4;
             ctx.lineWidth = 5;
@@ -4171,7 +4221,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }
             ctx.shadowBlur = 0;
             
-            // Pass 2: Draw all white fills to fill holes in letters
+            // Pass 2: Draw background fills to fill holes in letters (export uses light mode)
             ctx.fillStyle = '#ffffff';
             for (const pos of segmentPositions) {
               ctx.font = pos.font;
@@ -5628,7 +5678,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     ctx.lineTo(endX - 10, endY - 10);
     ctx.moveTo(endX, endY);
     ctx.lineTo(endX - 10, endY + 10);
-    ctx.strokeStyle = '#000';
+    ctx.strokeStyle = colors.bonds;
     ctx.lineWidth = 2;
     ctx.stroke();
     ctx.restore();
@@ -6472,7 +6522,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     <div style={{
       position: 'fixed',
       inset: 0,
-      background: '#fff',
+      background: colors.background,
       margin: 0,
       padding: 0,
       overflow: 'hidden',
@@ -6656,11 +6706,11 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                 position: 'absolute',
                 right: 0,
                 top: '100%',
-                backgroundColor: 'white',
+                backgroundColor: colors.surface,
                 minWidth: '280px',
-                boxShadow: '0 8px 16px rgba(0,0,0,0.1)',
+                boxShadow: `0 8px 16px ${colors.shadow}`,
                 borderRadius: '8px',
-                border: '1px solid #ddd',
+                border: `1px solid ${colors.border}`,
                 zIndex: 1000,
                 marginTop: '8px',
                 padding: '16px',
@@ -6677,15 +6727,71 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                   height: 0,
                   borderLeft: '8px solid transparent',
                   borderRight: '8px solid transparent',
-                  borderBottom: '8px solid white'
+                  borderBottom: `8px solid ${colors.surface}`
                 }} />
                 <div style={{
-                  color: '#666',
-                  fontSize: '12px',
-                  fontWeight: '500',
-                  marginBottom: '8px'
+                  color: colors.text,
+                  fontSize: '16px',
+                  fontWeight: '600',
+                  marginBottom: '16px'
                 }}>
-                  Settings menu coming soon...
+                  Settings
+                </div>
+                
+                {/* Dark Mode Toggle */}
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '12px 0',
+                  borderBottom: `1px solid ${colors.border}`
+                }}>
+                  <div style={{
+                    display: 'flex',
+                    flexDirection: 'column'
+                  }}>
+                    <span style={{
+                      color: colors.text,
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      marginBottom: '2px'
+                    }}>
+                      Dark Mode
+                    </span>
+                    <span style={{
+                      color: colors.textSecondary,
+                      fontSize: '12px'
+                    }}>
+                      Switch to dark color scheme
+                    </span>
+                  </div>
+                  
+                  <button
+                    onClick={() => setIsDarkMode(!isDarkMode)}
+                    style={{
+                      position: 'relative',
+                      width: '44px',
+                      height: '24px',
+                      backgroundColor: isDarkMode ? colors.buttonActive : colors.button,
+                      borderRadius: '12px',
+                      border: 'none',
+                      cursor: 'pointer',
+                      transition: 'all 0.2s ease',
+                      outline: 'none'
+                    }}
+                  >
+                    <div style={{
+                      position: 'absolute',
+                      top: '2px',
+                      left: isDarkMode ? '22px' : '2px',
+                      width: '20px',
+                      height: '20px',
+                      backgroundColor: '#ffffff',
+                      borderRadius: '50%',
+                      transition: 'all 0.2s ease',
+                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
+                    }} />
+                  </button>
                 </div>
               </div>
             )}
@@ -6713,7 +6819,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         minWidth: '200px',
         maxWidth: '100vw',
         height: '100vh',
-        background: '#f8f9fa',
+        background: colors.surface,
         padding: 'calc(50px + 16px) 16px 16px 16px', // Top padding accounts for tab bar
         boxSizing: 'border-box',
         display: 'flex',
@@ -6725,7 +6831,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         bottom: 0,
         borderRadius: 0, // Remove border radius for full-height sidebar
         boxShadow: 'none', // Remove shadow
-        border: '1px solid #e3e7eb', // Remove border
+        border: `1px solid ${colors.border}`, // Remove border
         borderRight: '1px solidrgb(192, 192, 192)', // Add subtle right border
         zIndex: 2,
         justifyContent: 'flex-start', // Change from space-between to flex-start
@@ -6761,8 +6867,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'draw' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'draw' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'draw' ? 
@@ -6774,20 +6880,20 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'draw') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'draw') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Draw Mode"
           >
             {/* Pencil SVG */}
-            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 24 24" fill="none" stroke={mode === 'draw' ? '#fff' : '#666'} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
+            <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 24 24" fill="none" stroke={mode === 'draw' ? '#fff' : colors.textSecondary} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
               <path d="M12 20h9" />
               <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
             </svg>
@@ -6804,8 +6910,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'mouse' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'mouse' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'mouse' ? 
@@ -6817,22 +6923,22 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'mouse') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'mouse') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Mouse Mode"
           >
             {/* Mouse cursor SVG - bigger with handle */}
             <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
-              <path d="M6 3L12 17L14.5 12.5L19 10.5L6 3Z" fill={mode === 'mouse' ? '#fff' : '#666'} stroke={mode === 'mouse' ? '#fff' : '#666'} strokeWidth="1.2" strokeLinejoin="round"/>
-              <rect x="16.3" y="16" width="3.5" height="7" rx="1.5" fill={mode === 'mouse' ? '#fff' : '#666'} stroke={mode === 'mouse' ? '#fff' : '#666'} strokeWidth="0.5" transform="rotate(316 12.75 18.5)"/>
+              <path d="M6 3L12 17L14.5 12.5L19 10.5L6 3Z" fill={mode === 'mouse' ? '#fff' : colors.textSecondary} stroke={mode === 'mouse' ? '#fff' : colors.textSecondary} strokeWidth="1.2" strokeLinejoin="round"/>
+              <rect x="16.3" y="16" width="3.5" height="7" rx="1.5" fill={mode === 'mouse' ? '#fff' : colors.textSecondary} stroke={mode === 'mouse' ? '#fff' : colors.textSecondary} strokeWidth="0.5" transform="rotate(316 12.75 18.5)"/>
             </svg>
           </button>
         </div>
@@ -6847,8 +6953,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'erase' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'erase' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'erase' ? 
@@ -6860,14 +6966,14 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'erase') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'erase') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Erase Mode"
@@ -6875,8 +6981,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             {/* Minimalist Eraser: Rotated rectangle, bifurcated */}
             <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
               <g transform="rotate(45 13 13)">
-                <rect x="6" y="10" width="14" height="6" rx="1.5" fill={mode === 'erase' ? '#fff' : '#666'} stroke={mode === 'erase' ? '#fff' : '#666'} strokeWidth="1.5"/>
-                <line x1="13" y1="10" x2="13" y2="16" stroke={mode === 'erase' ? '#e9ecef' : '#f8f9fa'} strokeWidth="1.5"/>
+                <rect x="6" y="10" width="14" height="6" rx="1.5" fill={mode === 'erase' ? '#fff' : colors.textSecondary} stroke={mode === 'erase' ? '#fff' : colors.textSecondary} strokeWidth="1.5"/>
+                <line x1="13" y1="10" x2="13" y2="16" stroke={mode === 'erase' ? colors.button : colors.surface} strokeWidth="1.5"/>
               </g>
             </svg>
           </button>
@@ -6892,8 +6998,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'text' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'text' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'text' ? 
@@ -6905,21 +7011,21 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'text') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'text') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Text Mode"
           >
             {/* Text "T" SVG - bigger and Times New Roman font */}
             <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
-              <text x="5" y="18" fill={mode === 'text' ? '#fff' : '#666'} style={{ font: 'bold 20px "Times New Roman", serif' }}>T</text>
+              <text x="5" y="18" fill={mode === 'text' ? '#fff' : colors.textSecondary} style={{ font: 'bold 20px "Times New Roman", serif' }}>T</text>
             </svg>
           </button>
         </div>
@@ -6938,8 +7044,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'plus' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'plus' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'plus' ? 
@@ -6951,22 +7057,22 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'plus') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'plus') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Add Positive Charge"
           >
             {/* Plus sign in circle SVG */}
             <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
-              <circle cx="13" cy="13" r="9" stroke={mode === 'plus' ? '#fff' : '#666'} strokeWidth="2.2" fill="none" />
-              <g stroke={mode === 'plus' ? '#fff' : '#666'} strokeWidth="2.2" strokeLinecap="round">
+              <circle cx="13" cy="13" r="9" stroke={mode === 'plus' ? '#fff' : colors.textSecondary} strokeWidth="2.2" fill="none" />
+              <g stroke={mode === 'plus' ? '#fff' : colors.textSecondary} strokeWidth="2.2" strokeLinecap="round">
                 <line x1="13" y1="8.5" x2="13" y2="17.5" />
                 <line x1="8.5" y1="13" x2="17.5" y2="13" />
               </g>
@@ -6984,8 +7090,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'minus' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'minus' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'minus' ? 
@@ -6997,22 +7103,22 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'minus') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'minus') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Add Negative Charge"
           >
             {/* Minus sign in circle SVG */}
             <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
-              <circle cx="13" cy="13" r="9" stroke={mode === 'minus' ? '#fff' : '#666'} strokeWidth="2.2" fill="none" />
-              <line x1="8.5" y1="13" x2="17.5" y2="13" stroke={mode === 'minus' ? '#fff' : '#666'} strokeWidth="2.2" strokeLinecap="round" />
+              <circle cx="13" cy="13" r="9" stroke={mode === 'minus' ? '#fff' : colors.textSecondary} strokeWidth="2.2" fill="none" />
+              <line x1="8.5" y1="13" x2="17.5" y2="13" stroke={mode === 'minus' ? '#fff' : colors.textSecondary} strokeWidth="2.2" strokeLinecap="round" />
             </svg>
           </button>
           <button
@@ -7027,8 +7133,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'lone' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'lone' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(240px, 22vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'lone' ? 
@@ -7040,22 +7146,22 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'lone') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'lone') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Add Lone Pair"
           >
             {/* Two dots SVG */}
             <svg width="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" height="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" viewBox="0 0 22 22" fill="none" style={{ pointerEvents: 'none' }}>
-              <circle cx="7" cy="11" r="2.6" fill={mode === 'lone' ? '#fff' : '#666'} />
-              <circle cx="15" cy="11" r="2.6" fill={mode === 'lone' ? '#fff' : '#666'} />
+              <circle cx="7" cy="11" r="2.6" fill={mode === 'lone' ? '#fff' : colors.textSecondary} />
+              <circle cx="15" cy="11" r="2.6" fill={mode === 'lone' ? '#fff' : colors.textSecondary} />
             </svg>
           </button>
         </div>
@@ -7083,8 +7189,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'arrow' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'arrow' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'arrow' ? 
@@ -7095,21 +7201,21 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'arrow') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'arrow') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Arrow"
           >
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-              <line x1="6" y1="13" x2="32" y2="13" stroke={mode === 'arrow' ? '#fff' : '#666'} strokeWidth="3" strokeLinecap="round" />
-              <polygon points="32,7 44,13 32,19" fill={mode === 'arrow' ? '#fff' : '#666'} />
+              <line x1="6" y1="13" x2="32" y2="13" stroke={mode === 'arrow' ? '#fff' : colors.textSecondary} strokeWidth="3" strokeLinecap="round" />
+              <polygon points="32,7 44,13 32,19" fill={mode === 'arrow' ? '#fff' : colors.textSecondary} />
             </svg>
           </button>
           <button
@@ -7121,8 +7227,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'equil' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'equil' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'equil' ? 
@@ -7133,25 +7239,25 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'equil') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'equil') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Equilibrium Arrow"
           >
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Top arrow: left to right */}
-              <line x1="8" y1="10" x2="34" y2="10" stroke={mode === 'equil' ? '#fff' : '#666'} strokeWidth="3" strokeLinecap="round" />
-              <polygon points="34,5 44,10 34,15" fill={mode === 'equil' ? '#fff' : '#666'} />
+              <line x1="8" y1="10" x2="34" y2="10" stroke={mode === 'equil' ? '#fff' : colors.textSecondary} strokeWidth="3" strokeLinecap="round" />
+              <polygon points="34,5 44,10 34,15" fill={mode === 'equil' ? '#fff' : colors.textSecondary} />
               {/* Bottom arrow: right to left */}
-              <line x1="38" y1="18" x2="12" y2="18" stroke={mode === 'equil' ? '#fff' : '#666'} strokeWidth="3" strokeLinecap="round" />
-              <polygon points="12,13 2,18 12,23" fill={mode === 'equil' ? '#fff' : '#666'} />
+              <line x1="38" y1="18" x2="12" y2="18" stroke={mode === 'equil' ? '#fff' : colors.textSecondary} strokeWidth="3" strokeLinecap="round" />
+              <polygon points="12,13 2,18 12,23" fill={mode === 'equil' ? '#fff' : colors.textSecondary} />
             </svg>
           </button>
         </div>
@@ -7168,8 +7274,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve2' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'curve2' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve2' ? 
@@ -7183,26 +7289,26 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve2') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve2') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Counterclockwise semicircle (top left)"
-          ><ArrowCCWSemicircleTopLeft mode={mode} /></button>
+          ><ArrowCCWSemicircleTopLeft mode={mode} isDarkMode={isDarkMode} /></button>
           {/* Arrow 2: CW Semicircle (Top Center) */}
           <button
             onClick={() => setModeAndClearSelection('curve1')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve1' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'curve1' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve1' ? 
@@ -7216,26 +7322,26 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve1') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve1') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Clockwise semicircle (top center)"
-          ><ArrowCWSemicircleTopCenter mode={mode} /></button>
+          ><ArrowCWSemicircleTopCenter mode={mode} isDarkMode={isDarkMode} /></button>
           {/* Arrow 3: CW Quarter-circle (Top Right) */}
           <button
             onClick={() => setModeAndClearSelection('curve0')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve0' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'curve0' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve0' ? 
@@ -7249,26 +7355,26 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve0') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve0') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Clockwise quarter (top right)"
-          ><ArrowCWQuarterTopRight mode={mode} /></button>
+          ><ArrowCWQuarterTopRight mode={mode} isDarkMode={isDarkMode} /></button>
           {/* Arrow 4: CCW Semicircle (Bottom Left) */}
           <button
             onClick={() => setModeAndClearSelection('curve5')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve5' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'curve5' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve5' ? 
@@ -7282,26 +7388,26 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve5') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve5') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Counterclockwise semicircle (bottom left)"
-          ><ArrowCCWSemicircleBottomLeft mode={mode} /></button>
+          ><ArrowCCWSemicircleBottomLeft mode={mode} isDarkMode={isDarkMode} /></button>
           {/* Arrow 5: CW Semicircle (Bottom Center) */}
           <button
             onClick={() => setModeAndClearSelection('curve4')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve4' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'curve4' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve4' ? 
@@ -7315,26 +7421,26 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve4') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve4') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Clockwise semicircle (bottom center)"
-          ><ArrowCWSemicircleBottomCenter mode={mode} /></button>
+          ><ArrowCWSemicircleBottomCenter mode={mode} isDarkMode={isDarkMode} /></button>
           {/* Arrow 6: CW Quarter-circle (Bottom Right) */}
           <button
             onClick={() => setModeAndClearSelection('curve3')}
             className="toolbar-button"
             style={{
               height: 'min(44px, 7vh)',
-              backgroundColor: mode === 'curve3' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'curve3' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve3' ? 
@@ -7348,18 +7454,18 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'curve3') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'curve3') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Clockwise quarter (bottom right)"
-          ><ArrowCWQuarterBottomRight mode={mode} /></button>
+          ><ArrowCWQuarterBottomRight mode={mode} isDarkMode={isDarkMode} /></button>
         </div>
         {/* Stereochemistry Section Title */}
         <div style={{
@@ -7383,8 +7489,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'wedge' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'wedge' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'wedge' ? 
@@ -7395,20 +7501,20 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'wedge') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'wedge') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Wedge Bond"
           >
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-              <polygon points="6,13 38,6 38,20" fill={mode === 'wedge' ? '#fff' : '#666'} />
+              <polygon points="6,13 38,6 38,20" fill={mode === 'wedge' ? '#fff' : colors.textSecondary} />
             </svg>
           </button>
           <button
@@ -7420,8 +7526,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'dash' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'dash' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'dash' ? 
@@ -7432,14 +7538,14 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'dash') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'dash') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Dash Bond"
@@ -7447,13 +7553,13 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Updated dash bond icon to better reflect actual appearance with perpendicular lines that get progressively wider */}
               <g transform="translate(6, 13)">
-                <line x1="0" y1="0" x2="32" y2="0" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="1" strokeOpacity="0" />
-                <line x1="3" y1="-1" x2="3" y2="1" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
-                <line x1="9" y1="-2" x2="9" y2="2" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
-                <line x1="15" y1="-3" x2="15" y2="3" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
-                <line x1="21" y1="-4" x2="21" y2="4" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
-                <line x1="27" y1="-5" x2="27" y2="5" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
-                <line x1="33" y1="-6" x2="33" y2="6" stroke={mode === 'dash' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
+                <line x1="0" y1="0" x2="32" y2="0" stroke={mode === 'dash' ? '#fff' : colors.textSecondary} strokeWidth="1" strokeOpacity="0" />
+                <line x1="3" y1="-1" x2="3" y2="1" stroke={mode === 'dash' ? '#fff' : colors.textSecondary} strokeWidth="2" strokeLinecap="round" />
+                <line x1="9" y1="-2" x2="9" y2="2" stroke={mode === 'dash' ? '#fff' : colors.textSecondary} strokeWidth="2" strokeLinecap="round" />
+                <line x1="15" y1="-3" x2="15" y2="3" stroke={mode === 'dash' ? '#fff' : colors.textSecondary} strokeWidth="2" strokeLinecap="round" />
+                <line x1="21" y1="-4" x2="21" y2="4" stroke={mode === 'dash' ? '#fff' : colors.textSecondary} strokeWidth="2" strokeLinecap="round" />
+                <line x1="27" y1="-5" x2="27" y2="5" stroke={mode === 'dash' ? '#fff' : colors.textSecondary} strokeWidth="2" strokeLinecap="round" />
+                <line x1="33" y1="-6" x2="33" y2="6" stroke={mode === 'dash' ? '#fff' : colors.textSecondary} strokeWidth="2" strokeLinecap="round" />
               </g>
             </svg>
           </button>
@@ -7466,8 +7572,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'ambiguous' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'ambiguous' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'ambiguous' ? 
@@ -7478,14 +7584,14 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'ambiguous') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'ambiguous') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Ambiguous Bond"
@@ -7493,7 +7599,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               <path
                 d= " M 4 13 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0"
-                stroke={mode === 'ambiguous' ? '#fff' : '#666'}
+                stroke={mode === 'ambiguous' ? '#fff' : colors.textSecondary}
                 stroke-width="3"
                 fill="none"
                 linecap="round"
@@ -7531,8 +7637,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: mode === 'triple' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: mode === 'triple' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'triple' ? 
@@ -7543,23 +7649,23 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (mode !== 'triple') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (mode !== 'triple') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Triple Bond"
           >
             <svg width="max(24px, min(32px, calc(min(280px, 25vw) * 0.114)))" height="max(14px, min(18px, calc(min(280px, 25vw) * 0.064)))" viewBox="0 0 32 18" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Triple bond - three parallel lines (smaller) */}
-              <line x1="4" y1="5" x2="28" y2="5" stroke={mode === 'triple' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
-              <line x1="4" y1="9" x2="28" y2="9" stroke={mode === 'triple' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
-              <line x1="4" y1="13" x2="28" y2="13" stroke={mode === 'triple' ? '#fff' : '#666'} strokeWidth="2" strokeLinecap="round" />
+              <line x1="4" y1="5" x2="28" y2="5" stroke={mode === 'triple' ? '#fff' : colors.textSecondary} strokeWidth="2" strokeLinecap="round" />
+              <line x1="4" y1="9" x2="28" y2="9" stroke={mode === 'triple' ? '#fff' : colors.textSecondary} strokeWidth="2" strokeLinecap="round" />
+              <line x1="4" y1="13" x2="28" y2="13" stroke={mode === 'triple' ? '#fff' : colors.textSecondary} strokeWidth="2" strokeLinecap="round" />
             </svg>
           </button>
           
@@ -7569,8 +7675,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'benzene' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: selectedPreset === 'benzene' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7584,14 +7690,14 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'benzene') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'benzene') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Benzene Ring"
@@ -7602,30 +7708,30 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               <g transform="translate(60, 60)">
                 {/* Bond 0: Double bond (top-right) */}
                 <g>
-                  <line x1="40" y1="-10" x2="80" y2="12" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
-                  <line x1="42" y1="8" x2="66" y2="22" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="40" y1="-10" x2="80" y2="12" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="42" y1="8" x2="66" y2="22" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 </g>
                 
                 {/* Bond 1: Single bond (right) */}
-                <line x1="80" y1="12" x2="80" y2="60" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="12" x2="80" y2="60" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 
                 {/* Bond 2: Double bond (bottom-right) */}
                 <g>
-                  <line x1="80" y1="60" x2="40" y2="82" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
-                  <line x1="66" y1="52" x2="44" y2="65" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="80" y1="60" x2="40" y2="82" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="66" y1="52" x2="44" y2="65" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 </g>
                 
                 {/* Bond 3: Single bond (bottom-left) */}
-                <line x1="40" y1="82" x2="0" y2="60" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="82" x2="0" y2="60" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 
                 {/* Bond 4: Double bond (left) */}
                 <g>
-                  <line x1="0" y1="60" x2="0" y2="12" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
-                  <line x1="14" y1="50" x2="14" y2="21" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="0" y1="60" x2="0" y2="12" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="14" y1="50" x2="14" y2="21" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 </g>
                 
                 {/* Bond 5: Single bond (top-left) */}
-                <line x1="0" y1="12" x2="40" y2="-10" stroke={selectedPreset === 'benzene' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="12" x2="40" y2="-10" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
               </g>
             </svg>
           </button>
@@ -7636,8 +7742,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclohexane' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: selectedPreset === 'cyclohexane' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7651,14 +7757,14 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclohexane') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclohexane') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Cyclohexane Ring"
@@ -7668,12 +7774,12 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               {/* Cyclohexane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in hexagon pattern */}
-                <line x1="40" y1="-10" x2="80" y2="12" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="80" y1="12" x2="80" y2="60" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="80" y1="60" x2="40" y2="82" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="40" y1="82" x2="0" y2="60" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="0" y1="60" x2="0" y2="12" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="0" y1="12" x2="40" y2="-10" stroke={selectedPreset === 'cyclohexane' ? '#fff' : '#666'} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="-10" x2="80" y2="12" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="12" x2="80" y2="60" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="60" x2="40" y2="82" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="82" x2="0" y2="60" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="60" x2="0" y2="12" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="12" x2="40" y2="-10" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
 
               </g>
             </svg>
@@ -7685,8 +7791,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclopentane' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: selectedPreset === 'cyclopentane' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7700,14 +7806,14 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclopentane') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclopentane') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Cyclopentane Ring"
@@ -7717,11 +7823,11 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               {/* Cyclopentane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in pentagon pattern */}
-                <line x1="40" y1="0" x2="80" y2="30" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="80" y1="30" x2="66" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="66" y1="80" x2="20" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="0" y1="30" x2="16" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="40" y1="0" x2="0" y2="30" stroke={selectedPreset === 'cyclopentane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="40" y1="0" x2="80" y2="30" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="80" y1="30" x2="66" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="66" y1="80" x2="20" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="0" y1="30" x2="16" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="40" y1="0" x2="0" y2="30" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
               </g>
             </svg>
           </button>
@@ -7732,8 +7838,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclobutane' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: selectedPreset === 'cyclobutane' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7747,14 +7853,14 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclobutane') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclobutane') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Cyclobutane Ring"
@@ -7764,10 +7870,10 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               {/* Cyclobutane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in square pattern */}
-                <line x1="0" y1="0" x2="80" y2="0" stroke={selectedPreset === 'cyclobutane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="80" y1="0" x2="80" y2="80" stroke={selectedPreset === 'cyclobutane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="80" y1="80" x2="0" y2="80" stroke={selectedPreset === 'cyclobutane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="0" y1="80" x2="0" y2="0" stroke={selectedPreset === 'cyclobutane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="0" x2="80" y2="0" stroke={selectedPreset === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="0" x2="80" y2="80" stroke={selectedPreset === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="80" x2="0" y2="80" stroke={selectedPreset === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="0" y2="0" stroke={selectedPreset === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
               </g>
             </svg>
           </button>
@@ -7778,8 +7884,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclopropane' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: selectedPreset === 'cyclopropane' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
@@ -7793,14 +7899,14 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseEnter={(e) => {
               if (selectedPreset !== 'cyclopropane') {
-                e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
               if (selectedPreset !== 'cyclopropane') {
-                e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title="Cyclopropane Ring"
@@ -7810,50 +7916,38 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               {/* Cyclopropane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in triangle pattern */}
-                <line x1="80" y1="80" x2="40" y2="0" stroke={selectedPreset === 'cyclopropane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="0" y1="80" x2="80" y2="80" stroke={selectedPreset === 'cyclopropane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="0" y1="80" x2="40" y2="0" stroke={selectedPreset === 'cyclopropane' ? '#fff' : '#666'} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="80" x2="40" y2="0" stroke={selectedPreset === 'cyclopropane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="80" y2="80" stroke={selectedPreset === 'cyclopropane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="40" y2="0" stroke={selectedPreset === 'cyclopropane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
               </g>
             </svg>
           </button>
           
-          {/* Chair Conformation preset button */}
+          {/* Chair Conformation preset button - DISABLED */}
           <button
-            onClick={toggleChairPreset}
+            onClick={() => {}} // Disabled - does nothing
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'chair' ? 'rgb(54,98,227)' : '#e9ecef',
-              border: '1px solid #e3e7eb',
+              backgroundColor: '#e9ecef', // Always disabled appearance
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: 'pointer',
-              boxShadow: selectedPreset === 'chair' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
-                '0 2px 4px rgba(0,0,0,0.05)',
+              cursor: 'not-allowed', // Show disabled cursor
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
             }}
-            onMouseEnter={(e) => {
-              if (selectedPreset !== 'chair') {
-              e.target.style.backgroundColor = '#dee2e6';
-                e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (selectedPreset !== 'chair') {
-              e.target.style.backgroundColor = '#e9ecef';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
-              }
-            }}
-            title="Chair Conformation"
+            onMouseEnter={() => {}} // No hover effect - disabled
+            onMouseLeave={() => {}} // No hover effect - disabled
+            title="Chair Conformation (Disabled)"
           >
             {/* Chair conformation SVG preview */}
             <svg width="32" height="32" viewBox="0 0 16 16" fill="none" style={{ pointerEvents: 'none' }}>
               {/* Proper chair with 3 sets of parallel lines */}
-              <g stroke={selectedPreset === 'chair' ? '#fff' : '#666'} strokeWidth="1.4" fill="none" strokeLinecap="round">
+              <g stroke="#666" strokeWidth="1.4" fill="none" strokeLinecap="round"> {/* Always gray - disabled */}
                 {/* Chair shape: bottom flat, then up-slants, top flat, then down-slants */}
                 <path d="M3 11 L9 11 L12 7 L10 4 L4 4 L1 7 Z"/>
               </g>
@@ -7868,7 +7962,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               alignItems: 'center',
               justifyContent: 'center',
               backgroundColor: '#e9ecef',
-              border: '1px solid #e3e7eb',
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
@@ -7908,7 +8002,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               padding: 'calc(min(280px, 25vw) * 0.019) 0',
               backgroundColor: '#e9ecef',
               color: '#333',
-              border: '1px solid #e3e7eb',
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.025)',
               cursor: 'pointer',
               boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
@@ -7952,7 +8046,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               padding: 'calc(min(280px, 25vw) * 0.019) 0',
               backgroundColor: historyIndex <= 0 ? '#f8f9fa' : '#e9ecef',
               color: historyIndex <= 0 ? '#999' : '#333',
-              border: '1px solid #e3e7eb',
+              border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.025)',
               cursor: historyIndex <= 0 ? 'not-allowed' : 'pointer',
               boxShadow: historyIndex <= 0 ? 
@@ -7977,9 +8071,9 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             }}
             onMouseLeave={(e) => {
               if (historyIndex > 0) {
-                e.target.style.backgroundColor = '#e9ecef';
+                e.target.style.backgroundColor = colors.button;
                 e.target.style.color = '#333';
-                e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
             title={`Undo${historyIndex <= 0 ? ' (No actions to undo)' : ''}`}
@@ -8104,7 +8198,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                 width: '70%',
                 height: '100%',
                 padding: 0,
-                border: '1px solid #e3e7eb',
+                border: `1px solid ${colors.border}`,
                 background: 'transparent',
                 color: 'transparent',
                 caretColor: 'black', // Only the caret is visible
@@ -8186,7 +8280,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               zIndex: 4,
               backgroundColor: 'rgb(54, 98, 227)',
               color: 'white',
-              border: '1px solid #e3e7eb',
+              border: `1px solid ${colors.border}`,
               borderRadius: '6px',
               padding: '6px 12px',
               fontSize: '13px',
@@ -8329,7 +8423,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                 marginTop: '25px',
                 backgroundColor: '#e9ecef',
                 color: 'white',
-                border: '1px solid #e3e7eb',
+                border: `1px solid ${colors.border}`,
                 borderRadius: '8px',
                 padding: '10px 20px',
                 fontSize: '14px',
@@ -8544,7 +8638,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
               style={{
                 backgroundColor: '#e9ecef',
                 color: '#333',
-                border: '1px solid #e3e7eb',
+                border: `1px solid ${colors.border}`,
                 borderRadius: '8px',
                 padding: '10px 20px',
                 fontSize: '14px',
@@ -8628,7 +8722,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             width: '80px',
             height: '36px',
             backgroundColor: isExporting ? '#f8f9fa' : '#e9ecef',
-            border: '1px solid #e3e7eb',
+            border: `1px solid ${colors.border}`,
             borderRadius: '6px',
             cursor: isExporting ? 'wait' : 'pointer',
             boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
@@ -8748,10 +8842,10 @@ function arrowheadPoints(x, y, angle, size = ARROWHEAD_SIZE) {
   return `${x},${y} ${x2},${y2} ${x3},${y3}`;
 }
 // 1. Counterclockwise Semicircle (Top Left)
-function ArrowCCWSemicircleTopLeft({ mode }) {
+function ArrowCCWSemicircleTopLeft({ mode, isDarkMode = false }) {
   // manually made
   const angle = -3 * Math.PI / 4;
-  const color = mode === 'curve2' ? '#fff' : '#666';
+  const color = mode === 'curve2' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
   return (
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <path d="M14 34 A14 14 0 1 1 36 20" stroke={color} 
@@ -8763,10 +8857,10 @@ function ArrowCCWSemicircleTopLeft({ mode }) {
   );
 }
 // 2. Clockwise Semicircle (Top Center)
-function ArrowCWSemicircleTopCenter({ mode }) {
+function ArrowCWSemicircleTopCenter({ mode, isDarkMode = false }) {
   // manually made
   const angle = -3 * Math.PI / 4;
-  const color = mode === 'curve1' ? '#fff' : '#666';
+  const color = mode === 'curve1' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
   return (
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <path d="M12 24 A12 12 0 0 1 36 24" stroke={color}
@@ -8778,10 +8872,10 @@ function ArrowCWSemicircleTopCenter({ mode }) {
   );
 }
 // 3. Clockwise Quarter-circle (Top Right)
-function ArrowCWQuarterTopRight({ mode }) {
+function ArrowCWQuarterTopRight({ mode, isDarkMode = false }) {
   // manually made
   const angle = -3 * Math.PI / 4;
-  const color = mode === 'curve0' ? '#fff' : '#666';
+  const color = mode === 'curve0' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
   return (
     <svg width="48" height="48" viewBox="0 6 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <path d="M10 32 A22 22 0 0 1 38 32" stroke={color}
@@ -8794,8 +8888,8 @@ function ArrowCWQuarterTopRight({ mode }) {
   );
 }
 // 4. Counterclockwise Semicircle (Bottom Left)
-function ArrowCCWSemicircleBottomLeft({ mode }) {
-  const color = mode === 'curve5' ? '#fff' : '#666';
+function ArrowCCWSemicircleBottomLeft({ mode, isDarkMode = false }) {
+  const color = mode === 'curve5' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
   return (
     <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <g transform="scale(1,-1) translate(0,-45)">
@@ -8810,11 +8904,11 @@ function ArrowCCWSemicircleBottomLeft({ mode }) {
   );
 }
 // 5. Clockwise Semicircle (Bottom Center)
-function ArrowCWSemicircleBottomCenter({ mode }) {
+function ArrowCWSemicircleBottomCenter({ mode, isDarkMode = false }) {
   // Arc: start at (10,34), end at (34,10), r=16, large-arc, sweep=1
   // Arrowhead at (34,10), tangent is -45deg
   const angle = -Math.PI/4;
-  const color = mode === 'curve4' ? '#fff' : '#666';
+  const color = mode === 'curve4' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
   return (
     <svg width="48" height="48" viewBox="0 4 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       {/* Arc remains the same */}
@@ -8829,11 +8923,11 @@ function ArrowCWSemicircleBottomCenter({ mode }) {
   );
 }
 // 6. Clockwise Quarter-circle (Bottom Right)
-function ArrowCWQuarterBottomRight({ mode }) {
+function ArrowCWQuarterBottomRight({ mode, isDarkMode = false }) {
   // Arc: start at (10,22), end at (34,34), r=12, large-arc=0, sweep=1
   // Arrowhead at (34,34), tangent is 30deg
   const angle = Math.atan2(12,24); // 26.56deg
-  const color = mode === 'curve3' ? '#fff' : '#666';
+  const color = mode === 'curve3' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
   return (
     <svg width="48" height="48" viewBox="0 15 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
       <path d="M10 38 A22 22 0 0 0 38 38"
