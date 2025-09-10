@@ -1,0 +1,10 @@
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/config/WebSocketConfig.java
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/controller/DrawingWebSocketController.java
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/repository/SegmentRepository.java
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/repository/VertexRepository.java
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/model/Segment.java
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/model/Molecule.java
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/controller/MoleculeController.java
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/repository/MoleculeRepository.java
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/model/Vertex.java
+/Users/nathanlevy/Desktop/openreactions copy/backend/src/main/java/com/openreactions/backend/OpenReactionsBackendApplication.java
