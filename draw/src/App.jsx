@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import './App.css'
-import UserInterface from './UserInterface';
+import HexGridWithToolbar from './HexGridWithToolbar';
 
 function App() {
-  return <UserInterface />;
+  return <HexGridWithToolbar />;
 }
 
 export default App
