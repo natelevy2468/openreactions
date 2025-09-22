@@ -5595,18 +5595,47 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     setShowMenu(false);
   };
 
+  // OPTIMIZATION: Cache ring detection with smart invalidation
+  // Create hash of vertex positions for dependency tracking
+  const vertexPositionHash = useMemo(() => {
+    if (vertices.length === 0) return '';
+    return vertices.map(v => `${v.x.toFixed(2)},${v.y.toFixed(2)}`).join('|');
+  }, [vertices]);
+  
+  // Create hash of segment endpoints for dependency tracking
+  const segmentEndpointHash = useMemo(() => {
+    if (segments.length === 0) return '';
+    return segments.map(s => `${s.x1.toFixed(2)},${s.y1.toFixed(2)}-${s.x2.toFixed(2)},${s.y2.toFixed(2)}`).join('|');
+  }, [segments]);
+  
+  // Create hash of vertex atoms for dependency tracking
+  const vertexAtomsHash = useMemo(() => {
+    return Object.entries(vertexAtoms).map(([key, atom]) => `${key}:${atom}`).join('|');
+  }, [vertexAtoms]);
+  
+  // Cache ring detection results with smart invalidation
+  const cachedRingInfo = useMemo(() => {
+    console.log('Ring detection cache miss - recalculating');
+    return getRingInfo(vertices, segments, vertexAtoms);
+  }, [
+    vertices.length,
+    segments.length,
+    vertexPositionHash,
+    segmentEndpointHash,
+    vertexAtomsHash
+  ]);
+  
   // Function to detect rings whenever molecules change
   const detectRings = useCallback(() => {
-    const ringInfo = getRingInfo(vertices, segments, vertexAtoms);
-    setDetectedRings(ringInfo.rings);
+    setDetectedRings(cachedRingInfo.rings);
     
     // For debugging (can be removed in production)
-    if (ringInfo.rings.length > 0) {
+    if (cachedRingInfo.rings.length > 0) {
       console.log('🔍 Rings detected, running epoxide detection...');
       // Run epoxide detection after rings are detected
       setTimeout(detectEpoxideVertices, 0);
     }
-  }, [vertices, segments, vertexAtoms, detectEpoxideVertices]);
+  }, [cachedRingInfo, detectEpoxideVertices]);
 
   // Function to analyze grid breaking whenever molecules change
   const analyzeGridBreakingState = useCallback(() => {
@@ -6048,61 +6077,75 @@ import MolecularProperties from './components/MolecularProperties.jsx';
       setSelectionEnd
     );
   };
+  // OPTIMIZATION: Throttle utility for mouse events
+  const throttleRef = useRef({});
+  const throttle = useCallback((key, func, limit) => {
+    if (!throttleRef.current[key]) {
+      func();
+      throttleRef.current[key] = true;
+      setTimeout(() => {
+        throttleRef.current[key] = false;
+      }, limit);
+    }
+  }, []);
+  
   const handleMouseMove = event => {
-    handleMouseMoveUtil(
-      event,
-      canvasRef,
-      isPasteMode,
-      isDragging,
-      fourthBondMode,
-      fourthBondSource,
-      mode,
-      draggingArrowIndex,
-      draggingVertex,
-      isSelecting,
-      clipboard,
-      showSnapPreview,
-      hexRadius,
-      offset,
-      dragStart,
-      dragArrowOffset,
-      arrows,
-      vertices,
-      vertexThreshold,
-      lineThreshold,
-      freeFloatingVertices,
-      segments,
-      vertexAtoms,
-      bondPreviews,
-      isPointOnBondPreview,
-      // Setters
-      setPastePreviewPosition,
-      calculateGridAlignment,
-      calculateBondAlignment,
-      setSnapAlignment,
-      setFourthBondPreview,
-      setDidDrag,
-      setArrows,
-      setDragStart,
-      setVertices,
-      setFreeFloatingVertices,
-      setSegments,
-      setVertexAtoms,
-      setDraggingVertex,
-      setSelectionEnd,
-      setOffset,
-      setHoverVertex,
-      setHoverSegmentIndex,
-      setHoverCurvedArrow,
-      isPointInArrowCircle,
-      isPointInCurvedArrowCircle,
-      distanceToVertex,
-      isPointInVertexBox
-    );
-
-    // Enhanced hover priority system for interactive modes: vertex > bond preview > grid line > nearest vertex fallback
-    const isInteractiveMode = (mode === 'draw' || mode === 'triple' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && 
-                             !isDragging && !isSelecting && !isPasteMode && !fourthBondMode && !draggingVertex && !draggingArrowIndex;
+    // OPTIMIZATION: Throttle mouse move to ~60fps (16ms)
+    throttle('mouseMove', () => {
+      handleMouseMoveUtil(
+        event,
+        canvasRef,
+        isPasteMode,
+        isDragging,
+        fourthBondMode,
+        fourthBondSource,
+        mode,
+        draggingArrowIndex,
+        draggingVertex,
+        isSelecting,
+        clipboard,
+        showSnapPreview,
+        hexRadius,
+        offset,
+        dragStart,
+        dragArrowOffset,
+        arrows,
+        vertices,
+        vertexThreshold,
+        lineThreshold,
+        freeFloatingVertices,
+        segments,
+        vertexAtoms,
+        bondPreviews,
+        isPointOnBondPreview,
+        // Setters
+        setPastePreviewPosition,
+        calculateGridAlignment,
+        calculateBondAlignment,
+        setSnapAlignment,
+        setFourthBondPreview,
+        setDidDrag,
+        setArrows,
+        setDragStart,
+        setVertices,
+        setFreeFloatingVertices,
+        setSegments,
+        setVertexAtoms,
+        setDraggingVertex,
+        setSelectionEnd,
+        setOffset,
+        setHoverVertex,
+        setHoverSegmentIndex,
+        setHoverCurvedArrow,
+        isPointInArrowCircle,
+        isPointInCurvedArrowCircle,
+        distanceToVertex,
+        isPointInVertexBox
+      );
+      
+      // Enhanced hover priority system for interactive modes: vertex > bond preview > grid line > nearest vertex fallback
+      const isInteractiveMode = (mode === 'draw' || mode === 'triple' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && 
+                               !isDragging && !isSelecting && !isPasteMode && !fourthBondMode && !draggingVertex && !draggingArrowIndex;
     
     if (isInteractiveMode) {
       const canvas = canvasRef.current;
@@ -6223,6 +6266,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         setHoverBondPreview(hoveredPreview);
       }
     }
+    }, 16); // Throttle to ~60fps
   };
   const handleMouseUp = event => {
     // Don't handle mouse up events in paste mode
