@@ -455,7 +455,99 @@ export function handleClickCore(event, state, actions) {
       return;
     }
     
-    // Erase any bond or atom under cursor
+    // Check if we're clicking on a vertex first (for atom/charge/lone pair removal)
+    let atomErased = false;
+    for (let v of vertices) {
+      const dist = distanceToVertex(x, y, v.x, v.y);
+      if (dist <= vertexThreshold) {
+        const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+        const atom = vertexAtoms[key];
+        
+        if (atom) {
+          // Capture state before erasing
+          captureState();
+          
+          // Check if we need to remove the entire vertex (off-grid with no bonds)
+          if (v.isOffGrid === true) {
+            // Count connected bonds
+            const connectedBonds = segments.filter(seg => 
+              seg.bondOrder > 0 && (
+                (Math.abs(seg.x1 - v.x) < 0.01 && Math.abs(seg.y1 - v.y) < 0.01) ||
+                (Math.abs(seg.x2 - v.x) < 0.01 && Math.abs(seg.y2 - v.y) < 0.01)
+              )
+            );
+            
+            if (connectedBonds.length === 0) {
+              // Remove the off-grid vertex entirely
+              setVertices(prevVertices => 
+                prevVertices.filter(vertex => 
+                  !(Math.abs(vertex.x - v.x) < 0.01 && Math.abs(vertex.y - v.y) < 0.01)
+                )
+              );
+              
+              // Remove from free floating vertices set
+              setFreeFloatingVertices(prevSet => {
+                const newSet = new Set(prevSet);
+                newSet.delete(key);
+                return newSet;
+              });
+              
+              // Clear bond previews to force regeneration
+              setBondPreviews([]);
+              setHoverBondPreview(null);
+            }
+          }
+          
+          // Remove atom label, charges, and lone pairs
+          const { [key]: _, ...rest } = vertexAtoms;
+          setVertexAtoms(rest);
+          atomErased = true;
+          return;
+        }
+        
+        // If no atom but vertex exists, check for off-grid vertex removal
+        if (v.isOffGrid === true) {
+          // Count connected bonds
+          const connectedBonds = segments.filter(seg => 
+            seg.bondOrder > 0 && (
+              (Math.abs(seg.x1 - v.x) < 0.01 && Math.abs(seg.y1 - v.y) < 0.01) ||
+              (Math.abs(seg.x2 - v.x) < 0.01 && Math.abs(seg.y2 - v.y) < 0.01)
+            )
+          );
+          
+          if (connectedBonds.length === 0) {
+            // Capture state before erasing vertex
+            captureState();
+            
+            // Remove the off-grid vertex entirely
+            setVertices(prevVertices => 
+              prevVertices.filter(vertex => 
+                !(Math.abs(vertex.x - v.x) < 0.01 && Math.abs(vertex.y - v.y) < 0.01)
+              )
+            );
+            
+            // Remove from free floating vertices set
+            const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+            setFreeFloatingVertices(prevSet => {
+              const newSet = new Set(prevSet);
+              newSet.delete(key);
+              return newSet;
+            });
+            
+            // Clear bond previews to force regeneration
+            setBondPreviews([]);
+            setHoverBondPreview(null);
+            atomErased = true;
+            return;
+          }
+        }
+      }
+    }
+    
+    // If we erased an atom/vertex, don't proceed to bond erasure
+    if (atomErased) return;
+    
+    // Erase any bond under cursor
     let bondRemoved = false;
     let removedSegment = null;
     const newSegments = segments.map(seg => {
@@ -492,6 +584,7 @@ export function handleClickCore(event, state, actions) {
       }
       return seg;
     });
+    
     if (bondRemoved) {
       // Capture state before erasing bond
       captureState();
@@ -565,20 +658,6 @@ export function handleClickCore(event, state, actions) {
       setBondPreviews([]);
       setHoverBondPreview(null);
       return;
-    }
-    // If no bond, erase atom
-    for (let v of vertices) {
-      const dist = distanceToVertex(x, y, v.x, v.y);
-      if (dist <= vertexThreshold) {
-        const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
-        if (vertexAtoms[key]) {
-          // Capture state before erasing atom
-          captureState();
-          const { [key]: _, ...rest } = vertexAtoms;
-          setVertexAtoms(rest);
-          return;
-        }
-      }
     }
   } else if (mode === 'arrow' || mode === 'equil' || mode.startsWith('curve')) {
     // Arrow modes: don't do anything on click - arrows are handled separately

@@ -1009,57 +1009,135 @@ import MolecularProperties from './components/MolecularProperties.jsx';
                 ctx.restore();
               }
               
-              // Draw lone pairs if present (same as main canvas)
+              // Draw lone pairs if present (using same logic as main canvas)
               if (atom.lonePairs) {
                 ctx.save();
                 ctx.fillStyle = '#1a1a1a';
                 const n = atom.lonePairs;
                 const dotR = 2.6;
+                
+                // Use same positioning logic as main canvas
                 const baseRadius = 14;
                 const padding = 6;
                 const r = Math.max(baseRadius, totalWidth / 2 + padding);
                 const verticalOffset = 16;
                 const baseHorizontalOffset = 16;
-                const horizontalOffset = baseHorizontalOffset;
+                const widthAdjustment = totalWidth > 20 ? (totalWidth - 20) / 2 : 0;
+                const horizontalOffset = baseHorizontalOffset + widthAdjustment;
                 
-                // Fixed positions for lone pairs
-                const positions = [
-                  { x: vx, y: vy - verticalOffset },     // top
-                  { x: vx + horizontalOffset, y: vy },   // right
-                  { x: vx, y: vy + verticalOffset },     // bottom
-                  { x: vx - horizontalOffset, y: vy }    // left
-                ];
+                let dots = [];
+                let placed = 0;
                 
-                // Draw lone pair dots
-                for (let i = 0; i < n && i < positions.length; i++) {
-                  const pos = positions[i];
-                  
-                  if (n - i === 1) {
-                    // Single dot
-                    ctx.beginPath();
-                    ctx.arc(pos.x, pos.y, dotR, 0, 2 * Math.PI);
-                    ctx.fill();
-                  } else if (n - i >= 2) {
-                    // Two dots
-                    const offset = 5;
-                    if (i === 0 || i === 2) { // top/bottom
-                      ctx.beginPath();
-                      ctx.arc(pos.x - offset, pos.y, dotR, 0, 2 * Math.PI);
-                      ctx.fill();
-                      ctx.beginPath();
-                      ctx.arc(pos.x + offset, pos.y, dotR, 0, 2 * Math.PI);
-                      ctx.fill();
-                    } else { // left/right
-                      ctx.beginPath();
-                      ctx.arc(pos.x, pos.y - offset, dotR, 0, 2 * Math.PI);
-                      ctx.fill();
-                      ctx.beginPath();
-                      ctx.arc(pos.x, pos.y + offset, dotR, 0, 2 * Math.PI);
-                      ctx.fill();
+                // Get connected bonds for this vertex for lone pair positioning
+                const connectedBonds = getConnectedBonds({ x: vx, y: vy }, segments);
+                
+                // Check if vertex is in a ring
+                const vertexKey = `${vx.toFixed(2)},${vy.toFixed(2)}`;
+                const rings = detectedRings || [];
+                const isInRing = rings.some(ring => {
+                  if (!Array.isArray(ring)) return false;
+                  return ring.some(v => {
+                    if (typeof v === 'string') {
+                      return v === vertexKey;
+                    } else if (v && typeof v === 'object' && v.x !== undefined && v.y !== undefined) {
+                      return Math.abs(v.x - vx) < 0.01 && Math.abs(v.y - vy) < 0.01;
                     }
-                    i++; // Skip next position since we placed two dots
+                    return false;
+                  });
+                });
+                
+                // Get priority order for lone pair positioning
+                let priorityNames;
+                if (atom.lonePairOrder) {
+                  priorityNames = atom.lonePairOrder;
+                } else {
+                  const actualVertex = vertices.find(v => Math.abs(v.x - vx) < 0.01 && Math.abs(v.y - vy) < 0.01);
+                  const safeVertex = actualVertex || { x: vx, y: vy };
+                  priorityNames = getLonePairPositionOrder(connectedBonds, safeVertex);
+                }
+                
+                // Map position names to angles
+                const positionAngles = {
+                  'top': 90,
+                  'right': 0,
+                  'bottom': 270,
+                  'left': 180
+                };
+                
+                // Create fixedPositions array based on priority order
+                const fixedPositions = priorityNames.map(name => ({
+                  angle: positionAngles[name],
+                  name: name
+                }));
+                
+                // Place lone pairs using same logic as main canvas
+                for (let i = 0; i < fixedPositions.length && placed < n; i++) {
+                  const pos = fixedPositions[i];
+                  
+                  // Calculate position
+                  let cx, cy;
+                  const angleRad = pos.angle * Math.PI / 180;
+                  
+                  // Use different radii based on position type
+                  let radius;
+                  if (pos.name === 'left' || pos.name === 'right') {
+                    radius = horizontalOffset + 2;
+                  } else if (pos.name === 'top' || pos.name === 'bottom') {
+                    radius = verticalOffset + 2;
+                  } else {
+                    radius = Math.max(horizontalOffset, verticalOffset) + 2;
+                  }
+                  
+                  cx = vx + radius * Math.cos(angleRad);
+                  cy = vy - radius * Math.sin(angleRad);
+                  
+                  if (n - placed === 1) {
+                    // Only one dot left: place in the center of this position
+                    dots.push({
+                      position: pos.name,
+                      coords: [cx, cy],
+                      type: 'single'
+                    });
+                    placed += 1;
+                  } else if (n - placed >= 2) {
+                    // Two dots: place them side by side
+                    const offset = 5;
+                    let dot1Coords, dot2Coords;
+                    
+                    if (pos.name === 'top' || pos.name === 'bottom') {
+                      // Horizontal spread for top/bottom positions
+                      dot1Coords = [cx - offset, cy];
+                      dot2Coords = [cx + offset, cy];
+                    } else {
+                      // Vertical spread for left/right positions
+                      dot1Coords = [cx, cy - offset];
+                      dot2Coords = [cx, cy + offset];
+                    }
+                    
+                    dots.push({
+                      position: pos.name,
+                      coords: dot1Coords,
+                      type: 'double'
+                    });
+                    
+                    dots.push({
+                      position: pos.name,
+                      coords: dot2Coords,
+                      type: 'double'
+                    });
+                    
+                    placed += 2;
                   }
                 }
+                
+                // Draw all lone pair dots
+                for (const dot of dots) {
+                  const [cx, cy] = dot.coords;
+                  ctx.beginPath();
+                  ctx.arc(cx, cy, dotR, 0, 2 * Math.PI);
+                  ctx.fill();
+                }
+                
                 ctx.restore();
               }
               
