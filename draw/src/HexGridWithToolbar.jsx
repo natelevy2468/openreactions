@@ -18,12 +18,26 @@ import { createEscapeKeyHandler, createGeneralEscapeHandler, createFourthBondKey
 import { handleArrowMouseMove, handleArrowClick } from './handlers/ArrowHandlers.js';
 import { handleClickCore } from './handlers/clickHandlers.js';
 import { formatAtomText } from './utils/TextUtils.jsx';
+import { useCanvasLayers } from './hooks/useCanvasLayers.js';
+import { drawStaticLayer, drawDynamicLayer, drawUILayer } from './utils/LayeredDrawing.js';
 import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview, isVertexInLinearSystem, getLinearAxis } from './utils/GridBreakingUtils.js';
 import { generateChairPreset, createChairIcon } from './utils/ChairConformation.js';
 import MolecularProperties from './components/MolecularProperties.jsx';
 
   const HexGridWithToolbar = () => {
     const canvasRef = useRef(null);
+    
+    // OPTIMIZATION: Canvas layer separation for better performance
+    const {
+      staticCanvasRef,
+      dynamicCanvasRef,
+      uiCanvasRef,
+      updateStaticLayer,
+      updateDynamicLayer,
+      updateUILayer,
+      markLayerDirty,
+      forceUpdateAll
+    } = useCanvasLayers(window.innerWidth, window.innerHeight);
     
     // segments store base coordinates and bondOrder: 0 (none), 1 (single), 2 (double)
   // bondType: null (normal), 'wedge', 'dash', 'ambiguous'
@@ -1912,16 +1926,72 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     }
   }, [vertices, buildGridVertexIndex]);
 
-  // Draw grid: segments and vertices (with atoms), hiding gray lines around atoms
+  // OPTIMIZATION: Layered drawing system
   const drawGrid = useCallback(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Define colors for drawing
+    const drawingColors = {
+      canvasBackground: colors.canvasBackground,
+      bondColor: '#333',
+      atomColor: '#000',
+      gridColor: '#e0e0e0',
+      gridVertexColor: '#ccc',
+      hoverColor: '#007bff',
+      previewColor: '#999',
+      selectionColor: '#007bff',
+      arrowColor: '#666',
+      lonePairColor: '#666'
+    };
     
-    // Fill canvas background with theme color
-    ctx.fillStyle = colors.canvasBackground;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // Update UI layer (grid, selections) - changes with pan/zoom
+    updateUILayer((ctx) => {
+      drawUILayer(ctx, {
+        segments,
+        vertices,
+        vertexAtoms,
+        offset,
+        hexRadius,
+        colors: drawingColors,
+        gridBreakingAnalysis,
+        isSelecting,
+        selectionStart,
+        selectionEnd,
+        selectedSegments,
+        selectedVertices,
+        showGrid: true
+      });
+    });
+    
+    // Update static layer (bonds, atoms) - only when structure changes
+    updateStaticLayer((ctx) => {
+      drawStaticLayer(ctx, {
+        segments,
+        vertices,
+        vertexAtoms,
+        vertexTypes,
+        detectedRings,
+        offset,
+        hexRadius,
+        colors: drawingColors,
+        mode
+      });
+    });
+    
+    // Update dynamic layer (hover effects, previews) - changes frequently
+    updateDynamicLayer((ctx) => {
+      drawDynamicLayer(ctx, {
+        hoverVertex,
+        hoverSegmentIndex,
+        hoverBondPreview,
+        bondPreviews,
+        arrowPreview,
+        fourthBondPreview,
+        offset,
+        hexRadius,
+        colors: drawingColors,
+        segments,
+        mode
+      });
+    });
 
 
 
@@ -8221,8 +8291,36 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         zIndex: 1,
         pointerEvents: 'none', // let toolbar be clickable
       }}>
+        {/* OPTIMIZATION: Layered canvas stack for better performance */}
+        {/* Static layer - bonds, atoms (rarely changes) */}
         <canvas
-          ref={canvasRef}
+          ref={staticCanvasRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            pointerEvents: 'none',
+            zIndex: 1,
+          }}
+        />
+        {/* Dynamic layer - hover effects, previews (changes frequently) */}
+        <canvas
+          ref={dynamicCanvasRef}
+          style={{
+            position: 'absolute',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
+        {/* UI layer - grid, selections, interactions (top layer) */}
+        <canvas
+          ref={uiCanvasRef}
           onClick={e => { handleClick(e); }}
           onMouseDown={handleMouseDown}
           onMouseMove={e => { handleMouseMove(e); handleArrowMouseMoveLocal(e); }}
@@ -8236,8 +8334,13 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             height: '100vh',
             pointerEvents: 'auto',
             cursor: isPasteMode ? 'copy' : (mode === 'text' || mode === 'mouse' ? 'text' : 'default'),
-            display: 'block',
+            zIndex: 3,
           }}
+        />
+        {/* Keep original canvas ref for compatibility */}
+        <canvas
+          ref={canvasRef}
+          style={{ display: 'none' }}
         />
       </div>
       {/* Atom text input - must be outside pointerEvents:none wrapper */}
