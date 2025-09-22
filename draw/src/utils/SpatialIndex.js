@@ -1,9 +1,8 @@
 /**
- * SpatialIndex - Efficient spatial indexing for fast element lookups
+ * Spatial Index for Fast Hit Testing
  * 
- * This class provides O(1) average case lookups for vertices and segments
- * based on their spatial position, dramatically improving performance
- * compared to O(n) linear searches through all elements.
+ * Converts O(n) linear searches to O(1) average case lookups
+ * by partitioning space into a grid and only checking nearby elements
  */
 
 export class SpatialIndex {
@@ -13,74 +12,37 @@ export class SpatialIndex {
     this.segmentGrid = new Map();
     this.clear();
   }
-
-  /**
-   * Clear all spatial data
-   */
+  
+  // Clear all indexed data
   clear() {
     this.vertexGrid.clear();
     this.segmentGrid.clear();
   }
-
-  /**
-   * Get the grid cell key for a position
-   */
+  
+  // Get cell key for coordinates
   getCellKey(x, y) {
-    const gridX = Math.floor(x / this.cellSize);
-    const gridY = Math.floor(y / this.cellSize);
-    return `${gridX},${gridY}`;
+    const cellX = Math.floor(x / this.cellSize);
+    const cellY = Math.floor(y / this.cellSize);
+    return `${cellX},${cellY}`;
   }
-
-  /**
-   * Get all cell keys that intersect with a circle
-   */
-  getNearbyCells(centerX, centerY, radius) {
-    const cells = new Set();
+  
+  // Get all cell keys within a radius
+  getNearbyCells(x, y, radius) {
+    const cells = [];
     const cellRadius = Math.ceil(radius / this.cellSize);
-    const centerGridX = Math.floor(centerX / this.cellSize);
-    const centerGridY = Math.floor(centerY / this.cellSize);
-
+    const centerX = Math.floor(x / this.cellSize);
+    const centerY = Math.floor(y / this.cellSize);
+    
     for (let dx = -cellRadius; dx <= cellRadius; dx++) {
       for (let dy = -cellRadius; dy <= cellRadius; dy++) {
-        const gridX = centerGridX + dx;
-        const gridY = centerGridY + dy;
-        cells.add(`${gridX},${gridY}`);
-      }
-    }
-
-    return cells;
-  }
-
-  /**
-   * Get all cell keys that a line segment passes through
-   */
-  getCellsForSegment(x1, y1, x2, y2) {
-    const cells = new Set();
-    
-    // Get bounding box cells
-    const minX = Math.min(x1, x2);
-    const maxX = Math.max(x1, x2);
-    const minY = Math.min(y1, y2);
-    const maxY = Math.max(y1, y2);
-    
-    const minGridX = Math.floor(minX / this.cellSize);
-    const maxGridX = Math.floor(maxX / this.cellSize);
-    const minGridY = Math.floor(minY / this.cellSize);
-    const maxGridY = Math.floor(maxY / this.cellSize);
-    
-    // Add all cells in bounding box (simple but effective for chemical bonds)
-    for (let gx = minGridX; gx <= maxGridX; gx++) {
-      for (let gy = minGridY; gy <= maxGridY; gy++) {
-        cells.add(`${gx},${gy}`);
+        cells.push(`${centerX + dx},${centerY + dy}`);
       }
     }
     
     return cells;
   }
-
-  /**
-   * Add a vertex to the spatial index
-   */
+  
+  // Add vertex to spatial grid
   addVertex(vertex, index) {
     const cellKey = this.getCellKey(vertex.x, vertex.y);
     if (!this.vertexGrid.has(cellKey)) {
@@ -88,194 +50,204 @@ export class SpatialIndex {
     }
     this.vertexGrid.get(cellKey).push({ ...vertex, index });
   }
-
-  /**
-   * Add multiple vertices at once (more efficient)
-   */
-  addVertices(vertices) {
-    this.vertexGrid.clear();
-    vertices.forEach((vertex, index) => {
-      this.addVertex(vertex, index);
-    });
-  }
-
-  /**
-   * Add a segment to the spatial index
-   */
+  
+  // Add segment to spatial grid (indexed by midpoint and endpoints)
   addSegment(segment, index) {
-    const cells = this.getCellsForSegment(segment.x1, segment.y1, segment.x2, segment.y2);
-    cells.forEach(cellKey => {
-      if (!this.segmentGrid.has(cellKey)) {
-        this.segmentGrid.set(cellKey, []);
+    // Index by midpoint
+    const midX = (segment.x1 + segment.x2) / 2;
+    const midY = (segment.y1 + segment.y2) / 2;
+    const midCellKey = this.getCellKey(midX, midY);
+    
+    if (!this.segmentGrid.has(midCellKey)) {
+      this.segmentGrid.set(midCellKey, []);
+    }
+    this.segmentGrid.get(midCellKey).push({ ...segment, index });
+    
+    // Also index by endpoints to catch segments that span multiple cells
+    const startCellKey = this.getCellKey(segment.x1, segment.y1);
+    const endCellKey = this.getCellKey(segment.x2, segment.y2);
+    
+    if (startCellKey !== midCellKey) {
+      if (!this.segmentGrid.has(startCellKey)) {
+        this.segmentGrid.set(startCellKey, []);
       }
-      this.segmentGrid.get(cellKey).push({ ...segment, index });
-    });
+      this.segmentGrid.get(startCellKey).push({ ...segment, index });
+    }
+    
+    if (endCellKey !== midCellKey && endCellKey !== startCellKey) {
+      if (!this.segmentGrid.has(endCellKey)) {
+        this.segmentGrid.set(endCellKey, []);
+      }
+      this.segmentGrid.get(endCellKey).push({ ...segment, index });
+    }
   }
-
-  /**
-   * Add multiple segments at once (more efficient)
-   */
-  addSegments(segments) {
-    this.segmentGrid.clear();
-    segments.forEach((segment, index) => {
-      this.addSegment(segment, index);
-    });
-  }
-
-  /**
-   * Get vertices within a radius of a point
-   */
+  
+  // Get vertices near a point within radius
   getNearbyVertices(x, y, radius) {
     const cells = this.getNearbyCells(x, y, radius);
     const vertices = [];
-    const radiusSq = radius * radius;
+    const seen = new Set(); // Prevent duplicates
     
     for (const cellKey of cells) {
       const cellVertices = this.vertexGrid.get(cellKey) || [];
       for (const vertex of cellVertices) {
-        const dx = vertex.x - x;
-        const dy = vertex.y - y;
-        const distSq = dx * dx + dy * dy;
-        if (distSq <= radiusSq) {
-          vertices.push({
-            ...vertex,
-            distance: Math.sqrt(distSq)
-          });
+        if (!seen.has(vertex.index)) {
+          const distance = Math.sqrt(
+            Math.pow(x - vertex.x, 2) + Math.pow(y - vertex.y, 2)
+          );
+          if (distance <= radius) {
+            vertices.push(vertex);
+            seen.add(vertex.index);
+          }
         }
       }
     }
     
     return vertices;
   }
-
-  /**
-   * Get the closest vertex to a point within a maximum distance
-   */
-  getClosestVertex(x, y, maxDistance) {
-    const nearbyVertices = this.getNearbyVertices(x, y, maxDistance);
-    if (nearbyVertices.length === 0) return null;
-    
-    return nearbyVertices.reduce((closest, vertex) => {
-      return vertex.distance < closest.distance ? vertex : closest;
-    });
-  }
-
-  /**
-   * Get segments within a radius of a point
-   */
+  
+  // Get segments near a point within radius
   getNearbySegments(x, y, radius) {
     const cells = this.getNearbyCells(x, y, radius);
     const segments = [];
-    const seenIndices = new Set();
+    const seen = new Set(); // Prevent duplicates
     
     for (const cellKey of cells) {
       const cellSegments = this.segmentGrid.get(cellKey) || [];
       for (const segment of cellSegments) {
-        // Avoid duplicates
-        if (seenIndices.has(segment.index)) continue;
-        seenIndices.add(segment.index);
-        
-        // Calculate distance from point to line segment
-        const dist = this.pointToSegmentDistance(x, y, segment.x1, segment.y1, segment.x2, segment.y2);
-        if (dist <= radius) {
-          segments.push({
-            ...segment,
-            distance: dist
-          });
+        if (!seen.has(segment.index)) {
+          // Calculate distance from point to line segment
+          const A = x - segment.x1;
+          const B = y - segment.y1;
+          const C = segment.x2 - segment.x1;
+          const D = segment.y2 - segment.y1;
+          const dot = A * C + B * D;
+          const len_sq = C * C + D * D;
+          let t = dot / len_sq;
+          t = Math.max(0, Math.min(1, t));
+          const projX = segment.x1 + t * C;
+          const projY = segment.y1 + t * D;
+          const dx = x - projX;
+          const dy = y - projY;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          if (distance <= radius) {
+            segments.push(segment);
+            seen.add(segment.index);
+          }
         }
       }
     }
     
     return segments;
   }
-
-  /**
-   * Calculate distance from a point to a line segment
-   */
-  pointToSegmentDistance(px, py, x1, y1, x2, y2) {
-    const A = px - x1;
-    const B = py - y1;
-    const C = x2 - x1;
-    const D = y2 - y1;
-    
-    const dot = A * C + B * D;
-    const lenSq = C * C + D * D;
-    
-    let param = -1;
-    if (lenSq !== 0) {
-      param = dot / lenSq;
-    }
-    
-    let xx, yy;
-    
-    if (param < 0) {
-      xx = x1;
-      yy = y1;
-    } else if (param > 1) {
-      xx = x2;
-      yy = y2;
-    } else {
-      xx = x1 + param * C;
-      yy = y1 + param * D;
-    }
-    
-    const dx = px - xx;
-    const dy = py - yy;
-    
-    return Math.sqrt(dx * dx + dy * dy);
-  }
-
-  /**
-   * Update the entire spatial index with new data
-   */
+  
+  // Update the entire index with new data
   update(vertices, segments) {
     this.clear();
-    this.addVertices(vertices);
-    this.addSegments(segments);
+    
+    // Index all vertices
+    vertices.forEach((vertex, index) => {
+      this.addVertex(vertex, index);
+    });
+    
+    // Index all segments
+    segments.forEach((segment, index) => {
+      this.addSegment(segment, index);
+    });
   }
-
-  /**
-   * Get statistics about the spatial index
-   */
+  
+  // Get statistics about the index
   getStats() {
-    let vertexCellCount = 0;
-    let maxVerticesPerCell = 0;
-    let totalVertices = 0;
-    
-    this.vertexGrid.forEach(vertices => {
-      vertexCellCount++;
-      maxVerticesPerCell = Math.max(maxVerticesPerCell, vertices.length);
-      totalVertices += vertices.length;
-    });
-    
-    let segmentCellCount = 0;
-    let maxSegmentsPerCell = 0;
-    let totalSegments = 0;
-    
-    this.segmentGrid.forEach(segments => {
-      segmentCellCount++;
-      maxSegmentsPerCell = Math.max(maxSegmentsPerCell, segments.length);
-      totalSegments += segments.length;
-    });
-    
     return {
-      vertexCellCount,
-      maxVerticesPerCell,
-      totalVertices,
-      avgVerticesPerCell: totalVertices / vertexCellCount || 0,
-      segmentCellCount,
-      maxSegmentsPerCell,
-      totalSegments,
-      avgSegmentsPerCell: totalSegments / segmentCellCount || 0
+      vertexCells: this.vertexGrid.size,
+      segmentCells: this.segmentGrid.size,
+      totalVertices: Array.from(this.vertexGrid.values()).reduce((sum, arr) => sum + arr.length, 0),
+      totalSegments: Array.from(this.segmentGrid.values()).reduce((sum, arr) => sum + arr.length, 0)
     };
   }
 }
 
-/**
- * Factory function to create and initialize a spatial index
- */
-export function createSpatialIndex(vertices = [], segments = [], cellSize = 60) {
-  const index = new SpatialIndex(cellSize);
-  index.update(vertices, segments);
-  return index;
-} 
+// Hook for using spatial index in React components
+import { useRef, useMemo, useCallback } from 'react';
+
+export const useSpatialIndex = (vertices, segments, cellSize = 60) => {
+  const spatialIndexRef = useRef(new SpatialIndex(cellSize));
+  
+  // Update index when data changes
+  useMemo(() => {
+    spatialIndexRef.current.update(vertices, segments);
+  }, [vertices, segments]);
+  
+  // Fast vertex lookup
+  const findNearbyVertices = useCallback((x, y, radius) => {
+    return spatialIndexRef.current.getNearbyVertices(x, y, radius);
+  }, []);
+  
+  // Fast segment lookup
+  const findNearbySegments = useCallback((x, y, radius) => {
+    return spatialIndexRef.current.getNearbySegments(x, y, radius);
+  }, []);
+  
+  // Find closest vertex within threshold
+  const findClosestVertex = useCallback((x, y, threshold) => {
+    const candidates = spatialIndexRef.current.getNearbyVertices(x, y, threshold);
+    
+    let closestVertex = null;
+    let minDistance = threshold;
+    
+    for (const vertex of candidates) {
+      const distance = Math.sqrt(
+        Math.pow(x - vertex.x, 2) + Math.pow(y - vertex.y, 2)
+      );
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestVertex = vertex;
+      }
+    }
+    
+    return closestVertex;
+  }, []);
+  
+  // Find closest segment within threshold
+  const findClosestSegment = useCallback((x, y, threshold) => {
+    const candidates = spatialIndexRef.current.getNearbySegments(x, y, threshold);
+    
+    let closestSegment = null;
+    let closestIndex = -1;
+    let minDistance = threshold;
+    
+    for (const segment of candidates) {
+      // Calculate distance from point to line segment
+      const A = x - segment.x1;
+      const B = y - segment.y1;
+      const C = segment.x2 - segment.x1;
+      const D = segment.y2 - segment.y1;
+      const dot = A * C + B * D;
+      const len_sq = C * C + D * D;
+      let t = dot / len_sq;
+      t = Math.max(0, Math.min(1, t));
+      const projX = segment.x1 + t * C;
+      const projY = segment.y1 + t * D;
+      const dx = x - projX;
+      const dy = y - projY;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance < minDistance) {
+        minDistance = distance;
+        closestSegment = segment;
+        closestIndex = segment.index;
+      }
+    }
+    
+    return { segment: closestSegment, index: closestIndex };
+  }, []);
+  
+  return {
+    findNearbyVertices,
+    findNearbySegments,
+    findClosestVertex,
+    findClosestSegment,
+    getStats: () => spatialIndexRef.current.getStats()
+  };
+};

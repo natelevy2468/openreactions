@@ -20,6 +20,8 @@ import { handleClickCore } from './handlers/clickHandlers.js';
 import { formatAtomText } from './utils/TextUtils.jsx';
 import { useCanvasLayers } from './hooks/useCanvasLayers.js';
 import { drawStaticLayer, drawDynamicLayer, drawUILayer } from './utils/LayeredDrawing.js';
+import { useSpatialIndex } from './utils/SpatialIndex.js';
+import { useOptimizedGrid } from './hooks/useOptimizedGrid.js';
 import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview, isVertexInLinearSystem, getLinearAxis } from './utils/GridBreakingUtils.js';
 import { generateChairPreset, createChairIcon } from './utils/ChairConformation.js';
 import MolecularProperties from './components/MolecularProperties.jsx';
@@ -38,6 +40,22 @@ import MolecularProperties from './components/MolecularProperties.jsx';
       markLayerDirty,
       forceUpdateAll
     } = useCanvasLayers(window.innerWidth, window.innerHeight);
+    
+    // OPTIMIZATION: Spatial indexing for fast hit testing
+    const {
+      findNearbyVertices,
+      findNearbySegments,
+      findClosestVertex,
+      findClosestSegment,
+      getStats
+    } = useSpatialIndex(vertices, segments, hexRadius);
+    
+    // OPTIMIZATION: Grid generation with viewport culling
+    const {
+      visibleGrid,
+      mergeWithMolecularData,
+      getGridStats
+    } = useOptimizedGrid(hexRadius, 20, window.innerWidth, window.innerHeight, offset);
     
     // segments store base coordinates and bondOrder: 0 (none), 1 (single), 2 (double)
   // bondType: null (normal), 'wedge', 'dash', 'ambiguous'
