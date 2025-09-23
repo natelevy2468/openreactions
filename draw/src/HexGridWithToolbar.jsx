@@ -18,44 +18,12 @@ import { createEscapeKeyHandler, createGeneralEscapeHandler, createFourthBondKey
 import { handleArrowMouseMove, handleArrowClick } from './handlers/ArrowHandlers.js';
 import { handleClickCore } from './handlers/clickHandlers.js';
 import { formatAtomText } from './utils/TextUtils.jsx';
-import { useCanvasLayers } from './hooks/useCanvasLayers.js';
-import { drawStaticLayer, drawDynamicLayer, drawUILayer } from './utils/LayeredDrawing.js';
-import { useSpatialIndex } from './utils/SpatialIndex.js';
-import { useOptimizedGrid } from './hooks/useOptimizedGrid.js';
 import { analyzeGridBreaking, isInBreakingZone, generateBondPreviews, isPointOnBondPreview, isVertexInLinearSystem, getLinearAxis } from './utils/GridBreakingUtils.js';
 import { generateChairPreset, createChairIcon } from './utils/ChairConformation.js';
 import MolecularProperties from './components/MolecularProperties.jsx';
 
   const HexGridWithToolbar = () => {
     const canvasRef = useRef(null);
-    
-    // OPTIMIZATION: Canvas layer separation for better performance
-    const {
-      staticCanvasRef,
-      dynamicCanvasRef,
-      uiCanvasRef,
-      updateStaticLayer,
-      updateDynamicLayer,
-      updateUILayer,
-      markLayerDirty,
-      forceUpdateAll
-    } = useCanvasLayers(window.innerWidth, window.innerHeight);
-    
-    // OPTIMIZATION: Spatial indexing for fast hit testing
-    const {
-      findNearbyVertices,
-      findNearbySegments,
-      findClosestVertex,
-      findClosestSegment,
-      getStats
-    } = useSpatialIndex(vertices, segments, hexRadius);
-    
-    // OPTIMIZATION: Grid generation with viewport culling
-    const {
-      visibleGrid,
-      mergeWithMolecularData,
-      getGridStats
-    } = useOptimizedGrid(hexRadius, 20, window.innerWidth, window.innerHeight, offset);
     
     // segments store base coordinates and bondOrder: 0 (none), 1 (single), 2 (double)
   // bondType: null (normal), 'wedge', 'dash', 'ambiguous'
@@ -1944,72 +1912,16 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     }
   }, [vertices, buildGridVertexIndex]);
 
-  // OPTIMIZATION: Layered drawing system
+  // Draw grid: segments and vertices (with atoms), hiding gray lines around atoms
   const drawGrid = useCallback(() => {
-    // Define colors for drawing
-    const drawingColors = {
-      canvasBackground: colors.canvasBackground,
-      bondColor: '#333',
-      atomColor: '#000',
-      gridColor: '#e0e0e0',
-      gridVertexColor: '#ccc',
-      hoverColor: '#007bff',
-      previewColor: '#999',
-      selectionColor: '#007bff',
-      arrowColor: '#666',
-      lonePairColor: '#666'
-    };
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
     
-    // Update UI layer (grid, selections) - changes with pan/zoom
-    updateUILayer((ctx) => {
-      drawUILayer(ctx, {
-        segments,
-        vertices,
-        vertexAtoms,
-        offset,
-        hexRadius,
-        colors: drawingColors,
-        gridBreakingAnalysis,
-        isSelecting,
-        selectionStart,
-        selectionEnd,
-        selectedSegments,
-        selectedVertices,
-        showGrid: true
-      });
-    });
-    
-    // Update static layer (bonds, atoms) - only when structure changes
-    updateStaticLayer((ctx) => {
-      drawStaticLayer(ctx, {
-        segments,
-        vertices,
-        vertexAtoms,
-        vertexTypes,
-        detectedRings,
-        offset,
-        hexRadius,
-        colors: drawingColors,
-        mode
-      });
-    });
-    
-    // Update dynamic layer (hover effects, previews) - changes frequently
-    updateDynamicLayer((ctx) => {
-      drawDynamicLayer(ctx, {
-        hoverVertex,
-        hoverSegmentIndex,
-        hoverBondPreview,
-        bondPreviews,
-        arrowPreview,
-        fourthBondPreview,
-        offset,
-        hexRadius,
-        colors: drawingColors,
-        segments,
-        mode
-      });
-    });
+    // Fill canvas background with theme color
+    ctx.fillStyle = colors.canvasBackground;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
 
 
 
@@ -5661,7 +5573,7 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     }
     setShowAtomInput(false);
   };
-  
+  //r
   // Handle atom input key events (Enter to submit, Escape to cancel)
   const handleAtomInputKeyDown = (e) => {
     if (e.key === 'Enter') {
@@ -5683,47 +5595,18 @@ import MolecularProperties from './components/MolecularProperties.jsx';
     setShowMenu(false);
   };
 
-  // OPTIMIZATION: Cache ring detection with smart invalidation
-  // Create hash of vertex positions for dependency tracking
-  const vertexPositionHash = useMemo(() => {
-    if (vertices.length === 0) return '';
-    return vertices.map(v => `${v.x.toFixed(2)},${v.y.toFixed(2)}`).join('|');
-  }, [vertices]);
-  
-  // Create hash of segment endpoints for dependency tracking
-  const segmentEndpointHash = useMemo(() => {
-    if (segments.length === 0) return '';
-    return segments.map(s => `${s.x1.toFixed(2)},${s.y1.toFixed(2)}-${s.x2.toFixed(2)},${s.y2.toFixed(2)}`).join('|');
-  }, [segments]);
-  
-  // Create hash of vertex atoms for dependency tracking
-  const vertexAtomsHash = useMemo(() => {
-    return Object.entries(vertexAtoms).map(([key, atom]) => `${key}:${atom}`).join('|');
-  }, [vertexAtoms]);
-  
-  // Cache ring detection results with smart invalidation
-  const cachedRingInfo = useMemo(() => {
-    console.log('Ring detection cache miss - recalculating');
-    return getRingInfo(vertices, segments, vertexAtoms);
-  }, [
-    vertices.length,
-    segments.length,
-    vertexPositionHash,
-    segmentEndpointHash,
-    vertexAtomsHash
-  ]);
-  
   // Function to detect rings whenever molecules change
   const detectRings = useCallback(() => {
-    setDetectedRings(cachedRingInfo.rings);
+    const ringInfo = getRingInfo(vertices, segments, vertexAtoms);
+    setDetectedRings(ringInfo.rings);
     
     // For debugging (can be removed in production)
-    if (cachedRingInfo.rings.length > 0) {
+    if (ringInfo.rings.length > 0) {
       console.log('🔍 Rings detected, running epoxide detection...');
       // Run epoxide detection after rings are detected
       setTimeout(detectEpoxideVertices, 0);
     }
-  }, [cachedRingInfo, detectEpoxideVertices]);
+  }, [vertices, segments, vertexAtoms, detectEpoxideVertices]);
 
   // Function to analyze grid breaking whenever molecules change
   const analyzeGridBreakingState = useCallback(() => {
@@ -6165,75 +6048,61 @@ import MolecularProperties from './components/MolecularProperties.jsx';
       setSelectionEnd
     );
   };
-  // OPTIMIZATION: Throttle utility for mouse events
-  const throttleRef = useRef({});
-  const throttle = useCallback((key, func, limit) => {
-    if (!throttleRef.current[key]) {
-      func();
-      throttleRef.current[key] = true;
-      setTimeout(() => {
-        throttleRef.current[key] = false;
-      }, limit);
-    }
-  }, []);
-  
   const handleMouseMove = event => {
-    // OPTIMIZATION: Throttle mouse move to ~60fps (16ms)
-    throttle('mouseMove', () => {
-      handleMouseMoveUtil(
-        event,
-        canvasRef,
-        isPasteMode,
-        isDragging,
-        fourthBondMode,
-        fourthBondSource,
-        mode,
-        draggingArrowIndex,
-        draggingVertex,
-        isSelecting,
-        clipboard,
-        showSnapPreview,
-        hexRadius,
-        offset,
-        dragStart,
-        dragArrowOffset,
-        arrows,
-        vertices,
-        vertexThreshold,
-        lineThreshold,
-        freeFloatingVertices,
-        segments,
-        vertexAtoms,
-        bondPreviews,
-        isPointOnBondPreview,
-        // Setters
-        setPastePreviewPosition,
-        calculateGridAlignment,
-        calculateBondAlignment,
-        setSnapAlignment,
-        setFourthBondPreview,
-        setDidDrag,
-        setArrows,
-        setDragStart,
-        setVertices,
-        setFreeFloatingVertices,
-        setSegments,
-        setVertexAtoms,
-        setDraggingVertex,
-        setSelectionEnd,
-        setOffset,
-        setHoverVertex,
-        setHoverSegmentIndex,
-        setHoverCurvedArrow,
-        isPointInArrowCircle,
-        isPointInCurvedArrowCircle,
-        distanceToVertex,
-        isPointInVertexBox
-      );
-      
-      // Enhanced hover priority system for interactive modes: vertex > bond preview > grid line > nearest vertex fallback
-      const isInteractiveMode = (mode === 'draw' || mode === 'triple' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && 
-                               !isDragging && !isSelecting && !isPasteMode && !fourthBondMode && !draggingVertex && !draggingArrowIndex;
+    handleMouseMoveUtil(
+      event,
+      canvasRef,
+      isPasteMode,
+      isDragging,
+      fourthBondMode,
+      fourthBondSource,
+      mode,
+      draggingArrowIndex,
+      draggingVertex,
+      isSelecting,
+      clipboard,
+      showSnapPreview,
+      hexRadius,
+      offset,
+      dragStart,
+      dragArrowOffset,
+      arrows,
+      vertices,
+      vertexThreshold,
+      lineThreshold,
+      freeFloatingVertices,
+      segments,
+      vertexAtoms,
+      bondPreviews,
+      isPointOnBondPreview,
+      // Setters
+      setPastePreviewPosition,
+      calculateGridAlignment,
+      calculateBondAlignment,
+      setSnapAlignment,
+      setFourthBondPreview,
+      setDidDrag,
+      setArrows,
+      setDragStart,
+      setVertices,
+      setFreeFloatingVertices,
+      setSegments,
+      setVertexAtoms,
+      setDraggingVertex,
+      setSelectionEnd,
+      setOffset,
+      setHoverVertex,
+      setHoverSegmentIndex,
+      setHoverCurvedArrow,
+      isPointInArrowCircle,
+      isPointInCurvedArrowCircle,
+      distanceToVertex,
+      isPointInVertexBox
+    );
+
+    // Enhanced hover priority system for interactive modes: vertex > bond preview > grid line > nearest vertex fallback
+    const isInteractiveMode = (mode === 'draw' || mode === 'triple' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && 
+                             !isDragging && !isSelecting && !isPasteMode && !fourthBondMode && !draggingVertex && !draggingArrowIndex;
     
     if (isInteractiveMode) {
       const canvas = canvasRef.current;
@@ -6354,7 +6223,6 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         setHoverBondPreview(hoveredPreview);
       }
     }
-    }, 16); // Throttle to ~60fps
   };
   const handleMouseUp = event => {
     // Don't handle mouse up events in paste mode
@@ -8309,36 +8177,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
         zIndex: 1,
         pointerEvents: 'none', // let toolbar be clickable
       }}>
-        {/* OPTIMIZATION: Layered canvas stack for better performance */}
-        {/* Static layer - bonds, atoms (rarely changes) */}
         <canvas
-          ref={staticCanvasRef}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
-            pointerEvents: 'none',
-            zIndex: 1,
-          }}
-        />
-        {/* Dynamic layer - hover effects, previews (changes frequently) */}
-        <canvas
-          ref={dynamicCanvasRef}
-          style={{
-            position: 'absolute',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
-            pointerEvents: 'none',
-            zIndex: 2,
-          }}
-        />
-        {/* UI layer - grid, selections, interactions (top layer) */}
-        <canvas
-          ref={uiCanvasRef}
+          ref={canvasRef}
           onClick={e => { handleClick(e); }}
           onMouseDown={handleMouseDown}
           onMouseMove={e => { handleMouseMove(e); handleArrowMouseMoveLocal(e); }}
@@ -8352,13 +8192,8 @@ import MolecularProperties from './components/MolecularProperties.jsx';
             height: '100vh',
             pointerEvents: 'auto',
             cursor: isPasteMode ? 'copy' : (mode === 'text' || mode === 'mouse' ? 'text' : 'default'),
-            zIndex: 3,
+            display: 'block',
           }}
-        />
-        {/* Keep original canvas ref for compatibility */}
-        <canvas
-          ref={canvasRef}
-          style={{ display: 'none' }}
         />
       </div>
       {/* Atom text input - must be outside pointerEvents:none wrapper */}
