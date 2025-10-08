@@ -2,6 +2,15 @@ import React, { useRef, useState, useCallback } from 'react';
 import logoFinal4 from '/logoFinal4.png';
 import gearIcon from '/gear.png';
 import { formatAtomText } from './utils/TextUtils.jsx';
+import { renderDoubleBond, analyzeBondContext, findNeighboringBonds } from './rendering/DoubleBondRenderer.js';
+import { detectAllRingsEnhanced } from './rendering/RingDetectionUtils.js';
+import { 
+  handleTextButtonClick, 
+  handleEnterKeyOnVertex, 
+  handleQuickElementKey,
+  handleTextInputComplete 
+} from './handlers/TextHandler.js';
+import { renderAllAtomText } from './rendering/TextRenderer.js';
 
 
   const HexGridWithToolbar = () => {
@@ -63,6 +72,28 @@ import { formatAtomText } from './utils/TextUtils.jsx';
     
     // Curved arrow state
     const [curvedArrowStartPoint, setCurvedArrowStartPoint] = useState(null);
+    
+    // Bond creation state for draw mode
+    const [isCreatingBond, setIsCreatingBond] = useState(false);
+    const [bondStartPoint, setBondStartPoint] = useState(null);
+    const [bondPreviewEnd, setBondPreviewEnd] = useState(null);
+    
+    // Hover state for highlighting
+    const [hoveredVertex, setHoveredVertex] = useState(null);
+    const [hoveredBondIndex, setHoveredBondIndex] = useState(null);
+    
+    // Bond suggestions state
+    const [bondSuggestions, setBondSuggestions] = useState([]);
+    const [hoveredSuggestionIndex, setHoveredSuggestionIndex] = useState(null);
+    
+    // Vertex bond state tracking - maps vertex key to its bond directions and orientation
+    const [vertexBondStates, setVertexBondStates] = useState({});
+    
+    // Current mouse position for text input positioning
+    const [currentMousePosition, setCurrentMousePosition] = useState({ x: 0, y: 0 });
+    
+    // Ring detection state - persistent rings
+    const [detectedRings, setDetectedRings] = useState([]);
     
     // Additional UI state
     const [isPropertiesPanelExpanded, setIsPropertiesPanelExpanded] = useState(false);
@@ -141,6 +172,1251 @@ import { formatAtomText } from './utils/TextUtils.jsx';
   }, [isDarkMode]);
   
   const colors = getColors();
+
+  // Drawing constants
+  const hexRadius = 60; // Standard bond length (doubled from 30 to 60)
+  const vertexThreshold = 15; // Distance for vertex detection
+  const lineThreshold = 8; // Distance for line detection
+  const mergeThreshold = 20; // Distance for vertex merging
+  const snapAngleTolerance = 20 * (Math.PI / 180); // 20 degrees in radians
+  const molecularBoundaryRadius = 40; // Radius around existing molecules to prevent new vertex creation
+  
+  // Common bond angles (in radians): 60°, 120°, 180°, 240°, 300°, 0° (rotated by +30° from previous)
+  const snapAngles = [Math.PI/3, 2*Math.PI/3, Math.PI, 4*Math.PI/3, 5*Math.PI/3, 0];
+
+  // Helper functions for bond creation
+  const calculateBondDirection = (x1, y1, x2, y2) => {
+    return Math.atan2(y2 - y1, x2 - x1);
+  };
+
+  // Helper function to normalize angle to 0-2π range
+  const normalizeAngle = (angle) => {
+    while (angle < 0) angle += 2 * Math.PI;
+    while (angle >= 2 * Math.PI) angle -= 2 * Math.PI;
+    return angle;
+  };
+
+  // Helper function to find the closest snap angle for a specific vertex
+  const findClosestSnapAngle = (targetAngle, startVertex = null) => {
+    const normalizedAngle = normalizeAngle(targetAngle);
+    let closestAngle = null;
+    let minDifference = Infinity;
+
+    // Get valid angles for this vertex, or use general snap angles if no vertex specified
+    const validAngles = startVertex ? getAvailableBondAngles(startVertex) : snapAngles;
+
+    for (const snapAngle of validAngles) {
+      // Calculate the difference, considering the circular nature of angles
+      let diff = Math.abs(normalizedAngle - snapAngle);
+      if (diff > Math.PI) {
+        diff = 2 * Math.PI - diff;
+      }
+
+      if (diff < minDifference && diff <= snapAngleTolerance) {
+        minDifference = diff;
+        closestAngle = snapAngle;
+      }
+    }
+
+    return closestAngle;
+  };
+
+  // Helper function to count bonds connected to a vertex
+  const countVertexBonds = (vertex) => {
+    return segments.filter(segment => {
+      if (segment.bondOrder <= 0) return false; // Skip grid lines
+      
+      const distanceToStart = Math.sqrt(
+        Math.pow(segment.x1 - vertex.x, 2) + 
+        Math.pow(segment.y1 - vertex.y, 2)
+      );
+      const distanceToEnd = Math.sqrt(
+        Math.pow(segment.x2 - vertex.x, 2) + 
+        Math.pow(segment.y2 - vertex.y, 2)
+      );
+      
+      return distanceToStart < 0.01 || distanceToEnd < 0.01;
+    }).length;
+  };
+
+  // Helper function to check if angle snapping should be disabled
+  const shouldDisableAngleSnapping = (startVertex) => {
+    if (!startVertex) return false;
+    return countVertexBonds(startVertex) >= 3; // Disable snapping for 4th bond
+  };
+
+  // Helper function to get vertex key
+  const getVertexKey = (vertex) => {
+    return `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+  };
+
+  // Helper function to normalize angle to nearest 60-degree increment (rotated by 30°)
+  const normalizeToSixtyDegrees = (angle) => {
+    const normalizedAngle = normalizeAngle(angle);
+    // 60-degree increments rotated by 30°: 30°, 90°, 150°, 210°, 270°, 330°
+    const sixtyDegreeIncrements = [Math.PI/6, Math.PI/2, 5*Math.PI/6, 7*Math.PI/6, 3*Math.PI/2, 11*Math.PI/6];
+    
+    let closestAngle = sixtyDegreeIncrements[0];
+    let minDiff = Math.abs(normalizedAngle - closestAngle);
+    
+    for (const increment of sixtyDegreeIncrements) {
+      let diff = Math.abs(normalizedAngle - increment);
+      if (diff > Math.PI) diff = 2 * Math.PI - diff;
+      
+      if (diff < minDiff) {
+        minDiff = diff;
+        closestAngle = increment;
+      }
+    }
+    
+    return closestAngle;
+  };
+
+  // Helper function to determine vertex orientation (30° or 90° based, rotated by 30°)
+  const determineVertexOrientation = (existingAngles) => {
+    if (existingAngles.length === 0) return null; // First bond can be any angle
+    
+    // Check if existing angles fit the 30°-based pattern (30°, 150°, 270°) - rotated from (0°, 120°, 240°)
+    const thirtyBasedAngles = [Math.PI/6, 5*Math.PI/6, 3*Math.PI/2];
+    // Check if existing angles fit the 90°-based pattern (90°, 210°, 330°) - rotated from (60°, 180°, 300°)
+    const ninetyBasedAngles = [Math.PI/2, 7*Math.PI/6, 11*Math.PI/6];
+    
+    // Normalize existing angles to 60-degree increments
+    const normalizedExisting = existingAngles.map(normalizeToSixtyDegrees);
+    
+    // Check which pattern the existing angles fit better
+    let thirtyBasedScore = 0;
+    let ninetyBasedScore = 0;
+    
+    for (const angle of normalizedExisting) {
+      if (thirtyBasedAngles.includes(angle)) thirtyBasedScore++;
+      if (ninetyBasedAngles.includes(angle)) ninetyBasedScore++;
+    }
+    
+    return thirtyBasedScore >= ninetyBasedScore ? 'thirty-based' : 'ninety-based';
+  };
+
+  // Helper function to get valid angles for a vertex based on its orientation
+  const getValidAnglesForVertex = (vertex) => {
+    const vertexKey = getVertexKey(vertex);
+    const bondState = vertexBondStates[vertexKey];
+    
+    if (!bondState || bondState.bondAngles.length === 0) {
+      // First bond - can be any 60-degree increment (all rotated by 30°)
+      return [Math.PI/6, Math.PI/2, 5*Math.PI/6, 7*Math.PI/6, 3*Math.PI/2, 11*Math.PI/6];
+    }
+    
+    const orientation = bondState.orientation;
+    if (orientation === 'thirty-based') {
+      return [Math.PI/6, 5*Math.PI/6, 3*Math.PI/2]; // 30°, 150°, 270°
+    } else {
+      return [Math.PI/2, 7*Math.PI/6, 11*Math.PI/6]; // 90°, 210°, 330°
+    }
+  };
+
+  // Helper function to update vertex bond state
+  const updateVertexBondState = useCallback((vertex, bondAngle) => {
+    const vertexKey = getVertexKey(vertex);
+    const normalizedAngle = normalizeToSixtyDegrees(bondAngle);
+    
+    setVertexBondStates(prevStates => {
+      const currentState = prevStates[vertexKey] || { bondAngles: [], orientation: null };
+      const newBondAngles = [...currentState.bondAngles];
+      
+      // Add the new angle if it's not already present
+      if (!newBondAngles.some(angle => Math.abs(angle - normalizedAngle) < 0.01)) {
+        newBondAngles.push(normalizedAngle);
+      }
+      
+      // Determine orientation if this is the first or second bond
+      let orientation = currentState.orientation;
+      if (!orientation && newBondAngles.length > 0) {
+        orientation = determineVertexOrientation(newBondAngles);
+      }
+      
+      return {
+        ...prevStates,
+        [vertexKey]: {
+          bondAngles: newBondAngles,
+          orientation: orientation
+        }
+      };
+    });
+  }, []);
+
+  // Helper function to get available bond angles for a vertex
+  const getAvailableBondAngles = (vertex) => {
+    const vertexKey = getVertexKey(vertex);
+    const bondState = vertexBondStates[vertexKey];
+    const validAngles = getValidAnglesForVertex(vertex);
+    
+    if (!bondState) {
+      return validAngles; // All angles available for new vertex
+    }
+    
+    // Return angles that aren't already used
+    return validAngles.filter(angle => 
+      !bondState.bondAngles.some(usedAngle => Math.abs(angle - usedAngle) < 0.01)
+    );
+  };
+
+  // Helper function to check if a position is within molecular boundary (too close to existing structure)
+  const isWithinMolecularBoundary = (x, y) => {
+    // Check distance to all existing vertices
+    for (const vertex of vertices) {
+      const distance = Math.sqrt(Math.pow(vertex.x - x, 2) + Math.pow(vertex.y - y, 2));
+      if (distance <= molecularBoundaryRadius) {
+        return true;
+      }
+    }
+    
+    // Check distance to all existing bonds (midpoints and along the bond)
+    for (const bond of segments) {
+      if (bond.bondOrder <= 0) continue; // Skip grid lines
+      
+      // Check distance to bond midpoint
+      const midX = (bond.x1 + bond.x2) / 2;
+      const midY = (bond.y1 + bond.y2) / 2;
+      const midDistance = Math.sqrt(Math.pow(midX - x, 2) + Math.pow(midY - y, 2));
+      
+      if (midDistance <= molecularBoundaryRadius) {
+        return true;
+      }
+      
+      // Check distance to closest point on bond line
+      const A = x - bond.x1;
+      const B = y - bond.y1;
+      const C = bond.x2 - bond.x1;
+      const D = bond.y2 - bond.y1;
+      
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      
+      if (lenSq > 0) {
+        let param = dot / lenSq;
+        if (param < 0) param = 0;
+        else if (param > 1) param = 1;
+        
+        const closestX = bond.x1 + param * C;
+        const closestY = bond.y1 + param * D;
+        const bondDistance = Math.sqrt(Math.pow(closestX - x, 2) + Math.pow(closestY - y, 2));
+        
+        if (bondDistance <= molecularBoundaryRadius) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  };
+
+  // Helper function to update ring detection
+  const updateRingDetection = useCallback(() => {
+    const rings = detectAllRingsEnhanced(segments, vertices);
+    setDetectedRings(rings);
+  }, [segments, vertices]);
+
+  // Helper function to check if a bond is in any detected ring
+  const isBondInRing = (bond) => {
+    for (const ring of detectedRings) {
+      if (ring.bonds) {
+        const bondExists = ring.bonds.some(ringBond => {
+          const tolerance = 0.01;
+          return (
+            Math.abs(ringBond.x1 - bond.x1) < tolerance &&
+            Math.abs(ringBond.y1 - bond.y1) < tolerance &&
+            Math.abs(ringBond.x2 - bond.x2) < tolerance &&
+            Math.abs(ringBond.y2 - bond.y2) < tolerance
+          ) || (
+            Math.abs(ringBond.x1 - bond.x2) < tolerance &&
+            Math.abs(ringBond.y1 - bond.y2) < tolerance &&
+            Math.abs(ringBond.x2 - bond.x1) < tolerance &&
+            Math.abs(ringBond.y2 - bond.y1) < tolerance
+          );
+        });
+        
+        if (bondExists) return ring;
+      }
+    }
+    return null;
+  };
+
+  // Helper function to get interior direction for a ring bond
+  const getRingInteriorDirection = (bond, ring) => {
+    if (!ring || !ring.center) return null;
+    
+    const bondMidX = (bond.x1 + bond.x2) / 2;
+    const bondMidY = (bond.y1 + bond.y2) / 2;
+    
+    return Math.atan2(
+      ring.center.y - bondMidY,
+      ring.center.x - bondMidX
+    );
+  };
+
+  // Helper function to determine double bond rendering case
+  const getDoubleBondRenderingCase = (bond) => {
+    const startVertex = { x: bond.x1, y: bond.y1 };
+    const endVertex = { x: bond.x2, y: bond.y2 };
+    
+    const startVertexBondCount = countVertexBonds(startVertex);
+    const endVertexBondCount = countVertexBonds(endVertex);
+    
+    // Case 1: Both vertices have additional bonds (single + offset line)
+    if (startVertexBondCount > 1 && endVertexBondCount > 1) {
+      return 'single-plus-offset';
+    }
+    
+    // Case 2: At least one vertex has no additional bonds (equal parallel lines)
+    return 'equal-parallel';
+  };
+
+  // Helper function to render a double bond based on its case and ring status
+  const renderDoubleBondByCase = (ctx, bond, offset, colors) => {
+    // Check if bond is in a ring
+    const ringInfo = isBondInRing(bond);
+    
+    if (ringInfo) {
+      // Ring double bond - always render with interior offset
+      const interiorDirection = getRingInteriorDirection(bond, ringInfo);
+      const offsetDistance = 4;
+      
+      const offsetX = Math.cos(interiorDirection) * offsetDistance;
+      const offsetY = Math.sin(interiorDirection) * offsetDistance;
+      
+      // Draw main bond line
+      ctx.strokeStyle = colors.bonds;
+      ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(bond.x1 + offset.x, bond.y1 + offset.y);
+      ctx.lineTo(bond.x2 + offset.x, bond.y2 + offset.y);
+      ctx.stroke();
+      
+      // Draw interior offset line (shorter for rings)
+      const bondLength = Math.sqrt(Math.pow(bond.x2 - bond.x1, 2) + Math.pow(bond.y2 - bond.y1, 2));
+      const shorterLength = bondLength * 0.7; // Shorter for ring bonds
+      const centerX = (bond.x1 + bond.x2) / 2;
+      const centerY = (bond.y1 + bond.y2) / 2;
+      
+      const bondUnitX = (bond.x2 - bond.x1) / bondLength;
+      const bondUnitY = (bond.y2 - bond.y1) / bondLength;
+      
+      const shorterStartX = centerX - (bondUnitX * shorterLength / 2);
+      const shorterStartY = centerY - (bondUnitY * shorterLength / 2);
+      const shorterEndX = centerX + (bondUnitX * shorterLength / 2);
+      const shorterEndY = centerY + (bondUnitY * shorterLength / 2);
+      
+      // Draw interior offset line
+      ctx.beginPath();
+      ctx.moveTo(shorterStartX + offsetX + offset.x, shorterStartY + offsetY + offset.y);
+      ctx.lineTo(shorterEndX + offsetX + offset.x, shorterEndY + offsetY + offset.y);
+      ctx.stroke();
+      
+    } else {
+      // Non-ring double bond - use existing case logic
+      const renderingCase = getDoubleBondRenderingCase(bond);
+      
+      if (renderingCase === 'equal-parallel') {
+        // Case 2: Two parallel lines of equal length - slightly closer
+        const bondAngle = Math.atan2(bond.y2 - bond.y1, bond.x2 - bond.x1);
+        const perpAngle = bondAngle + Math.PI / 2;
+        const offsetDistance = 5; // Reduced from 6 to 5 pixels (slightly closer)
+        
+        const offsetX = Math.cos(perpAngle) * offsetDistance;
+        const offsetY = Math.sin(perpAngle) * offsetDistance;
+        
+        // Draw two equal parallel lines
+        ctx.strokeStyle = colors.bonds;
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        
+        // First line
+        ctx.beginPath();
+        ctx.moveTo(bond.x1 + offsetX + offset.x, bond.y1 + offsetY + offset.y);
+        ctx.lineTo(bond.x2 + offsetX + offset.x, bond.y2 + offsetY + offset.y);
+        ctx.stroke();
+        
+        // Second line
+        ctx.beginPath();
+        ctx.moveTo(bond.x1 - offsetX + offset.x, bond.y1 - offsetY + offset.y);
+        ctx.lineTo(bond.x2 - offsetX + offset.x, bond.y2 - offsetY + offset.y);
+        ctx.stroke();
+        
+      } else {
+        // Case 1: Single bond + shorter, thicker offset line further away
+        const bondAngle = Math.atan2(bond.y2 - bond.y1, bond.x2 - bond.x1);
+        const perpAngle = bondAngle + Math.PI / 2; // Default offset direction
+        const offsetDistance = 8; // Increased from 4 to 8 pixels
+        
+        const offsetX = Math.cos(perpAngle) * offsetDistance;
+        const offsetY = Math.sin(perpAngle) * offsetDistance;
+        
+        // Draw main bond line (same as single bond)
+        ctx.strokeStyle = colors.bonds;
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(bond.x1 + offset.x, bond.y1 + offset.y);
+        ctx.lineTo(bond.x2 + offset.x, bond.y2 + offset.y);
+        ctx.stroke();
+        
+        // Calculate shorter line endpoints (80% of original length, centered)
+        const bondLength = Math.sqrt(Math.pow(bond.x2 - bond.x1, 2) + Math.pow(bond.y2 - bond.y1, 2));
+        const shorterLength = bondLength * 0.8; // Increased from 0.6 to 0.8 (slightly longer)
+        const centerX = (bond.x1 + bond.x2) / 2;
+        const centerY = (bond.y1 + bond.y2) / 2;
+        
+        const bondUnitX = (bond.x2 - bond.x1) / bondLength;
+        const bondUnitY = (bond.y2 - bond.y1) / bondLength;
+        
+        const shorterStartX = centerX - (bondUnitX * shorterLength / 2);
+        const shorterStartY = centerY - (bondUnitY * shorterLength / 2);
+        const shorterEndX = centerX + (bondUnitX * shorterLength / 2);
+        const shorterEndY = centerY + (bondUnitY * shorterLength / 2);
+        
+        // Draw shorter offset line - same thickness as main line
+        ctx.lineWidth = 3; // Same thickness as main line
+        ctx.beginPath();
+        ctx.moveTo(shorterStartX + offsetX + offset.x, shorterStartY + offsetY + offset.y);
+        ctx.lineTo(shorterEndX + offsetX + offset.x, shorterEndY + offsetY + offset.y);
+        ctx.stroke();
+      }
+    }
+  };
+
+  const findNearestVertex = (x, y) => {
+    let nearestVertex = null;
+    let minDistance = vertexThreshold;
+    
+    vertices.forEach(vertex => {
+      const distance = Math.sqrt(Math.pow(vertex.x - (x - offset.x), 2) + Math.pow(vertex.y - (y - offset.y), 2));
+      if (distance < minDistance) {
+        minDistance = distance;
+        nearestVertex = vertex;
+      }
+    });
+    
+    return nearestVertex;
+  };
+
+  // Helper function to find if mouse is over a bond
+  const findHoveredBond = (x, y) => {
+    const worldX = x - offset.x;
+    const worldY = y - offset.y;
+    
+    for (let i = 0; i < segments.length; i++) {
+      const segment = segments[i];
+      if (segment.bondOrder <= 0) continue; // Skip grid lines
+      
+      // Calculate distance from point to line segment
+      const A = worldX - segment.x1;
+      const B = worldY - segment.y1;
+      const C = segment.x2 - segment.x1;
+      const D = segment.y2 - segment.y1;
+      
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      
+      if (lenSq === 0) continue; // Zero-length segment
+      
+      let param = dot / lenSq;
+      
+      // Clamp to segment bounds
+      if (param < 0) param = 0;
+      else if (param > 1) param = 1;
+      
+      const xx = segment.x1 + param * C;
+      const yy = segment.y1 + param * D;
+      
+      const dx = worldX - xx;
+      const dy = worldY - yy;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance <= lineThreshold) {
+        return i;
+      }
+    }
+    
+    return null;
+  };
+
+  // Helper function to check if a suggested bond would overlap with existing bonds
+  const wouldOverlapExistingBond = (suggestionStart, suggestionEnd) => {
+    const suggestionAngle = Math.atan2(suggestionEnd.y - suggestionStart.y, suggestionEnd.x - suggestionStart.x);
+    const normalizedSuggestionAngle = normalizeToSixtyDegrees(suggestionAngle);
+    
+    // Check all existing bonds for overlap
+    for (const segment of segments) {
+      if (segment.bondOrder <= 0) continue; // Skip grid lines
+      
+      // Check if this bond starts from the same vertex as our suggestion
+      const startsFromSameVertex = (
+        Math.abs(segment.x1 - suggestionStart.x) < 0.01 && 
+        Math.abs(segment.y1 - suggestionStart.y) < 0.01
+      ) || (
+        Math.abs(segment.x2 - suggestionStart.x) < 0.01 && 
+        Math.abs(segment.y2 - suggestionStart.y) < 0.01
+      );
+      
+      if (startsFromSameVertex) {
+        // Calculate the angle of this existing bond from the suggestion start point
+        let existingBondAngle;
+        if (Math.abs(segment.x1 - suggestionStart.x) < 0.01 && Math.abs(segment.y1 - suggestionStart.y) < 0.01) {
+          existingBondAngle = Math.atan2(segment.y2 - segment.y1, segment.x2 - segment.x1);
+        } else {
+          existingBondAngle = Math.atan2(segment.y1 - segment.y2, segment.x1 - segment.x2);
+        }
+        
+        const normalizedExistingAngle = normalizeToSixtyDegrees(existingBondAngle);
+        
+        // If angles are the same (within tolerance), this would overlap
+        if (Math.abs(normalizedSuggestionAngle - normalizedExistingAngle) < 0.01) {
+          return true;
+        }
+      }
+    }
+    
+    return false;
+  };
+
+  // Helper function to generate bond suggestions at 120-degree angles
+  const generateBondSuggestions = useCallback((lastBond) => {
+    if (!lastBond) return [];
+
+    const suggestions = [];
+    
+    // Calculate the angle of the last bond
+    const bondAngle = Math.atan2(lastBond.y2 - lastBond.y1, lastBond.x2 - lastBond.x1);
+    
+    // Check bond counts for both vertices
+    const startVertex = { x: lastBond.x1, y: lastBond.y1 };
+    const endVertex = { x: lastBond.x2, y: lastBond.y2 };
+    const startVertexBondCount = countVertexBonds(startVertex);
+    const endVertexBondCount = countVertexBonds(endVertex);
+    
+    // Generate suggestions from the END vertex (x2, y2) - only if it has fewer than 3 bonds
+    if (endVertexBondCount < 3) {
+      const availableEndAngles = getAvailableBondAngles(endVertex);
+      
+      // Generate suggestions at 120-degree separation from the bond (±60° from bond angle)
+      const endSuggestion1Angle = bondAngle + (Math.PI / 3); // +60 degrees from bond angle
+      const endSuggestion2Angle = bondAngle - (Math.PI / 3); // -60 degrees from bond angle
+      
+      // Check if these angles are available for this vertex
+      const endSuggestion1Normalized = normalizeToSixtyDegrees(endSuggestion1Angle);
+      const endSuggestion2Normalized = normalizeToSixtyDegrees(endSuggestion2Angle);
+      
+      if (availableEndAngles.some(angle => Math.abs(angle - endSuggestion1Normalized) < 0.01)) {
+        const endSuggestion1End = {
+          x: lastBond.x2 + Math.cos(endSuggestion1Angle) * hexRadius,
+          y: lastBond.y2 + Math.sin(endSuggestion1Angle) * hexRadius
+        };
+        
+        if (!wouldOverlapExistingBond(endVertex, endSuggestion1End)) {
+          suggestions.push({
+            id: 'end-suggestion1',
+            x1: lastBond.x2,
+            y1: lastBond.y2,
+            x2: endSuggestion1End.x,
+            y2: endSuggestion1End.y,
+            angle: endSuggestion1Angle,
+            fromVertex: { x: lastBond.x2, y: lastBond.y2 }
+          });
+        }
+      }
+      
+      if (availableEndAngles.some(angle => Math.abs(angle - endSuggestion2Normalized) < 0.01)) {
+        const endSuggestion2End = {
+          x: lastBond.x2 + Math.cos(endSuggestion2Angle) * hexRadius,
+          y: lastBond.y2 + Math.sin(endSuggestion2Angle) * hexRadius
+        };
+        
+        if (!wouldOverlapExistingBond(endVertex, endSuggestion2End)) {
+          suggestions.push({
+            id: 'end-suggestion2',
+            x1: lastBond.x2,
+            y1: lastBond.y2,
+            x2: endSuggestion2End.x,
+            y2: endSuggestion2End.y,
+            angle: endSuggestion2Angle,
+            fromVertex: { x: lastBond.x2, y: lastBond.y2 }
+          });
+        }
+      }
+    }
+    
+    // Generate suggestions from the START vertex (x1, y1) - only if it has fewer than 3 bonds
+    if (startVertexBondCount < 3) {
+      const availableStartAngles = getAvailableBondAngles(startVertex);
+      
+      // The bond angle from start vertex perspective is opposite
+      const startBondAngle = bondAngle + Math.PI; // Reverse direction
+      const startSuggestion1Angle = startBondAngle + (Math.PI / 3); // +60 degrees from reversed bond angle
+      const startSuggestion2Angle = startBondAngle - (Math.PI / 3); // -60 degrees from reversed bond angle
+      
+      // Check if these angles are available for this vertex
+      const startSuggestion1Normalized = normalizeToSixtyDegrees(startSuggestion1Angle);
+      const startSuggestion2Normalized = normalizeToSixtyDegrees(startSuggestion2Angle);
+      
+      if (availableStartAngles.some(angle => Math.abs(angle - startSuggestion1Normalized) < 0.01)) {
+        const startSuggestion1End = {
+          x: lastBond.x1 + Math.cos(startSuggestion1Angle) * hexRadius,
+          y: lastBond.y1 + Math.sin(startSuggestion1Angle) * hexRadius
+        };
+        
+        if (!wouldOverlapExistingBond(startVertex, startSuggestion1End)) {
+          suggestions.push({
+            id: 'start-suggestion1',
+            x1: lastBond.x1,
+            y1: lastBond.y1,
+            x2: startSuggestion1End.x,
+            y2: startSuggestion1End.y,
+            angle: startSuggestion1Angle,
+            fromVertex: { x: lastBond.x1, y: lastBond.y1 }
+          });
+        }
+      }
+      
+      if (availableStartAngles.some(angle => Math.abs(angle - startSuggestion2Normalized) < 0.01)) {
+        const startSuggestion2End = {
+          x: lastBond.x1 + Math.cos(startSuggestion2Angle) * hexRadius,
+          y: lastBond.y1 + Math.sin(startSuggestion2Angle) * hexRadius
+        };
+        
+        if (!wouldOverlapExistingBond(startVertex, startSuggestion2End)) {
+          suggestions.push({
+            id: 'start-suggestion2',
+            x1: lastBond.x1,
+            y1: lastBond.y1,
+            x2: startSuggestion2End.x,
+            y2: startSuggestion2End.y,
+            angle: startSuggestion2Angle,
+            fromVertex: { x: lastBond.x1, y: lastBond.y1 }
+          });
+        }
+      }
+    }
+    
+    return suggestions;
+  }, [hexRadius, segments, countVertexBonds, getAvailableBondAngles, normalizeToSixtyDegrees]);
+
+  // Helper function to check if mouse is over a bond suggestion
+  const findHoveredSuggestion = (x, y) => {
+    const worldX = x - offset.x;
+    const worldY = y - offset.y;
+    
+    for (let i = 0; i < bondSuggestions.length; i++) {
+      const suggestion = bondSuggestions[i];
+      
+      // Calculate distance from point to line segment
+      const A = worldX - suggestion.x1;
+      const B = worldY - suggestion.y1;
+      const C = suggestion.x2 - suggestion.x1;
+      const D = suggestion.y2 - suggestion.y1;
+      
+      const dot = A * C + B * D;
+      const lenSq = C * C + D * D;
+      
+      if (lenSq === 0) continue;
+      
+      let param = dot / lenSq;
+      if (param < 0) param = 0;
+      else if (param > 1) param = 1;
+      
+      const xx = suggestion.x1 + param * C;
+      const yy = suggestion.y1 + param * D;
+      
+      const dx = worldX - xx;
+      const dy = worldY - yy;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance <= lineThreshold) {
+        return i;
+      }
+    }
+    
+    return null;
+  };
+
+  // Helper function to find vertices that should be merged
+  const findVerticesToMerge = useCallback(() => {
+    const mergeOperations = [];
+    
+    for (let i = 0; i < vertices.length; i++) {
+      for (let j = i + 1; j < vertices.length; j++) {
+        const vertex1 = vertices[i];
+        const vertex2 = vertices[j];
+        
+        const distance = Math.sqrt(
+          Math.pow(vertex1.x - vertex2.x, 2) + 
+          Math.pow(vertex1.y - vertex2.y, 2)
+        );
+        
+        if (distance <= mergeThreshold) {
+          mergeOperations.push({
+            vertex1Index: i,
+            vertex2Index: j,
+            vertex1,
+            vertex2,
+            distance
+          });
+        }
+      }
+    }
+    
+    return mergeOperations;
+  }, [vertices, mergeThreshold]);
+
+  // Helper function to perform vertex merging
+  const performVertexMerge = useCallback((mergeOperation) => {
+    const { vertex1Index, vertex2Index, vertex1, vertex2 } = mergeOperation;
+    
+    // Calculate merged position (average of the two vertices)
+    const mergedVertex = {
+      x: (vertex1.x + vertex2.x) / 2,
+      y: (vertex1.y + vertex2.y) / 2,
+      isOffGrid: vertex1.isOffGrid || vertex2.isOffGrid // Keep off-grid status if either is off-grid
+    };
+    
+    // Update vertices array - remove both old vertices and add merged one
+    setVertices(prevVertices => {
+      const newVertices = [...prevVertices];
+      // Remove vertices in reverse order to maintain indices
+      if (vertex2Index > vertex1Index) {
+        newVertices.splice(vertex2Index, 1);
+        newVertices.splice(vertex1Index, 1);
+      } else {
+        newVertices.splice(vertex1Index, 1);
+        newVertices.splice(vertex2Index, 1);
+      }
+      newVertices.push(mergedVertex);
+      return newVertices;
+    });
+    
+    // Update all segments that reference the old vertices
+    setSegments(prevSegments => {
+      return prevSegments.map(segment => {
+        let updatedSegment = { ...segment };
+        
+        // Check if segment uses vertex1
+        if (Math.abs(segment.x1 - vertex1.x) < 0.01 && Math.abs(segment.y1 - vertex1.y) < 0.01) {
+          updatedSegment.x1 = mergedVertex.x;
+          updatedSegment.y1 = mergedVertex.y;
+        }
+        if (Math.abs(segment.x2 - vertex1.x) < 0.01 && Math.abs(segment.y2 - vertex1.y) < 0.01) {
+          updatedSegment.x2 = mergedVertex.x;
+          updatedSegment.y2 = mergedVertex.y;
+        }
+        
+        // Check if segment uses vertex2
+        if (Math.abs(segment.x1 - vertex2.x) < 0.01 && Math.abs(segment.y1 - vertex2.y) < 0.01) {
+          updatedSegment.x1 = mergedVertex.x;
+          updatedSegment.y1 = mergedVertex.y;
+        }
+        if (Math.abs(segment.x2 - vertex2.x) < 0.01 && Math.abs(segment.y2 - vertex2.y) < 0.01) {
+          updatedSegment.x2 = mergedVertex.x;
+          updatedSegment.y2 = mergedVertex.y;
+        }
+        
+        // Recalculate bond direction if endpoints changed
+        if (updatedSegment.x1 !== segment.x1 || updatedSegment.y1 !== segment.y1 || 
+            updatedSegment.x2 !== segment.x2 || updatedSegment.y2 !== segment.y2) {
+          updatedSegment.direction = calculateBondDirection(
+            updatedSegment.x1, updatedSegment.y1, 
+            updatedSegment.x2, updatedSegment.y2
+          );
+        }
+        
+        return updatedSegment;
+      });
+    });
+    
+    // Update vertex atoms if they exist for the merged vertices
+    setVertexAtoms(prevAtoms => {
+      const newAtoms = { ...prevAtoms };
+      const vertex1Key = `${vertex1.x.toFixed(2)},${vertex1.y.toFixed(2)}`;
+      const vertex2Key = `${vertex2.x.toFixed(2)},${vertex2.y.toFixed(2)}`;
+      const mergedKey = `${mergedVertex.x.toFixed(2)},${mergedVertex.y.toFixed(2)}`;
+      
+      // If either vertex had atom data, preserve it for the merged vertex
+      if (newAtoms[vertex1Key] || newAtoms[vertex2Key]) {
+        newAtoms[mergedKey] = newAtoms[vertex1Key] || newAtoms[vertex2Key];
+      }
+      
+      // Remove old atom data
+      delete newAtoms[vertex1Key];
+      delete newAtoms[vertex2Key];
+      
+      return newAtoms;
+    });
+  }, [calculateBondDirection]);
+
+  // Function to check and perform vertex merging
+  const checkAndPerformVertexMerging = useCallback(() => {
+    const mergeOperations = findVerticesToMerge();
+    
+    // Perform merging operations (limit to one at a time to avoid conflicts)
+    if (mergeOperations.length > 0) {
+      // Sort by distance and merge the closest pair first
+      mergeOperations.sort((a, b) => a.distance - b.distance);
+      performVertexMerge(mergeOperations[0]);
+    }
+  }, [findVerticesToMerge, performVertexMerge]);
+
+  // Canvas click handler for all modes
+  const handleCanvasClick = useCallback((event) => {
+    // Handle text mode clicks
+    if (mode === 'text') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const clickPosition = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      
+      // Check if clicking on existing vertex first
+      const clickedVertex = findNearestVertex(clickPosition.x, clickPosition.y);
+      if (clickedVertex) {
+        // Open text input for existing vertex
+        const success = handleEnterKeyOnVertex(
+          clickedVertex,
+          clickPosition,
+          {
+            setShowAtomInput,
+            setAtomInputPosition,
+            setAtomInputValue,
+            setMenuVertexKey
+          }
+        );
+        return;
+      }
+      
+      // Create new vertex with text input
+      const success = handleTextButtonClick(
+        clickPosition,
+        offset,
+        { vertices, molecularBoundaryRadius },
+        {
+          setVertices,
+          setShowAtomInput,
+          setAtomInputPosition,
+          setAtomInputValue,
+          setMenuVertexKey
+        }
+      );
+      return;
+    }
+
+    // Handle draw mode clicks
+    if (mode !== 'draw') return;
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Convert to world coordinates
+    const worldX = x - offset.x;
+    const worldY = y - offset.y;
+    
+    // Check if we're clicking on an existing vertex FIRST (highest priority)
+    const clickedVertex = findNearestVertex(x, y);
+    
+    if (clickedVertex && !isCreatingBond) {
+      // Clear existing suggestions when starting a new bond from a vertex
+      setBondSuggestions([]);
+      
+      // Start creating a bond from this existing vertex
+      setBondStartPoint(clickedVertex);
+      setIsCreatingBond(true);
+      return; // Exit early - vertex click takes priority over everything
+    }
+    
+    // Check if clicking on a bond suggestion (only if no vertex was clicked)
+    const clickedSuggestionIndex = findHoveredSuggestion(x, y);
+    if (clickedSuggestionIndex !== null && !isCreatingBond) {
+      const suggestion = bondSuggestions[clickedSuggestionIndex];
+      
+      // Create the suggested bond
+      const newVertex = { x: suggestion.x2, y: suggestion.y2, isOffGrid: false };
+      setVertices(prev => [...prev, newVertex]);
+      
+      const newBond = {
+        x1: suggestion.x1,
+        y1: suggestion.y1,
+        x2: suggestion.x2,
+        y2: suggestion.y2,
+        bondOrder: 1,
+        bondType: null,
+        bondDirection: 1,
+        direction: calculateBondDirection(suggestion.x1, suggestion.y1, suggestion.x2, suggestion.y2),
+        flipSmallerLine: false
+      };
+      
+      setSegments(prev => {
+        const newSegments = [...prev, newBond];
+        
+        // Update vertex bond states for both ends of the bond
+        const bondAngle = calculateBondDirection(newBond.x1, newBond.y1, newBond.x2, newBond.y2);
+        const reverseBondAngle = bondAngle + Math.PI; // Angle from end vertex perspective
+        
+        updateVertexBondState(suggestion.fromVertex, bondAngle);
+        updateVertexBondState(newVertex, reverseBondAngle);
+        
+        // Generate new suggestions from this bond
+        setTimeout(() => {
+          setBondSuggestions(generateBondSuggestions(newBond));
+          // Update ring detection after new bond
+          updateRingDetection();
+          // Check for vertex merging after state updates
+          setTimeout(() => checkAndPerformVertexMerging(), 10);
+        }, 0);
+        return newSegments;
+      });
+      
+      return; // Exit early after handling suggestion click
+    }
+    
+    // Check if clicking on an existing bond to make it a double bond
+    const clickedBondIndex = findHoveredBond(x, y);
+    if (clickedBondIndex !== null && !isCreatingBond) {
+      const clickedBond = segments[clickedBondIndex];
+      
+      // Only convert single bonds to double bonds
+      if (clickedBond.bondOrder === 1) {
+        // Convert to double bond
+        setSegments(prev => {
+          const newSegments = [...prev];
+          const doubleBond = {
+            ...clickedBond,
+            bondOrder: 2
+          };
+          newSegments[clickedBondIndex] = doubleBond;
+          
+          // Regenerate suggestions from the new double bond
+          setTimeout(() => {
+            setBondSuggestions(generateBondSuggestions(doubleBond));
+            // Update ring detection after double bond creation
+            updateRingDetection();
+          }, 0);
+          
+          return newSegments;
+        });
+      }
+      
+      return; // Exit early after handling bond click
+    }
+
+    if (!isCreatingBond) {
+      // If we get here, no vertex, suggestion, or bond was clicked
+      // Check if click position is within molecular boundary
+      if (isWithinMolecularBoundary(worldX, worldY)) {
+        // Don't create new vertex if too close to existing molecular structure
+        return;
+      }
+      
+      // Clear existing suggestions when starting a new bond
+      setBondSuggestions([]);
+      
+      // Create new start vertex at click position
+      const newStartVertex = { x: worldX, y: worldY, isOffGrid: false };
+      setVertices(prev => [...prev, newStartVertex]);
+      setBondStartPoint(newStartVertex);
+      setIsCreatingBond(true);
+    } else {
+      // Complete the bond with fixed length
+      let endVertex;
+      
+      // Re-check for clicked vertex in completion mode (vertex still takes priority)
+      const completionClickedVertex = findNearestVertex(x, y);
+      
+      if (completionClickedVertex && completionClickedVertex !== bondStartPoint) {
+        // End at existing vertex
+        endVertex = completionClickedVertex;
+      } else {
+        // Calculate fixed-length end position with angle snapping
+        const deltaX = worldX - bondStartPoint.x;
+        const deltaY = worldY - bondStartPoint.y;
+        const currentLength = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        
+        if (currentLength > 0) {
+          // Calculate the target angle
+          let targetAngle = Math.atan2(deltaY, deltaX);
+          
+          // Check if angle snapping should be applied
+          if (!shouldDisableAngleSnapping(bondStartPoint)) {
+            const snappedAngle = findClosestSnapAngle(targetAngle, bondStartPoint);
+            if (snappedAngle !== null) {
+              targetAngle = snappedAngle;
+            }
+          }
+          
+          // Calculate fixed-length end point using the (possibly snapped) angle
+          const fixedX = bondStartPoint.x + Math.cos(targetAngle) * hexRadius;
+          const fixedY = bondStartPoint.y + Math.sin(targetAngle) * hexRadius;
+          endVertex = { x: fixedX, y: fixedY, isOffGrid: false };
+        } else {
+          // Default to horizontal bond if no movement
+          endVertex = { x: bondStartPoint.x + hexRadius, y: bondStartPoint.y, isOffGrid: false };
+        }
+        
+        setVertices(prev => [...prev, endVertex]);
+      }
+      
+      // Create the bond
+      const newBond = {
+        x1: bondStartPoint.x,
+        y1: bondStartPoint.y,
+        x2: endVertex.x,
+        y2: endVertex.y,
+        bondOrder: 1, // Single bond
+        bondType: null,
+        bondDirection: 1,
+        direction: calculateBondDirection(bondStartPoint.x, bondStartPoint.y, endVertex.x, endVertex.y),
+        flipSmallerLine: false
+      };
+      
+      setSegments(prev => {
+        const newSegments = [...prev, newBond];
+        
+        // Update vertex bond states for both ends of the bond
+        const bondAngle = calculateBondDirection(newBond.x1, newBond.y1, newBond.x2, newBond.y2);
+        const reverseBondAngle = bondAngle + Math.PI; // Angle from end vertex perspective
+        
+        updateVertexBondState(bondStartPoint, bondAngle);
+        updateVertexBondState(endVertex, reverseBondAngle);
+        
+        // Generate bond suggestions from the newly created bond
+        setTimeout(() => {
+          setBondSuggestions(generateBondSuggestions(newBond));
+          // Update ring detection after new bond
+          updateRingDetection();
+          // Check for vertex merging after state updates
+          setTimeout(() => checkAndPerformVertexMerging(), 10);
+        }, 0);
+        return newSegments;
+      });
+      
+      // Reset bond creation state
+      setIsCreatingBond(false);
+      setBondStartPoint(null);
+      setBondPreviewEnd(null);
+    }
+  }, [mode, isCreatingBond, bondStartPoint, vertices, segments, offset, hexRadius, bondSuggestions, findHoveredSuggestion, generateBondSuggestions, checkAndPerformVertexMerging, shouldDisableAngleSnapping, findClosestSnapAngle, updateVertexBondState, calculateBondDirection, molecularBoundaryRadius]);
+
+  const handleCanvasMouseMove = useCallback((event) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // Update current mouse position for text input positioning
+    setCurrentMousePosition({ x, y });
+    
+    // Handle bond creation preview
+    if (mode === 'draw' && isCreatingBond) {
+      // Convert to world coordinates
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      // Calculate fixed-length preview end point with angle snapping
+      if (bondStartPoint) {
+        const deltaX = worldX - bondStartPoint.x;
+        const deltaY = worldY - bondStartPoint.y;
+        const currentLength = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+        
+        if (currentLength > 0) {
+          // Calculate the target angle
+          let targetAngle = Math.atan2(deltaY, deltaX);
+          
+          // Check if angle snapping should be applied
+          if (!shouldDisableAngleSnapping(bondStartPoint)) {
+            const snappedAngle = findClosestSnapAngle(targetAngle, bondStartPoint);
+            if (snappedAngle !== null) {
+              targetAngle = snappedAngle;
+            }
+          }
+          
+          // Calculate fixed-length end point using the (possibly snapped) angle
+          const fixedX = bondStartPoint.x + Math.cos(targetAngle) * hexRadius;
+          const fixedY = bondStartPoint.y + Math.sin(targetAngle) * hexRadius;
+          setBondPreviewEnd({ x: fixedX, y: fixedY });
+        } else {
+          // Default preview position
+          setBondPreviewEnd({ x: bondStartPoint.x + hexRadius, y: bondStartPoint.y });
+        }
+      }
+    }
+    
+    // Handle hover detection (always active, even when creating bonds)
+    const hoveredVertex = findNearestVertex(x, y);
+    
+    // Check for suggestion hover (only when not creating bonds AND no vertex is hovered)
+    const hoveredSuggestion = (!isCreatingBond && !hoveredVertex) ? findHoveredSuggestion(x, y) : null;
+    
+    // Only check for bond hover if no vertex or suggestion is hovered (vertex has absolute highest priority)
+    const hoveredBond = (hoveredVertex || hoveredSuggestion !== null) ? null : findHoveredBond(x, y);
+    
+    // Update hover states
+    setHoveredVertex(hoveredVertex);
+    setHoveredBondIndex(hoveredBond);
+    setHoveredSuggestionIndex(hoveredSuggestion);
+  }, [mode, isCreatingBond, offset, bondStartPoint, hexRadius, vertices, segments, vertexThreshold, lineThreshold, bondSuggestions, shouldDisableAngleSnapping, findClosestSnapAngle, getAvailableBondAngles]);
+
+  // Enhanced keyboard handler for text and bond creation
+  const handleKeyDown = useCallback((event) => {
+    // Handle Escape key for bond creation
+    if (event.key === 'Escape' && isCreatingBond) {
+      setIsCreatingBond(false);
+      setBondStartPoint(null);
+      setBondPreviewEnd(null);
+      return;
+    }
+
+    // Handle Enter key for text input on hovered vertex
+    if (event.key === 'Enter' && hoveredVertex && !showAtomInput) {
+      const success = handleEnterKeyOnVertex(
+        hoveredVertex, 
+        currentMousePosition, 
+        {
+          setShowAtomInput,
+          setAtomInputPosition,
+          setAtomInputValue,
+          setMenuVertexKey
+        }
+      );
+      if (success) return;
+    }
+
+    // Handle single letter keys for quick element placement
+    if (event.key.length === 1 && /[A-Za-z]/.test(event.key) && hoveredVertex && !showAtomInput) {
+      const success = handleQuickElementKey(
+        event.key,
+        hoveredVertex,
+        { vertexAtoms, segments },
+        { setVertexAtoms }
+      );
+      if (success) return;
+    }
+  }, [isCreatingBond, hoveredVertex, showAtomInput, currentMousePosition, vertexAtoms, segments]);
+
+  // Handle mouse leaving canvas - clear hover states
+  const handleCanvasMouseLeave = useCallback(() => {
+    setHoveredVertex(null);
+    setHoveredBondIndex(null);
+    setHoveredSuggestionIndex(null);
+  }, []);
+
+  // Add keyboard listener
+  React.useEffect(() => {
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
+  // Check for vertex merging when vertices change
+  React.useEffect(() => {
+    if (vertices.length > 1) {
+      const timeoutId = setTimeout(() => {
+        checkAndPerformVertexMerging();
+      }, 100); // Small delay to allow state updates to complete
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [vertices, checkAndPerformVertexMerging]);
+
+  // Canvas drawing function
+  const drawCanvas = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Set canvas size
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = colors.canvasBackground;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw existing bonds - handle single and double bonds differently
+    ctx.lineCap = 'round'; // Rounded line ends
+    segments.forEach((segment, index) => {
+      if (segment.bondOrder <= 0) return; // Skip grid lines
+      
+      if (segment.bondOrder === 1) {
+        // Single bond rendering
+        ctx.strokeStyle = hoveredBondIndex === index ? '#007bff' : colors.bonds;
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(segment.x1 + offset.x, segment.y1 + offset.y);
+        ctx.lineTo(segment.x2 + offset.x, segment.y2 + offset.y);
+        ctx.stroke();
+      } else if (segment.bondOrder === 2) {
+        // Double bond rendering with hover support
+        if (hoveredBondIndex === index) {
+          // Render hovered double bond in blue
+          const originalBondsColor = colors.bonds;
+          const tempColors = { ...colors, bonds: '#007bff' };
+          renderDoubleBondByCase(ctx, segment, offset, tempColors);
+        } else {
+          // Render normal double bond
+          renderDoubleBondByCase(ctx, segment, offset, colors);
+        }
+      }
+    });
+
+    // Draw bond suggestions
+    if (bondSuggestions.length > 0 && !isCreatingBond) {
+      bondSuggestions.forEach((suggestion, index) => {
+        // Use gray color for suggestions, blue if hovered
+        ctx.strokeStyle = hoveredSuggestionIndex === index ? '#007bff' : '#888888';
+        ctx.lineWidth = 3; // Same thickness as regular bonds
+        ctx.lineCap = 'round';
+        // Solid gray lines, same as bond preview
+        ctx.beginPath();
+        ctx.moveTo(suggestion.x1 + offset.x, suggestion.y1 + offset.y);
+        ctx.lineTo(suggestion.x2 + offset.x, suggestion.y2 + offset.y);
+        ctx.stroke();
+      });
+    }
+
+    // Draw bond preview if creating a bond
+    if (isCreatingBond && bondStartPoint && bondPreviewEnd) {
+      ctx.strokeStyle = '#888888'; // Gray preview color
+      ctx.lineWidth = 3; // Same thickness as regular bonds
+      ctx.lineCap = 'round';
+      // No dashed line - solid gray line
+      ctx.beginPath();
+      ctx.moveTo(bondStartPoint.x + offset.x, bondStartPoint.y + offset.y);
+      ctx.lineTo(bondPreviewEnd.x + offset.x, bondPreviewEnd.y + offset.y);
+      ctx.stroke();
+    }
+
+    // Draw atom text labels
+    renderAllAtomText(ctx, vertices, vertexAtoms, offset, colors, isDarkMode);
+
+    // Draw hovered vertex highlight (always visible, even during bond creation)
+    // This is drawn last so it appears on top of everything else
+    if (hoveredVertex) {
+      ctx.fillStyle = 'rgba(0, 123, 255, 0.3)'; // Blue highlight color with transparency
+      ctx.beginPath();
+      ctx.arc(hoveredVertex.x + offset.x, hoveredVertex.y + offset.y, 10, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }, [colors, segments, vertices, vertexAtoms, offset, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode]);
+
+  // Redraw canvas when relevant data changes
+  React.useEffect(() => {
+    drawCanvas();
+  }, [drawCanvas]);
+
   return (
     <div style={{
       position: 'fixed',
@@ -1709,11 +2985,11 @@ import { formatAtomText } from './utils/TextUtils.jsx';
       }}>
         <canvas
           ref={canvasRef}
-          onClick={() => {}}
+          onClick={handleCanvasClick}
           onMouseDown={() => {}}
-          onMouseMove={() => {}}
+          onMouseMove={handleCanvasMouseMove}
           onMouseUp={() => {}}
-          onMouseLeave={() => {}}
+          onMouseLeave={handleCanvasMouseLeave}
           style={{
             position: 'absolute',
             top: 0,
@@ -1721,7 +2997,10 @@ import { formatAtomText } from './utils/TextUtils.jsx';
             width: '100vw',
             height: '100vh',
             pointerEvents: 'auto',
-            cursor: isPasteMode ? 'copy' : (mode === 'text' || mode === 'mouse' ? 'text' : 'default'),
+            cursor: isPasteMode ? 'copy' : 
+                   (mode === 'draw' && isCreatingBond ? 'crosshair' : 
+                   (mode === 'draw' ? 'crosshair' : 
+                   (mode === 'text' || mode === 'mouse' ? 'text' : 'default'))),
             display: 'block',
           }}
         />
@@ -1789,14 +3068,22 @@ import { formatAtomText } from './utils/TextUtils.jsx';
               value={atomInputValue}
               onChange={(e) => {
                 const newValue = e.target.value;
-                // Auto-capitalize single letters
-                if (newValue.length === 1 && /^[a-zA-Z]$/.test(newValue)) {
-                  setAtomInputValue(newValue.toUpperCase());
-                } else {
-                  setAtomInputValue(newValue);
+                // Only allow letters (no numbers, no automatic hydrogens)
+                const lettersOnly = newValue.replace(/[^a-zA-Z]/g, '');
+                // Auto-capitalize
+                setAtomInputValue(lettersOnly.toUpperCase());
+              }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  // Handle text input completion
+                  handleTextInputComplete(
+                    atomInputValue,
+                    menuVertexKey,
+                    { segments },
+                    { setVertexAtoms, setShowAtomInput }
+                  );
                 }
               }}
-              onKeyDown={() => {}}
               autoFocus
               style={{
                 position: 'absolute',
