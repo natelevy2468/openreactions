@@ -11,6 +11,9 @@ import {
   handleTextInputComplete 
 } from './handlers/TextHandler.js';
 import { renderAllAtomText } from './rendering/TextRenderer.js';
+import { renderAllLonePairsAndCharges } from './rendering/LonePairRenderer.js';
+import { getLonePairPositionOrder } from './utils/LonePairPositioning.js';
+import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rendering/StereochemistryRenderer.js';
 
 
   const HexGridWithToolbar = () => {
@@ -179,7 +182,7 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
   const lineThreshold = 8; // Distance for line detection
   const mergeThreshold = 20; // Distance for vertex merging
   const snapAngleTolerance = 20 * (Math.PI / 180); // 20 degrees in radians
-  const molecularBoundaryRadius = 40; // Radius around existing molecules to prevent new vertex creation
+  const molecularBoundaryRadius = 60; // Radius around existing molecules to prevent new vertex creation (safe zone)
   
   // Common bond angles (in radians): 60°, 120°, 180°, 240°, 300°, 0° (rotated by +30° from previous)
   const snapAngles = [Math.PI/3, 2*Math.PI/3, Math.PI, 4*Math.PI/3, 5*Math.PI/3, 0];
@@ -410,7 +413,55 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
     return false;
   };
 
-  // Helper function to update ring detection
+  // Helper function to find overlapping bond
+  const findOverlappingBond = (startVertex, endVertex) => {
+    const angleTolerance = 15 * (Math.PI / 180); // 15 degrees tolerance
+    const newBondAngle = Math.atan2(endVertex.y - startVertex.y, endVertex.x - startVertex.x);
+    
+    // Check all existing bonds connected to the start vertex
+    for (const bond of segments) {
+      if (bond.bondOrder <= 0) continue; // Skip grid lines
+      
+      // Check if bond is connected to start vertex
+      const isConnectedToStart = 
+        (Math.abs(bond.x1 - startVertex.x) < 0.01 && Math.abs(bond.y1 - startVertex.y) < 0.01) ||
+        (Math.abs(bond.x2 - startVertex.x) < 0.01 && Math.abs(bond.y2 - startVertex.y) < 0.01);
+      
+      if (!isConnectedToStart) continue;
+      
+      // Calculate the angle of the existing bond from the start vertex
+      let existingBondAngle;
+      if (Math.abs(bond.x1 - startVertex.x) < 0.01 && Math.abs(bond.y1 - startVertex.y) < 0.01) {
+        existingBondAngle = Math.atan2(bond.y2 - bond.y1, bond.x2 - bond.x1);
+      } else {
+        existingBondAngle = Math.atan2(bond.y1 - bond.y2, bond.x1 - bond.x2);
+      }
+      
+      // Calculate angular difference
+      let angleDiff = Math.abs(newBondAngle - existingBondAngle);
+      // Normalize to 0-π range
+      if (angleDiff > Math.PI) angleDiff = 2 * Math.PI - angleDiff;
+      
+      // If angles are very similar, this is an overlapping bond
+      if (angleDiff < angleTolerance) {
+        return bond;
+      }
+    }
+    
+    return null;
+  };
+
+  // Memoize ring detection to avoid recalculating on every render
+  const detectedRingsMemo = React.useMemo(() => {
+    return detectAllRingsEnhanced(segments, vertices);
+  }, [segments, vertices]);
+  
+  // Update detectedRings state when memo changes
+  React.useEffect(() => {
+    setDetectedRings(detectedRingsMemo);
+  }, [detectedRingsMemo]);
+  
+  // Helper function to manually trigger ring detection (for specific cases)
   const updateRingDetection = useCallback(() => {
     const rings = detectAllRingsEnhanced(segments, vertices);
     setDetectedRings(rings);
@@ -479,7 +530,7 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
     if (ringInfo) {
       // Ring double bond - always render with interior offset
       const interiorDirection = getRingInteriorDirection(bond, ringInfo);
-      const offsetDistance = 4;
+      const offsetDistance = 11; // Further from main line for better visibility
       
       const offsetX = Math.cos(interiorDirection) * offsetDistance;
       const offsetY = Math.sin(interiorDirection) * offsetDistance;
@@ -493,9 +544,9 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
       ctx.lineTo(bond.x2 + offset.x, bond.y2 + offset.y);
       ctx.stroke();
       
-      // Draw interior offset line (shorter for rings)
+      // Draw interior offset line (slightly longer and further away)
       const bondLength = Math.sqrt(Math.pow(bond.x2 - bond.x1, 2) + Math.pow(bond.y2 - bond.y1, 2));
-      const shorterLength = bondLength * 0.7; // Shorter for ring bonds
+      const shorterLength = bondLength * 0.77; // Slightly longer (increased from 0.6 to 0.7)
       const centerX = (bond.x1 + bond.x2) / 2;
       const centerY = (bond.y1 + bond.y2) / 2;
       
@@ -544,10 +595,10 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
         ctx.stroke();
         
       } else {
-        // Case 1: Single bond + shorter, thicker offset line further away
+        // Case 1: Single bond + shorter offset line (matching ring style)
         const bondAngle = Math.atan2(bond.y2 - bond.y1, bond.x2 - bond.x1);
         const perpAngle = bondAngle + Math.PI / 2; // Default offset direction
-        const offsetDistance = 8; // Increased from 4 to 8 pixels
+        const offsetDistance = 11; // Match ring double bond style
         
         const offsetX = Math.cos(perpAngle) * offsetDistance;
         const offsetY = Math.sin(perpAngle) * offsetDistance;
@@ -561,9 +612,9 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
         ctx.lineTo(bond.x2 + offset.x, bond.y2 + offset.y);
         ctx.stroke();
         
-        // Calculate shorter line endpoints (80% of original length, centered)
+        // Calculate shorter line endpoints (matching ring style - 77% length, centered)
         const bondLength = Math.sqrt(Math.pow(bond.x2 - bond.x1, 2) + Math.pow(bond.y2 - bond.y1, 2));
-        const shorterLength = bondLength * 0.8; // Increased from 0.6 to 0.8 (slightly longer)
+        const shorterLength = bondLength * 0.77; // Match ring double bond style
         const centerX = (bond.x1 + bond.x2) / 2;
         const centerY = (bond.y1 + bond.y2) / 2;
         
@@ -1007,8 +1058,50 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
       return;
     }
 
-    // Handle draw mode clicks
-    if (mode !== 'draw') return;
+    // Handle charge and lone pair mode clicks
+    if (mode === 'plus' || mode === 'minus' || mode === 'lone') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      // Find the nearest vertex
+      const clickedVertex = findNearestVertex(x, y);
+      if (clickedVertex) {
+        const vertexKey = `${clickedVertex.x.toFixed(2)},${clickedVertex.y.toFixed(2)}`;
+        
+        setVertexAtoms(prev => {
+          const prevVal = prev[vertexKey] || { 
+            symbol: 'C', 
+            charge: 0, 
+            implicitH: 0, 
+            lonePairs: 0 
+          };
+          
+          if (mode === 'plus') {
+            // Toggle +1 charge (cycle: 0 -> +1 -> 0)
+            const charge = prevVal.charge === 1 ? 0 : 1;
+            return { ...prev, [vertexKey]: { ...prevVal, charge } };
+          } else if (mode === 'minus') {
+            // Toggle -1 charge (cycle: 0 -> -1 -> 0)
+            const charge = prevVal.charge === -1 ? 0 : -1;
+            return { ...prev, [vertexKey]: { ...prevVal, charge } };
+          } else if (mode === 'lone') {
+            // Increment lone pairs count (cycle: 0 -> 1 -> 2 -> ... -> 8 -> 0)
+            // Each click adds one electron dot
+            const lonePairs = ((prevVal.lonePairs || 0) + 1) % 9;
+            return { ...prev, [vertexKey]: { ...prevVal, lonePairs } };
+          }
+          return prev;
+        });
+      }
+      return;
+    }
+
+    // Handle draw mode and stereochemistry mode clicks
+    if (mode !== 'draw' && mode !== 'wedge' && mode !== 'dash' && mode !== 'ambiguous') return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1039,6 +1132,12 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
     if (clickedSuggestionIndex !== null && !isCreatingBond) {
       const suggestion = bondSuggestions[clickedSuggestionIndex];
       
+      // Determine bond type based on current mode
+      let bondType = null;
+      if (mode === 'wedge') bondType = 'wedge';
+      else if (mode === 'dash') bondType = 'dash';
+      else if (mode === 'ambiguous') bondType = 'ambiguous';
+      
       // Create the suggested bond
       const newVertex = { x: suggestion.x2, y: suggestion.y2, isOffGrid: false };
       setVertices(prev => [...prev, newVertex]);
@@ -1049,7 +1148,7 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
         x2: suggestion.x2,
         y2: suggestion.y2,
         bondOrder: 1,
-        bondType: null,
+        bondType: bondType,
         bondDirection: 1,
         direction: calculateBondDirection(suggestion.x1, suggestion.y1, suggestion.x2, suggestion.y2),
         flipSmallerLine: false
@@ -1079,13 +1178,13 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
       return; // Exit early after handling suggestion click
     }
     
-    // Check if clicking on an existing bond to make it a double bond
+    // Check if clicking on an existing bond
     const clickedBondIndex = findHoveredBond(x, y);
     if (clickedBondIndex !== null && !isCreatingBond) {
       const clickedBond = segments[clickedBondIndex];
       
-      // Only convert single bonds to double bonds
-      if (clickedBond.bondOrder === 1) {
+      // Handle draw mode: convert to double bond
+      if (mode === 'draw' && clickedBond.bondOrder === 1 && !clickedBond.bondType) {
         // Convert to double bond
         setSegments(prev => {
           const newSegments = [...prev];
@@ -1104,6 +1203,40 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
           
           return newSegments;
         });
+        return; // Exit early
+      }
+      
+      // Handle stereochemistry modes: convert bond or flip if same type
+      if (mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') {
+        setSegments(prev => {
+          const newSegments = [...prev];
+          
+          // If clicking the same stereochemistry type, flip it 180 degrees
+          if (clickedBond.bondType === mode) {
+            // Flip the bond by swapping endpoints
+            const flippedBond = {
+              ...clickedBond,
+              x1: clickedBond.x2,
+              y1: clickedBond.y2,
+              x2: clickedBond.x1,
+              y2: clickedBond.y1,
+              bondDirection: clickedBond.bondDirection === 1 ? -1 : 1
+            };
+            newSegments[clickedBondIndex] = flippedBond;
+          } else {
+            // Convert to the selected stereochemistry type
+            const stereoBond = {
+              ...clickedBond,
+              bondOrder: 1, // Always single bond
+              bondType: mode,
+              bondDirection: 1
+            };
+            newSegments[clickedBondIndex] = stereoBond;
+          }
+          
+          return newSegments;
+        });
+        return; // Exit early
       }
       
       return; // Exit early after handling bond click
@@ -1165,14 +1298,47 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
         setVertices(prev => [...prev, endVertex]);
       }
       
+      // Check if this bond would overlap with an existing bond
+      const overlappingBond = findOverlappingBond(bondStartPoint, endVertex);
+      
+      if (overlappingBond && overlappingBond.bondOrder === 1) {
+        // Convert the existing bond to a double bond instead of creating a new one
+        setSegments(prev => {
+          return prev.map(seg => {
+            if (seg === overlappingBond) {
+              return { ...seg, bondOrder: 2 };
+            }
+            return seg;
+          });
+        });
+        
+        // Reset bond creation state
+        setIsCreatingBond(false);
+        setBondStartPoint(null);
+        setBondPreviewEnd(null);
+        
+        // Update ring detection after converting to double bond
+        setTimeout(() => {
+          updateRingDetection();
+        }, 0);
+        
+        return; // Exit early - we converted instead of creating
+      }
+      
+      // Determine bond type based on current mode
+      let bondType = null;
+      if (mode === 'wedge') bondType = 'wedge';
+      else if (mode === 'dash') bondType = 'dash';
+      else if (mode === 'ambiguous') bondType = 'ambiguous';
+      
       // Create the bond
       const newBond = {
         x1: bondStartPoint.x,
         y1: bondStartPoint.y,
         x2: endVertex.x,
         y2: endVertex.y,
-        bondOrder: 1, // Single bond
-        bondType: null,
+        bondOrder: 1, // Always single bond for stereochemistry
+        bondType: bondType,
         bondDirection: 1,
         direction: calculateBondDirection(bondStartPoint.x, bondStartPoint.y, endVertex.x, endVertex.y),
         flipSmallerLine: false
@@ -1217,8 +1383,8 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
     // Update current mouse position for text input positioning
     setCurrentMousePosition({ x, y });
     
-    // Handle bond creation preview
-    if (mode === 'draw' && isCreatingBond) {
+    // Handle bond creation preview (for draw mode and stereochemistry modes)
+    if ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && isCreatingBond) {
       // Convert to world coordinates
       const worldX = x - offset.x;
       const worldY = y - offset.y;
@@ -1345,10 +1511,16 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
     ctx.fillStyle = colors.canvasBackground;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw existing bonds - handle single and double bonds differently
+    // Draw existing bonds - handle stereochemistry, single, and double bonds
     ctx.lineCap = 'round'; // Rounded line ends
+    
+    // First pass: Render stereochemistry bonds
+    const stereoBondIndices = renderAllStereochemistryBonds(ctx, segments, offset, colors);
+    
+    // Second pass: Render regular bonds (skip stereochemistry bonds)
     segments.forEach((segment, index) => {
       if (segment.bondOrder <= 0) return; // Skip grid lines
+      if (stereoBondIndices.has(index)) return; // Skip stereochemistry bonds (already rendered)
       
       if (segment.bondOrder === 1) {
         // Single bond rendering
@@ -1389,18 +1561,40 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
 
     // Draw bond preview if creating a bond
     if (isCreatingBond && bondStartPoint && bondPreviewEnd) {
-      ctx.strokeStyle = '#888888'; // Gray preview color
-      ctx.lineWidth = 3; // Same thickness as regular bonds
-      ctx.lineCap = 'round';
-      // No dashed line - solid gray line
-      ctx.beginPath();
-      ctx.moveTo(bondStartPoint.x + offset.x, bondStartPoint.y + offset.y);
-      ctx.lineTo(bondPreviewEnd.x + offset.x, bondPreviewEnd.y + offset.y);
-      ctx.stroke();
+      const previewBond = {
+        x1: bondStartPoint.x,
+        y1: bondStartPoint.y,
+        x2: bondPreviewEnd.x,
+        y2: bondPreviewEnd.y,
+        bondOrder: 1,
+        bondType: mode === 'wedge' || mode === 'dash' || mode === 'ambiguous' ? mode : null,
+        bondDirection: 1
+      };
+      
+      // Create gray preview colors
+      const previewColors = { ...colors, bonds: '#888888' };
+      
+      // Render preview with appropriate style
+      if (previewBond.bondType) {
+        // Render stereochemistry preview in gray
+        renderStereochemistryBond(ctx, previewBond, offset, previewColors);
+      } else {
+        // Regular bond preview
+        ctx.strokeStyle = '#888888'; // Gray preview color
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(bondStartPoint.x + offset.x, bondStartPoint.y + offset.y);
+        ctx.lineTo(bondPreviewEnd.x + offset.x, bondPreviewEnd.y + offset.y);
+        ctx.stroke();
+      }
     }
 
     // Draw atom text labels
     renderAllAtomText(ctx, vertices, vertexAtoms, offset, colors, isDarkMode);
+    
+    // Draw lone pairs and charges
+    renderAllLonePairsAndCharges(ctx, vertices, segments, vertexAtoms, offset, colors);
 
     // Draw hovered vertex highlight (always visible, even during bond creation)
     // This is drawn last so it appears on top of everything else
@@ -3068,10 +3262,13 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
               value={atomInputValue}
               onChange={(e) => {
                 const newValue = e.target.value;
-                // Only allow letters (no numbers, no automatic hydrogens)
-                const lettersOnly = newValue.replace(/[^a-zA-Z]/g, '');
-                // Auto-capitalize
-                setAtomInputValue(lettersOnly.toUpperCase());
+                // Allow letters and numbers for custom text labels
+                const allowedChars = newValue.replace(/[^a-zA-Z0-9]/g, '');
+                // Auto-capitalize letters only
+                const capitalized = allowedChars.split('').map(char => 
+                  /[a-z]/.test(char) ? char.toUpperCase() : char
+                ).join('');
+                setAtomInputValue(capitalized);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {

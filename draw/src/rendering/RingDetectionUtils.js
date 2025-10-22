@@ -38,15 +38,21 @@ export const detectAllRingsEnhanced = (bonds, vertices) => {
 export const detectRingsOfSize = (targetSize, bonds, vertices) => {
   const rings = [];
   const adjacency = buildAdjacencyList(bonds, vertices);
-  const visited = new Set();
   
-  // Try starting from each vertex
+  // Early exit if not enough vertices for this ring size
+  if (vertices.length < targetSize) return rings;
+  
+  // Try starting from each vertex - don't use global visited set
+  // as it prevents finding all possible rings
   for (let startIndex = 0; startIndex < vertices.length; startIndex++) {
-    if (visited.has(startIndex)) continue;
+    // Skip vertices with no connections
+    if (!adjacency[startIndex] || adjacency[startIndex].length === 0) continue;
+    
+    // Skip vertices with insufficient connections for this ring size
+    if (adjacency[startIndex].length < 2) continue;
     
     const foundRings = findCyclesFromVertex(startIndex, targetSize, adjacency, vertices, bonds);
     rings.push(...foundRings);
-    visited.add(startIndex);
   }
   
   return rings;
@@ -63,22 +69,33 @@ export const detectRingsOfSize = (targetSize, bonds, vertices) => {
  */
 export const findCyclesFromVertex = (startIndex, targetSize, adjacency, vertices, bonds) => {
   const cycles = [];
+  let cycleCount = 0;
+  const maxCyclesPerVertex = 10; // Limit cycles per starting vertex to prevent excessive computation
   
   const dfs = (currentIndex, path, visitedInPath) => {
-    if (path.length === targetSize) {
-      // Check if we can close the cycle back to start
+    // Early exit if we've found enough cycles from this vertex
+    if (cycleCount >= maxCyclesPerVertex) return;
+    
+    // Add current vertex to path
+    const newPath = [...path, currentIndex];
+    const newVisited = new Set(visitedInPath);
+    newVisited.add(currentIndex);
+    
+    // If we've reached the target size, check if we can close the cycle
+    if (newPath.length === targetSize) {
       const neighbors = adjacency[currentIndex] || [];
       const canCloseToStart = neighbors.some(neighbor => neighbor.vertexIndex === startIndex);
       
       if (canCloseToStart) {
+        cycleCount++;
         // Found a valid cycle
-        const cycleVertices = path.map(index => vertices[index]);
+        const cycleVertices = newPath.map(index => vertices[index]);
         const cycleBonds = [];
         
         // Reconstruct the bonds forming the cycle
-        for (let i = 0; i < path.length; i++) {
-          const nextIndex = (i + 1) % path.length;
-          const bond = findBondBetweenVertices(vertices[path[i]], vertices[path[nextIndex]], bonds);
+        for (let i = 0; i < newPath.length; i++) {
+          const nextIndex = (i + 1) % newPath.length;
+          const bond = findBondBetweenVertices(vertices[newPath[i]], vertices[newPath[nextIndex]], bonds);
           if (bond) cycleBonds.push(bond);
         }
         
@@ -95,26 +112,24 @@ export const findCyclesFromVertex = (startIndex, targetSize, adjacency, vertices
       return;
     }
     
-    if (path.length >= targetSize) return; // Prevent infinite recursion
-    
-    const neighbors = adjacency[currentIndex] || [];
-    for (const neighbor of neighbors) {
-      const neighborIndex = neighbor.vertexIndex;
-      
-      // Don't revisit vertices in current path (except start vertex for closing)
-      if (visitedInPath.has(neighborIndex) && neighborIndex !== startIndex) continue;
-      
-      // Don't close cycle too early
-      if (neighborIndex === startIndex && path.length < 3) continue;
-      
-      const newPath = [...path, currentIndex];
-      const newVisited = new Set(visitedInPath);
-      newVisited.add(currentIndex);
-      
-      dfs(neighborIndex, newPath, newVisited);
+    // Continue searching if we haven't reached target size
+    if (newPath.length < targetSize) {
+      const neighbors = adjacency[currentIndex] || [];
+      for (const neighbor of neighbors) {
+        const neighborIndex = neighbor.vertexIndex;
+        
+        // Don't revisit vertices in current path (except start vertex for closing)
+        if (newVisited.has(neighborIndex) && neighborIndex !== startIndex) continue;
+        
+        // Don't close cycle too early (need at least 3 vertices)
+        if (neighborIndex === startIndex && newPath.length < 3) continue;
+        
+        dfs(neighborIndex, newPath, newVisited);
+      }
     }
   };
   
+  // Start DFS from the starting vertex
   dfs(startIndex, [], new Set());
   return cycles;
 };
@@ -129,14 +144,29 @@ export const removeDuplicateRings = (rings) => {
   const seen = new Set();
   
   for (const ring of rings) {
-    // Create a canonical representation of the ring
+    // Create a canonical representation of the ring using sorted vertex coordinates
     const vertexKeys = ring.vertices
       .map(v => `${v.x.toFixed(2)},${v.y.toFixed(2)}`)
       .sort()
       .join('|');
     
-    if (!seen.has(vertexKeys)) {
-      seen.add(vertexKeys);
+    // Also check bond-based representation to catch rings with same vertices but different bond paths
+    const bondKeys = ring.bonds
+      .map(bond => {
+        const x1 = bond.x1.toFixed(2);
+        const y1 = bond.y1.toFixed(2);
+        const x2 = bond.x2.toFixed(2);
+        const y2 = bond.y2.toFixed(2);
+        // Sort coordinates to ensure consistent key
+        return x1 < x2 || (x1 === x2 && y1 < y2) ? `${x1},${y1}-${x2},${y2}` : `${x2},${y2}-${x1},${y1}`;
+      })
+      .sort()
+      .join('|');
+    
+    const combinedKey = `${vertexKeys}:${bondKeys}`;
+    
+    if (!seen.has(combinedKey)) {
+      seen.add(combinedKey);
       unique.push(ring);
     }
   }
@@ -350,27 +380,42 @@ export const detectSixMemberedRings = (bonds, vertices) => {
 export const buildAdjacencyList = (bonds, vertices, tolerance = 0.01) => {
   const adjacency = {};
   
+  // Initialize adjacency list for all vertices
   vertices.forEach((vertex, index) => {
     adjacency[index] = [];
   });
   
+  // Process each bond
   bonds.forEach(bond => {
-    if (bond.bondOrder <= 0) return;
+    // Only consider actual bonds (not grid lines)
+    if (!bond.bondOrder || bond.bondOrder <= 0) return;
     
-    // Find vertex indices for this bond
+    // Find vertex indices for this bond endpoints
     let startIndex = -1;
     let endIndex = -1;
     
-    vertices.forEach((vertex, index) => {
-      if (Math.abs(vertex.x - bond.x1) < tolerance && Math.abs(vertex.y - bond.y1) < tolerance) {
-        startIndex = index;
+    // More efficient vertex lookup
+    for (let i = 0; i < vertices.length; i++) {
+      const vertex = vertices[i];
+      
+      if (startIndex === -1 && 
+          Math.abs(vertex.x - bond.x1) < tolerance && 
+          Math.abs(vertex.y - bond.y1) < tolerance) {
+        startIndex = i;
       }
-      if (Math.abs(vertex.x - bond.x2) < tolerance && Math.abs(vertex.y - bond.y2) < tolerance) {
-        endIndex = index;
+      
+      if (endIndex === -1 && 
+          Math.abs(vertex.x - bond.x2) < tolerance && 
+          Math.abs(vertex.y - bond.y2) < tolerance) {
+        endIndex = i;
       }
-    });
+      
+      // Early exit if both found
+      if (startIndex !== -1 && endIndex !== -1) break;
+    }
     
-    if (startIndex !== -1 && endIndex !== -1) {
+    // Add bidirectional connections if both vertices found
+    if (startIndex !== -1 && endIndex !== -1 && startIndex !== endIndex) {
       adjacency[startIndex].push({ vertexIndex: endIndex, bond });
       adjacency[endIndex].push({ vertexIndex: startIndex, bond });
     }
@@ -397,6 +442,25 @@ export const findBondBetweenVertices = (vertex1, vertex2, bonds) => {
     
     return (v1AtStart && v2AtEnd) || (v1AtEnd && v2AtStart);
   }) || null;
+};
+
+/**
+ * Calculates the center (centroid) of a ring
+ * @param {Array} ringVertices - Array of vertices in the ring
+ * @returns {Object} Center point {x, y}
+ */
+export const calculateRingCenter = (ringVertices) => {
+  if (!ringVertices || ringVertices.length === 0) {
+    return { x: 0, y: 0 };
+  }
+
+  const sumX = ringVertices.reduce((sum, vertex) => sum + vertex.x, 0);
+  const sumY = ringVertices.reduce((sum, vertex) => sum + vertex.y, 0);
+  
+  return {
+    x: sumX / ringVertices.length,
+    y: sumY / ringVertices.length
+  };
 };
 
 /**

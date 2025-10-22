@@ -29,8 +29,8 @@ I've implemented a comprehensive ring detection system that ensures all double b
 #### **Ring Double Bonds** (New Priority Case)
 - **Always interior**: Offset line always points toward ring center
 - **Main + offset**: Main bond line + shorter interior offset line
-- **70% length**: Offset line is 70% of main bond length
-- **4px interior offset**: Consistent interior positioning
+- **60% length**: Offset line is 60% of main bond length (shorter)
+- **6px interior offset**: Further from main line for better visual separation
 
 #### **Non-Ring Double Bonds** (Existing Cases)
 - **Case 1**: Single + offset (when both vertices have >1 bond)

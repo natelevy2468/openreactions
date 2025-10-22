@@ -59,7 +59,7 @@ export const formatAtomText = (text) => {
   
   // Render the segments with improved styling to match canvas rendering
   return (
-    <span style={{ fontWeight: '40', color: 'black' }}>
+    <span style={{ fontWeight: 'normal', color: 'black' }}>
       {segments.map((segment, index) => (
         <span
           key={index}
@@ -67,7 +67,7 @@ export const formatAtomText = (text) => {
             fontSize: '0.58em',        // Smaller size for proper subscript appearance (matching canvas 15px)
             position: 'relative',
             bottom: '-4px',            // Precisely positioned to match canvas rendering
-            fontWeight: '40',
+            fontWeight: 'normal',
             ...getKerningStyle(segment, index) // Apply fine-tuned character-specific kerning
           } : {}}
         >

@@ -18,8 +18,8 @@ I've successfully implemented the double bond creation system with intelligent r
 *When both vertices have additional bonds (>1 bond each)*
 - **Main line**: Full-thickness line (3px) at original bond position
 - **Offset line**: Same thickness (3px) but shorter (60% length) and further away
-- **Positioning**: Offset by 8px perpendicular to bond direction
-- **Length**: Offset line is centered and 70% of main line length
+- **Positioning**: Offset by 10px perpendicular to bond direction (further away)
+- **Length**: Offset line is centered and 70% of main line length (shorter and further away)
 - **Use case**: Double bonds in molecular chains and complex structures
 
 #### **Case 2: Equal Parallel Lines**

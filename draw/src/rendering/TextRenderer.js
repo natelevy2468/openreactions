@@ -27,59 +27,103 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
   // Set text properties
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.font = 'bold 26px Arial, sans-serif'; // Increased from 24px to 26px (slightly bigger)
 
-  // Draw white outline for visibility over bonds
-  ctx.strokeStyle = '#FFFFFF';
-  ctx.lineWidth = 10; // Reduced from 6 to 5 (slightly thinner outline)
-  ctx.strokeText(formatted.mainText, screenX, screenY);
-  
-  // Draw white fill to cover holes in letters (O, P, etc.)
-  ctx.fillStyle = '#FFFFFF';
-  ctx.fillText(formatted.mainText, screenX, screenY);
-  
-  // Draw black text on top
-  ctx.fillStyle = '#000000';
-  ctx.fillText(formatted.mainText, screenX, screenY);
+  // Render text with automatic subscript handling for numbers
+  if (formatted.hasSegments && formatted.segments) {
+    // Render segmented text (with automatic subscripts for numbers)
+    let currentX = screenX;
+    
+    // Calculate total width to center the text properly
+    let totalWidth = 0;
+    formatted.segments.forEach(segment => {
+      const fontSize = segment.isNumber ? 18 : 26; // Smaller for subscripts
+      ctx.font = `${fontSize}px Arial, sans-serif`;
+      totalWidth += ctx.measureText(segment.text).width;
+    });
+    
+    // Start rendering from left
+    currentX = screenX - totalWidth / 2;
+    
+    formatted.segments.forEach((segment, index) => {
+      const fontSize = segment.isNumber ? 18 : 26;
+      const yOffset = segment.isNumber ? 8 : 0; // Lower for subscripts
+      
+      ctx.font = `${fontSize}px Arial, sans-serif`;
+      const segmentWidth = ctx.measureText(segment.text).width;
+      const segmentX = currentX + segmentWidth / 2;
+      const segmentY = screenY + yOffset;
+      
+      // Draw white outline (thicker to cover bonds in letter holes)
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = segment.isNumber ? 6 : 10;
+      ctx.strokeText(segment.text, segmentX, segmentY);
+      
+      // Draw white fill to completely cover bonds
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillText(segment.text, segmentX, segmentY);
+      
+      // Draw black text
+      ctx.fillStyle = '#000000';
+      ctx.fillText(segment.text, segmentX, segmentY);
+      
+      currentX += segmentWidth;
+    });
+  } else {
+    // Simple text without segments (fallback)
+    ctx.font = '26px Arial, sans-serif';
+    
+    // Draw white outline for visibility over bonds (thicker to cover bonds)
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 10;
+    ctx.strokeText(formatted.mainText, screenX, screenY);
+    
+    // Draw white fill to cover holes in letters (O, P, etc.)
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillText(formatted.mainText, screenX, screenY);
+    
+    // Draw black text with normal fill (thin font weight already applied)
+    ctx.fillStyle = '#000000';
+    ctx.fillText(formatted.mainText, screenX, screenY);
+  }
 
   // Handle subscript (only if manually specified - no automatic hydrogens)
   if (formatted.hasSubscript) {
-    ctx.font = 'bold 18px Arial, sans-serif'; // Increased from 16px to 17px (slightly bigger)
+    ctx.font = '18px Arial, sans-serif'; // Increased from 16px to 17px (slightly bigger)
     const mainWidth = ctx.measureText(formatted.mainText).width;
     const subscriptX = screenX + mainWidth/2 + 6;
     const subscriptY = screenY + 8;
     
-    // White outline for subscript
+    // White outline for subscript (thicker to cover bonds)
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 5; // Reduced from 4 to 3.5 (slightly thinner)
+    ctx.lineWidth = 8;
     ctx.strokeText(formatted.subscript, subscriptX, subscriptY);
     
     // White fill to cover holes
     ctx.fillStyle = '#FFFFFF';
     ctx.fillText(formatted.subscript, subscriptX, subscriptY);
     
-    // Black subscript text on top
+    // Black subscript text with normal fill
     ctx.fillStyle = '#000000';
     ctx.fillText(formatted.subscript, subscriptX, subscriptY);
   }
 
   // Handle superscript (charges)
   if (formatted.hasSuperscript) {
-    ctx.font = 'bold 18px Arial, sans-serif'; // Increased from 16px to 17px (slightly bigger)
+    ctx.font = '18px Arial, sans-serif'; // Increased from 16px to 17px (slightly bigger)
     const mainWidth = ctx.measureText(formatted.mainText).width;
     const superscriptX = screenX + mainWidth/2 + 6;
     const superscriptY = screenY - 8;
     
-    // White outline for superscript
+    // White outline for superscript (thicker to cover bonds)
     ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 5; // Reduced from 4 to 3.5 (slightly thinner)
+    ctx.lineWidth = 8;
     ctx.strokeText(formatted.superscript, superscriptX, superscriptY);
     
     // White fill to cover holes
     ctx.fillStyle = '#FFFFFF';
     ctx.fillText(formatted.superscript, superscriptX, superscriptY);
     
-    // Black superscript text on top
+    // Black superscript text with normal fill
     ctx.fillStyle = '#000000';
     ctx.fillText(formatted.superscript, superscriptX, superscriptY);
   }
@@ -95,11 +139,16 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
  * @param {boolean} isDarkMode - Whether dark mode is active
  */
 export const renderAllAtomText = (ctx, vertices, vertexAtoms, offset, colors, isDarkMode = false) => {
+  // Create vertex lookup map for O(1) access instead of O(n) find operations
+  const vertexMap = new Map();
+  vertices.forEach(v => {
+    const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+    vertexMap.set(key, v);
+  });
+  
+  // Render each atom text
   Object.entries(vertexAtoms).forEach(([vertexKey, atomData]) => {
-    const [x, y] = vertexKey.split(',').map(parseFloat);
-    const vertex = vertices.find(v => 
-      Math.abs(v.x - x) < 0.01 && Math.abs(v.y - y) < 0.01
-    );
+    const vertex = vertexMap.get(vertexKey);
     
     if (vertex) {
       renderAtomText(ctx, vertex, atomData, offset, colors, isDarkMode);
@@ -121,29 +170,29 @@ export const calculateTextBounds = (ctx, vertex, atomData, offset) => {
   const screenX = vertex.x + offset.x;
   const screenY = vertex.y + offset.y;
 
-  // Set font to measure text
-  ctx.font = 'bold 16px Arial, sans-serif';
-  const mainMetrics = ctx.measureText(atomData.symbol);
-  
-  let totalWidth = mainMetrics.width;
-  let totalHeight = 16; // Font size
-
-  // Account for subscript and superscript
+  // Format the text to get proper dimensions
   const formatted = formatAtomTextForDisplay(atomData);
-  if (formatted) {
-    ctx.font = 'bold 12px Arial, sans-serif';
-    
-    if (formatted.hasSubscript) {
-      const subscriptMetrics = ctx.measureText(formatted.subscript);
-      totalWidth += subscriptMetrics.width + 8;
-    }
-    
-    if (formatted.hasSuperscript) {
-      const superscriptMetrics = ctx.measureText(formatted.superscript);
-      totalWidth = Math.max(totalWidth, mainMetrics.width + superscriptMetrics.width + 8);
-      totalHeight += 6; // Extra height for superscript
-    }
+  if (!formatted) return null;
+
+  let totalWidth = 0;
+  let totalHeight = 26; // Base font size
+  
+  // Calculate width based on segments if available
+  if (formatted.hasSegments && formatted.segments) {
+    formatted.segments.forEach(segment => {
+      const fontSize = segment.isNumber ? 18 : 26;
+      ctx.font = `${fontSize}px Arial, sans-serif`;
+      totalWidth += ctx.measureText(segment.text).width;
+    });
+  } else {
+    ctx.font = '26px Arial, sans-serif';
+    totalWidth = ctx.measureText(atomData.symbol).width;
   }
+  
+  // Add padding for better clipping
+  const padding = 12;
+  totalWidth += padding * 2;
+  totalHeight += padding * 2;
 
   return {
     x: screenX - totalWidth / 2,
@@ -172,6 +221,197 @@ export const isPointInAtomText = (x, y, textBounds) => {
 };
 
 /**
+ * Clips a bond segment around text bounds
+ * @param {Object} bond - Bond segment {x1, y1, x2, y2}
+ * @param {Array} allTextBounds - Array of text bounding boxes
+ * @param {Object} offset - Canvas offset
+ * @returns {Array} Array of bond segments to render (may be split)
+ */
+export const clipBondAroundText = (bond, allTextBounds, offset) => {
+  if (!allTextBounds || allTextBounds.length === 0) {
+    return [bond]; // No clipping needed
+  }
+  
+  const segments = [];
+  let currentStart = { x: bond.x1, y: bond.y1 };
+  let currentEnd = { x: bond.x2, y: bond.y2 };
+  
+  // Check if bond passes through any text bounds
+  let needsClipping = false;
+  for (const textBound of allTextBounds) {
+    if (textBound && doesBondIntersectRect(bond, textBound, offset)) {
+      needsClipping = true;
+      break;
+    }
+  }
+  
+  if (!needsClipping) {
+    return [bond]; // Return original bond
+  }
+  
+  // Calculate the clipped bond segments
+  const worldX1 = bond.x1 + offset.x;
+  const worldY1 = bond.y1 + offset.y;
+  const worldX2 = bond.x2 + offset.x;
+  const worldY2 = bond.y2 + offset.y;
+  
+  // Find intersection points with all text bounds
+  const intersections = [];
+  
+  for (const textBound of allTextBounds) {
+    if (!textBound) continue;
+    
+    const intersectPoints = lineBoundingBoxIntersection(
+      worldX1, worldY1, worldX2, worldY2,
+      textBound.x, textBound.y, textBound.width, textBound.height
+    );
+    
+    intersections.push(...intersectPoints);
+  }
+  
+  if (intersections.length === 0) {
+    return [bond];
+  }
+  
+  // Sort intersections along the bond
+  intersections.sort((a, b) => a.t - b.t);
+  
+  // Create segments between intersections
+  const clippedSegments = [];
+  let lastT = 0;
+  
+  for (let i = 0; i < intersections.length; i += 2) {
+    const enterT = intersections[i].t;
+    const exitT = intersections[i + 1] ? intersections[i + 1].t : 1;
+    
+    // Add segment before entering text
+    if (enterT > lastT + 0.01) {
+      clippedSegments.push({
+        x1: bond.x1 + (bond.x2 - bond.x1) * lastT,
+        y1: bond.y1 + (bond.y2 - bond.y1) * lastT,
+        x2: bond.x1 + (bond.x2 - bond.x1) * enterT,
+        y2: bond.y1 + (bond.y2 - bond.y1) * enterT,
+        ...bond
+      });
+    }
+    
+    lastT = exitT;
+  }
+  
+  // Add final segment after last intersection
+  if (lastT < 0.99) {
+    clippedSegments.push({
+      x1: bond.x1 + (bond.x2 - bond.x1) * lastT,
+      y1: bond.y1 + (bond.y2 - bond.y1) * lastT,
+      x2: bond.x2,
+      y2: bond.y2,
+      ...bond
+    });
+  }
+  
+  return clippedSegments.length > 0 ? clippedSegments : [bond];
+};
+
+/**
+ * Checks if bond intersects a rectangle
+ * @param {Object} bond - Bond segment
+ * @param {Object} rect - Rectangle bounds
+ * @param {Object} offset - Canvas offset
+ * @returns {boolean} Whether bond intersects rectangle
+ */
+const doesBondIntersectRect = (bond, rect, offset) => {
+  const x1 = bond.x1 + offset.x;
+  const y1 = bond.y1 + offset.y;
+  const x2 = bond.x2 + offset.x;
+  const y2 = bond.y2 + offset.y;
+  
+  // Check if either endpoint is inside the rect
+  const p1Inside = x1 >= rect.x && x1 <= rect.x + rect.width &&
+                   y1 >= rect.y && y1 <= rect.y + rect.height;
+  const p2Inside = x2 >= rect.x && x2 <= rect.x + rect.width &&
+                   y2 >= rect.y && y2 <= rect.y + rect.height;
+  
+  if (p1Inside || p2Inside) return true;
+  
+  // Check if line intersects any edge of the rectangle
+  return lineIntersectsRect(x1, y1, x2, y2, rect);
+};
+
+/**
+ * Checks if a line intersects a rectangle
+ * @param {number} x1 - Line start x
+ * @param {number} y1 - Line start y
+ * @param {number} x2 - Line end x
+ * @param {number} y2 - Line end y
+ * @param {Object} rect - Rectangle bounds
+ * @returns {boolean} Whether line intersects rectangle
+ */
+const lineIntersectsRect = (x1, y1, x2, y2, rect) => {
+  // Check intersection with all four edges
+  const edges = [
+    { x1: rect.x, y1: rect.y, x2: rect.x + rect.width, y2: rect.y }, // Top
+    { x1: rect.x + rect.width, y1: rect.y, x2: rect.x + rect.width, y2: rect.y + rect.height }, // Right
+    { x1: rect.x, y1: rect.y + rect.height, x2: rect.x + rect.width, y2: rect.y + rect.height }, // Bottom
+    { x1: rect.x, y1: rect.y, x2: rect.x, y2: rect.y + rect.height } // Left
+  ];
+  
+  for (const edge of edges) {
+    if (lineSegmentsIntersect(x1, y1, x2, y2, edge.x1, edge.y1, edge.x2, edge.y2)) {
+      return true;
+    }
+  }
+  
+  return false;
+};
+
+/**
+ * Checks if two line segments intersect
+ * @returns {boolean} Whether lines intersect
+ */
+const lineSegmentsIntersect = (x1, y1, x2, y2, x3, y3, x4, y4) => {
+  const denom = (y4 - y3) * (x2 - x1) - (x4 - x3) * (y2 - y1);
+  if (Math.abs(denom) < 0.0001) return false;
+  
+  const ua = ((x4 - x3) * (y1 - y3) - (y4 - y3) * (x1 - x3)) / denom;
+  const ub = ((x2 - x1) * (y1 - y3) - (y2 - y1) * (x1 - x3)) / denom;
+  
+  return ua >= 0 && ua <= 1 && ub >= 0 && ub <= 1;
+};
+
+/**
+ * Calculates intersection points between a line and a bounding box
+ * @returns {Array} Array of intersection points with t values (0-1 along line)
+ */
+const lineBoundingBoxIntersection = (x1, y1, x2, y2, rectX, rectY, rectW, rectH) => {
+  const intersections = [];
+  
+  // Check all four edges
+  const edges = [
+    { x1: rectX, y1: rectY, x2: rectX + rectW, y2: rectY }, // Top
+    { x1: rectX + rectW, y1: rectY, x2: rectX + rectW, y2: rectY + rectH }, // Right
+    { x1: rectX, y1: rectY + rectH, x2: rectX + rectW, y2: rectY + rectH }, // Bottom
+    { x1: rectX, y1: rectY, x2: rectX, y2: rectY + rectH } // Left
+  ];
+  
+  edges.forEach(edge => {
+    const denom = (edge.y2 - edge.y1) * (x2 - x1) - (edge.x2 - edge.x1) * (y2 - y1);
+    if (Math.abs(denom) < 0.0001) return;
+    
+    const ua = ((edge.x2 - edge.x1) * (y1 - edge.y1) - (edge.y2 - edge.y1) * (x1 - edge.x1)) / denom;
+    
+    if (ua >= 0 && ua <= 1) {
+      intersections.push({
+        t: ua,
+        x: x1 + ua * (x2 - x1),
+        y: y1 + ua * (y2 - y1)
+      });
+    }
+  });
+  
+  return intersections;
+};
+
+/**
  * Renders text input preview while user is typing
  * @param {CanvasRenderingContext2D} ctx - Canvas context
  * @param {Object} vertex - Vertex position
@@ -191,7 +431,7 @@ export const renderTextInputPreview = (ctx, vertex, previewText, offset, colors)
   ctx.lineWidth = 2;
   
   // Measure text for background size
-  ctx.font = 'bold 16px Arial, sans-serif';
+  ctx.font = '16px Arial, sans-serif';
   const metrics = ctx.measureText(previewText);
   const padding = 4;
   
@@ -204,7 +444,7 @@ export const renderTextInputPreview = (ctx, vertex, previewText, offset, colors)
   ctx.fillRect(bgX, bgY, bgWidth, bgHeight);
   ctx.strokeRect(bgX, bgY, bgWidth, bgHeight);
   
-  // Draw preview text
+  // Draw preview text with normal fill
   ctx.fillStyle = colors.text;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

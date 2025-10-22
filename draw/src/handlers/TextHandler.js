@@ -158,39 +158,62 @@ export const calculateImplicitHydrogens = (elementSymbol, vertex, state) => {
 
 /**
  * Formats atom text for display (handles subscripts, charges, etc.)
+ * Automatically treats numbers in the symbol as subscripts
  * @param {Object} atomData - Atom data {symbol, charge, implicitH}
- * @returns {Object} Formatted text data for rendering
+ * @returns {Object} Formatted text data for rendering with segments
  */
 export const formatAtomTextForDisplay = (atomData) => {
   if (!atomData || !atomData.symbol) return null;
 
+  const symbol = atomData.symbol;
+  
+  // Parse the symbol into letters and numbers
+  const segments = [];
+  let currentSegment = '';
+  let isCurrentNumber = false;
+  
+  for (let i = 0; i < symbol.length; i++) {
+    const char = symbol[i];
+    const isNumber = /[0-9]/.test(char);
+    
+    // If type changed, save current segment and start new one
+    if (i === 0 || isNumber !== isCurrentNumber) {
+      if (currentSegment) {
+        segments.push({ text: currentSegment, isNumber: isCurrentNumber });
+      }
+      currentSegment = char;
+      isCurrentNumber = isNumber;
+    } else {
+      currentSegment += char;
+    }
+  }
+  
+  // Add the final segment
+  if (currentSegment) {
+    segments.push({ text: currentSegment, isNumber: isCurrentNumber });
+  }
+  
+  // Check if we have any numbers that need to be subscripted
+  const hasNumbers = segments.some(seg => seg.isNumber);
+  
   const formatted = {
-    mainText: atomData.symbol,
+    segments: segments, // Array of {text, isNumber}
+    mainText: segments.length > 0 && !segments[0].isNumber ? segments[0].text : symbol,
     subscript: '',
     superscript: '',
     hasSubscript: false,
-    hasSuperscript: false
+    hasSuperscript: false,
+    hasSegments: hasNumbers // Use segmented rendering if there are any numbers
   };
-
-  // Only add hydrogens if explicitly specified (no automatic calculation)
+  
+  // Add explicit hydrogens if specified
   if (atomData.implicitH > 0) {
     formatted.subscript = atomData.implicitH > 1 ? `H${atomData.implicitH}` : 'H';
     formatted.hasSubscript = true;
   }
 
-  // Add charge as superscript
-  if (atomData.charge !== 0) {
-    if (atomData.charge === 1) {
-      formatted.superscript = '+';
-    } else if (atomData.charge === -1) {
-      formatted.superscript = '−';
-    } else if (atomData.charge > 1) {
-      formatted.superscript = `${atomData.charge}+`;
-    } else {
-      formatted.superscript = `${Math.abs(atomData.charge)}−`;
-    }
-    formatted.hasSuperscript = true;
-  }
+  // Note: Charges are now rendered separately as circles with symbols
+  // Do not render charges as superscripts to avoid duplication
 
   return formatted;
 };
@@ -210,15 +233,11 @@ export const parseAtomInput = (inputText) => {
     implicitH: 0
   };
 
-  // Simple parsing - extract element symbol (first 1-2 letters)
-  const elementMatch = text.match(/^([A-Z][a-z]?)/);
-  if (elementMatch) {
-    result.symbol = elementMatch[1];
-  } else {
-    result.symbol = text.charAt(0).toUpperCase();
-  }
-
-  // Parse charge (+ or - at the end)
+  // Accept any text as the symbol - don't restrict to element symbols
+  // This allows custom labels, group abbreviations, etc.
+  let symbolText = text;
+  
+  // Parse charge (+ or - at the end) and remove it from symbol
   const chargeMatch = text.match(/([+-]\d*|\d*[+-])$/);
   if (chargeMatch) {
     const chargeStr = chargeMatch[1];
@@ -228,7 +247,12 @@ export const parseAtomInput = (inputText) => {
       const num = parseInt(chargeStr.replace(/[+-]/, ''));
       result.charge = chargeStr.includes('+') ? num : -num;
     }
+    // Remove charge from symbol
+    symbolText = text.substring(0, chargeMatch.index);
   }
+  
+  // Store the full text as symbol (numbers will be auto-subscripted during rendering)
+  result.symbol = symbolText;
 
   return result;
 };
@@ -301,19 +325,16 @@ export const handleTextInputComplete = (inputText, vertexKey, state, actions) =>
       return newAtoms;
     });
   } else {
-    // Parse and validate input
+    // Parse input (accept any text, no validation required)
     const atomData = parseAtomInput(inputText);
-    const validation = validateElementSymbol(atomData.symbol);
+    
+    // No automatic hydrogens - user must specify manually
+    atomData.implicitH = 0;
 
-    if (validation.isValid || validation.suggestions.length > 0) {
-      // No automatic hydrogens - user must specify manually
-      atomData.implicitH = 0;
-
-      setVertexAtoms(prev => ({
-        ...prev,
-        [vertexKey]: atomData
-      }));
-    }
+    setVertexAtoms(prev => ({
+      ...prev,
+      [vertexKey]: atomData
+    }));
   }
 
   // Close text input
