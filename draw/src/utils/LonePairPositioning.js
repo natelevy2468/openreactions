@@ -159,7 +159,7 @@ export const calculateAvailableSectors = (bondAngles) => {
 export const calculateLonePairPositions = (environment, lonePairCount) => {
   if (lonePairCount === 0) return [];
   
-  const { bondAngles, vertex } = environment;
+  const { bondAngles, vertex, atomData } = environment;
   const positions = [];
   
   // Cardinal directions in radians: 0° (right), 90° (down), 180° (left), 270° (up)
@@ -170,8 +170,15 @@ export const calculateLonePairPositions = (environment, lonePairCount) => {
     3 * Math.PI / 2      // 270° - up
   ];
   
-  // Distance from vertex center for lone pair dots
-  const lonePairDistance = 22; // pixels from vertex center (further away for better spacing)
+  // Base distance from vertex center for lone pair dots
+  const baseLonePairDistance = 22;
+  
+  // Calculate text width to adjust horizontal lone pair distances
+  let textWidth = 0;
+  if (atomData && atomData.symbol) {
+    // Estimate text width (rough calculation, will be refined)
+    textWidth = atomData.symbol.length * 13; // Approximate 13px per character
+  }
   
   // Find which cardinal directions are occupied by bonds
   const occupiedCardinals = new Set();
@@ -225,8 +232,18 @@ export const calculateLonePairPositions = (environment, lonePairCount) => {
       const cardinalIndex = positionPriority[i];
       const angle = cardinalAngles[cardinalIndex];
       
-      const x = vertex.x + Math.cos(angle) * lonePairDistance;
-      const y = vertex.y + Math.sin(angle) * lonePairDistance;
+      // Adjust distance for horizontal positions based on text width
+      let adjustedDistance = baseLonePairDistance;
+      if (cardinalIndex === 0 || cardinalIndex === 2) {
+        // Right (0°) or Left (180°) - add portion of text width (reduced factor)
+        adjustedDistance = baseLonePairDistance + textWidth / 3;
+      } else if (cardinalIndex === 3) {
+        // Up (270°) - add a bit more distance
+        adjustedDistance = baseLonePairDistance + 4;
+      }
+      
+      const x = vertex.x + Math.cos(angle) * adjustedDistance;
+      const y = vertex.y + Math.sin(angle) * adjustedDistance;
       
       positions.push({
         x: x,
@@ -387,8 +404,18 @@ export const calculateLonePairPositions = (environment, lonePairCount) => {
     const cardinalIndex = priorityOrder[i];
     const angle = cardinalAngles[cardinalIndex];
     
-    const x = vertex.x + Math.cos(angle) * lonePairDistance;
-    const y = vertex.y + Math.sin(angle) * lonePairDistance;
+    // Adjust distance for horizontal positions based on text width
+    let adjustedDistance = baseLonePairDistance;
+    if (cardinalIndex === 0 || cardinalIndex === 2) {
+      // Right (0°) or Left (180°) - add portion of text width (reduced factor)
+      adjustedDistance = baseLonePairDistance + textWidth / 3;
+    } else if (cardinalIndex === 3) {
+      // Up (270°) - add a bit more distance
+      adjustedDistance = baseLonePairDistance + 4;
+    }
+    
+    const x = vertex.x + Math.cos(angle) * adjustedDistance;
+    const y = vertex.y + Math.sin(angle) * adjustedDistance;
     
     positions.push({
       x: x,

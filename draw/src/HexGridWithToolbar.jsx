@@ -14,6 +14,8 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
 import { renderAllLonePairsAndCharges } from './rendering/LonePairRenderer.js';
 import { getLonePairPositionOrder } from './utils/LonePairPositioning.js';
 import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rendering/StereochemistryRenderer.js';
+import { renderAllArrows, renderArrowPreview, renderArrow } from './rendering/ArrowRenderer.js';
+import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
 
 
   const HexGridWithToolbar = () => {
@@ -246,6 +248,38 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
   const shouldDisableAngleSnapping = (startVertex) => {
     if (!startVertex) return false;
     return countVertexBonds(startVertex) >= 3; // Disable snapping for 4th bond
+  };
+  
+  // Helper function to check if vertex has a triple bond (requires linear geometry)
+  const hasTripleBond = (vertex) => {
+    if (!vertex) return false;
+    
+    for (const segment of segments) {
+      if (segment.bondOrder === 3) {
+        const isConnected = (
+          (Math.abs(segment.x1 - vertex.x) < 0.01 && Math.abs(segment.y1 - vertex.y) < 0.01) ||
+          (Math.abs(segment.x2 - vertex.x) < 0.01 && Math.abs(segment.y2 - vertex.y) < 0.01)
+        );
+        if (isConnected) {
+          return { hasTriple: true, bond: segment };
+        }
+      }
+    }
+    return { hasTriple: false };
+  };
+  
+  // Helper function to get linear angle for triple bond (180° from existing bond)
+  const getLinearAngle = (vertex, tripleBond) => {
+    // Calculate the angle of the existing triple bond from this vertex
+    let bondAngle;
+    if (Math.abs(tripleBond.x1 - vertex.x) < 0.01 && Math.abs(tripleBond.y1 - vertex.y) < 0.01) {
+      bondAngle = Math.atan2(tripleBond.y2 - tripleBond.y1, tripleBond.x2 - tripleBond.x1);
+    } else {
+      bondAngle = Math.atan2(tripleBond.y1 - tripleBond.y2, tripleBond.x1 - tripleBond.x2);
+    }
+    
+    // Return 180° opposite angle
+    return bondAngle + Math.PI;
   };
 
   // Helper function to get vertex key
@@ -731,13 +765,63 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
     return false;
   };
 
-  // Helper function to generate bond suggestions at 120-degree angles
+  // Helper function to generate bond suggestions at 120-degree angles (or 180° for triple bonds)
   const generateBondSuggestions = useCallback((lastBond) => {
     if (!lastBond) return [];
 
     const suggestions = [];
     
-    // Calculate the angle of the last bond
+    // If the last bond IS a triple bond, generate linear suggestions only
+    if (lastBond.bondOrder === 3) {
+      // Triple bond requires linear geometry - only show 180° suggestions
+      const bondAngle = Math.atan2(lastBond.y2 - lastBond.y1, lastBond.x2 - lastBond.x1);
+      const startVertex = { x: lastBond.x1, y: lastBond.y1 };
+      const endVertex = { x: lastBond.x2, y: lastBond.y2 };
+      const startVertexBondCount = countVertexBonds(startVertex);
+      const endVertexBondCount = countVertexBonds(endVertex);
+      
+      // Linear suggestion from END vertex (only one, at 180°)
+      if (endVertexBondCount < 2) {
+        const linearAngle = bondAngle; // Same direction as triple bond
+        const endSuggestion = {
+          x: lastBond.x2 + Math.cos(linearAngle) * hexRadius,
+          y: lastBond.y2 + Math.sin(linearAngle) * hexRadius
+        };
+        
+        suggestions.push({
+          id: 'end-linear',
+          x1: lastBond.x2,
+          y1: lastBond.y2,
+          x2: endSuggestion.x,
+          y2: endSuggestion.y,
+          angle: linearAngle,
+          fromVertex: { x: lastBond.x2, y: lastBond.y2 }
+        });
+      }
+      
+      // Linear suggestion from START vertex (only one, at 180°)
+      if (startVertexBondCount < 2) {
+        const linearAngle = bondAngle + Math.PI; // Opposite direction
+        const startSuggestion = {
+          x: lastBond.x1 + Math.cos(linearAngle) * hexRadius,
+          y: lastBond.y1 + Math.sin(linearAngle) * hexRadius
+        };
+        
+        suggestions.push({
+          id: 'start-linear',
+          x1: lastBond.x1,
+          y1: lastBond.y1,
+          x2: startSuggestion.x,
+          y2: startSuggestion.y,
+          angle: linearAngle,
+          fromVertex: { x: lastBond.x1, y: lastBond.y1 }
+        });
+      }
+      
+      return suggestions; // Return early for triple bonds
+    }
+    
+    // Normal bond (not triple) - continue with regular logic
     const bondAngle = Math.atan2(lastBond.y2 - lastBond.y1, lastBond.x2 - lastBond.x1);
     
     // Check bond counts for both vertices
@@ -746,8 +830,14 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
     const startVertexBondCount = countVertexBonds(startVertex);
     const endVertexBondCount = countVertexBonds(endVertex);
     
+    // Check if either vertex has a triple bond (requires linear geometry)
+    const endHasTriple = hasTripleBond(endVertex);
+    const startHasTriple = hasTripleBond(startVertex);
+    
     // Generate suggestions from the END vertex (x2, y2) - only if it has fewer than 3 bonds
-    if (endVertexBondCount < 3) {
+    // Skip if this end connects to a triple bond (use linear geometry from other end)
+    if (endVertexBondCount < 3 && !endHasTriple.hasTriple) {
+        // Normal 120° suggestions
       const availableEndAngles = getAvailableBondAngles(endVertex);
       
       // Generate suggestions at 120-degree separation from the bond (±60° from bond angle)
@@ -798,7 +888,9 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
     }
     
     // Generate suggestions from the START vertex (x1, y1) - only if it has fewer than 3 bonds
-    if (startVertexBondCount < 3) {
+    // Skip if this end connects to a triple bond (use linear geometry from other end)
+    if (startVertexBondCount < 3 && !startHasTriple.hasTriple) {
+        // Normal 120° suggestions
       const availableStartAngles = getAvailableBondAngles(startVertex);
       
       // The bond angle from start vertex perspective is opposite
@@ -1096,12 +1188,368 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
           }
           return prev;
         });
+        
+        // Clear bond suggestions when modifying charges/lone pairs
+        setBondSuggestions([]);
       }
       return;
     }
 
-    // Handle draw mode and stereochemistry mode clicks
-    if (mode !== 'draw' && mode !== 'wedge' && mode !== 'dash' && mode !== 'ambiguous') return;
+    // Handle arrow mode clicks
+    if (mode === 'arrow') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      // Convert to world coordinates
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      // Create a forward arrow at click position
+      const arrowLength = 80; // Length of the arrow
+      const newArrow = {
+        x: worldX,
+        y: worldY,
+        type: 'forward', // Straight forward arrow pointing right
+        length: arrowLength,
+        angle: 0 // Points to the right (0 degrees)
+      };
+      
+      setArrows(prev => [...prev, newArrow]);
+      
+      // Clear bond suggestions when placing arrow
+      setBondSuggestions([]);
+      return;
+    }
+
+    // Handle equilibrium arrow mode clicks
+    if (mode === 'equil') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      // Convert to world coordinates
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      // Create an equilibrium arrow at click position
+      const arrowLength = 80;
+      const newArrow = {
+        x: worldX,
+        y: worldY,
+        type: 'equilibrium',
+        length: arrowLength,
+        angle: 0 // Points to the right (0 degrees)
+      };
+      
+      setArrows(prev => [...prev, newArrow]);
+      
+      // Clear bond suggestions when placing arrow
+      setBondSuggestions([]);
+      return;
+    }
+    
+    // Handle curved arrow mode clicks (two-click system)
+    if (mode === 'curve0' || mode === 'curve1' || mode === 'curve2' || 
+        mode === 'curve3' || mode === 'curve4' || mode === 'curve5') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      // Convert to world coordinates
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      if (!curvedArrowStartPoint) {
+        // First click: set start point
+        setCurvedArrowStartPoint({ x: worldX, y: worldY });
+      } else {
+        // Second click: create curved arrow
+        const newArrow = {
+          x1: curvedArrowStartPoint.x,
+          y1: curvedArrowStartPoint.y,
+          x2: worldX,
+          y2: worldY,
+          type: 'curved',
+          curveType: mode, // curve0, curve1, curve2, curve3, curve4, or curve5
+          direction: (mode === 'curve0' || mode === 'curve1' || mode === 'curve2') ? 'ccw' : 'cw' // Swapped
+        };
+        
+        setArrows(prev => [...prev, newArrow]);
+        setCurvedArrowStartPoint(null); // Reset for next arrow
+        
+        // Clear bond suggestions when placing curved arrow
+        setBondSuggestions([]);
+      }
+      return;
+    }
+
+    // Handle benzene mode clicks
+    if (mode === 'benzene') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      // Convert to world coordinates
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      // Check for snap target
+      const snapInfo = calculateBenzeneSnap({ x: worldX, y: worldY }, vertices, segments, hexRadius);
+      
+      // Use snap position if available, otherwise use mouse position
+      const centerX = snapInfo ? snapInfo.center.x : worldX;
+      const centerY = snapInfo ? snapInfo.center.y : worldY;
+      
+      // Generate benzene ring centered at calculated position
+      const benzeneRadius = hexRadius; // Use standard bond length as radius
+      const benzeneVertices = [];
+      const benzeneBonds = [];
+      
+      // Create 6 vertices in hexagon arrangement
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 6) + (i * Math.PI / 3); // Start at 30° and go around
+        const vx = centerX + Math.cos(angle) * benzeneRadius;
+        const vy = centerY + Math.sin(angle) * benzeneRadius;
+        benzeneVertices.push({ x: vx, y: vy, isOffGrid: false });
+      }
+      
+      // Create 6 bonds connecting the vertices (alternating single/double)
+      for (let i = 0; i < 6; i++) {
+        const nextIndex = (i + 1) % 6;
+        const bondOrder = (i % 2 === 0) ? 2 : 1; // Alternating double/single bonds
+        
+        benzeneBonds.push({
+          x1: benzeneVertices[i].x,
+          y1: benzeneVertices[i].y,
+          x2: benzeneVertices[nextIndex].x,
+          y2: benzeneVertices[nextIndex].y,
+          bondOrder: bondOrder,
+          bondType: null,
+          bondDirection: 1,
+          direction: calculateBondDirection(
+            benzeneVertices[i].x, benzeneVertices[i].y,
+            benzeneVertices[nextIndex].x, benzeneVertices[nextIndex].y
+          ),
+          flipSmallerLine: false
+        });
+      }
+      
+      // Add all vertices and bonds to state
+      setVertices(prev => [...prev, ...benzeneVertices]);
+      setSegments(prev => [...prev, ...benzeneBonds]);
+      
+      // Update ring detection after adding benzene
+      setTimeout(() => {
+        updateRingDetection();
+      }, 0);
+      
+      // Don't clear mode - allow multiple benzene placements
+      
+      return;
+    }
+    
+    // Handle cyclohexane mode clicks (6-member ring, all single bonds)
+    if (mode === 'cyclohexane') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      const snapInfo = calculateRingSnap({ x: worldX, y: worldY }, vertices, segments, hexRadius, 6);
+      const centerX = snapInfo ? snapInfo.center.x : worldX;
+      const centerY = snapInfo ? snapInfo.center.y : worldY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      
+      const ringVertices = [];
+      const ringBonds = [];
+      
+      for (let i = 0; i < 6; i++) {
+        const angle = (Math.PI / 6) + (i * Math.PI / 3) + rotationOffset;
+        ringVertices.push({ 
+          x: centerX + Math.cos(angle) * hexRadius, 
+          y: centerY + Math.sin(angle) * hexRadius, 
+          isOffGrid: false 
+        });
+      }
+      
+      for (let i = 0; i < 6; i++) {
+        const nextIndex = (i + 1) % 6;
+        ringBonds.push({
+          x1: ringVertices[i].x, y1: ringVertices[i].y,
+          x2: ringVertices[nextIndex].x, y2: ringVertices[nextIndex].y,
+          bondOrder: 1, // All single bonds
+          bondType: null, bondDirection: 1,
+          direction: calculateBondDirection(ringVertices[i].x, ringVertices[i].y, ringVertices[nextIndex].x, ringVertices[nextIndex].y),
+          flipSmallerLine: false
+        });
+      }
+      
+      setVertices(prev => [...prev, ...ringVertices]);
+      setSegments(prev => [...prev, ...ringBonds]);
+      setTimeout(() => updateRingDetection(), 0);
+      return;
+    }
+    
+    // Handle cyclopentane mode clicks (5-member pentagon)
+    if (mode === 'cyclopentane') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      const pentagonRadius = hexRadius / (2 * Math.sin(Math.PI / 5));
+      const snapInfo = calculateRingSnap({ x: worldX, y: worldY }, vertices, segments, pentagonRadius, 5);
+      const centerX = snapInfo ? snapInfo.center.x : worldX;
+      const centerY = snapInfo ? snapInfo.center.y : worldY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      
+      const ringVertices = [];
+      const ringBonds = [];
+      
+      for (let i = 0; i < 5; i++) {
+        const angle = (-Math.PI / 2) + (i * 2 * Math.PI / 5) + rotationOffset;
+        ringVertices.push({ 
+          x: centerX + Math.cos(angle) * pentagonRadius, 
+          y: centerY + Math.sin(angle) * pentagonRadius, 
+          isOffGrid: true 
+        });
+      }
+      
+      for (let i = 0; i < 5; i++) {
+        const nextIndex = (i + 1) % 5;
+        ringBonds.push({
+          x1: ringVertices[i].x, y1: ringVertices[i].y,
+          x2: ringVertices[nextIndex].x, y2: ringVertices[nextIndex].y,
+          bondOrder: 1,
+          bondType: null, bondDirection: 1,
+          direction: calculateBondDirection(ringVertices[i].x, ringVertices[i].y, ringVertices[nextIndex].x, ringVertices[nextIndex].y),
+          flipSmallerLine: false
+        });
+      }
+      
+      setVertices(prev => [...prev, ...ringVertices]);
+      setSegments(prev => [...prev, ...ringBonds]);
+      setTimeout(() => updateRingDetection(), 0);
+      return;
+    }
+    
+    // Handle cyclobutane mode clicks (4-member square)
+    if (mode === 'cyclobutane') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      const squareRadius = hexRadius / (2 * Math.sin(Math.PI / 4));
+      const snapInfo = calculateRingSnap({ x: worldX, y: worldY }, vertices, segments, squareRadius, 4);
+      const centerX = snapInfo ? snapInfo.center.x : worldX;
+      const centerY = snapInfo ? snapInfo.center.y : worldY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      
+      const ringVertices = [];
+      const ringBonds = [];
+      
+      for (let i = 0; i < 4; i++) {
+        const angle = (Math.PI / 4) + (i * Math.PI / 2) + rotationOffset;
+        ringVertices.push({ 
+          x: centerX + Math.cos(angle) * squareRadius, 
+          y: centerY + Math.sin(angle) * squareRadius, 
+          isOffGrid: true 
+        });
+      }
+      
+      for (let i = 0; i < 4; i++) {
+        const nextIndex = (i + 1) % 4;
+        ringBonds.push({
+          x1: ringVertices[i].x, y1: ringVertices[i].y,
+          x2: ringVertices[nextIndex].x, y2: ringVertices[nextIndex].y,
+          bondOrder: 1,
+          bondType: null, bondDirection: 1,
+          direction: calculateBondDirection(ringVertices[i].x, ringVertices[i].y, ringVertices[nextIndex].x, ringVertices[nextIndex].y),
+          flipSmallerLine: false
+        });
+      }
+      
+      setVertices(prev => [...prev, ...ringVertices]);
+      setSegments(prev => [...prev, ...ringBonds]);
+      setTimeout(() => updateRingDetection(), 0);
+      return;
+    }
+    
+    // Handle cyclopropane mode clicks (3-member triangle)
+    if (mode === 'cyclopropane') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      const triangleRadius = hexRadius / (2 * Math.sin(Math.PI / 3));
+      const snapInfo = calculateRingSnap({ x: worldX, y: worldY }, vertices, segments, triangleRadius, 3);
+      const centerX = snapInfo ? snapInfo.center.x : worldX;
+      const centerY = snapInfo ? snapInfo.center.y : worldY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      
+      const ringVertices = [];
+      const ringBonds = [];
+      
+      for (let i = 0; i < 3; i++) {
+        const angle = (-Math.PI / 2) + (i * 2 * Math.PI / 3) + rotationOffset;
+        ringVertices.push({ 
+          x: centerX + Math.cos(angle) * triangleRadius, 
+          y: centerY + Math.sin(angle) * triangleRadius, 
+          isOffGrid: true 
+        });
+      }
+      
+      for (let i = 0; i < 3; i++) {
+        const nextIndex = (i + 1) % 3;
+        ringBonds.push({
+          x1: ringVertices[i].x, y1: ringVertices[i].y,
+          x2: ringVertices[nextIndex].x, y2: ringVertices[nextIndex].y,
+          bondOrder: 1,
+          bondType: null, bondDirection: 1,
+          direction: calculateBondDirection(ringVertices[i].x, ringVertices[i].y, ringVertices[nextIndex].x, ringVertices[nextIndex].y),
+          flipSmallerLine: false
+        });
+      }
+      
+      setVertices(prev => [...prev, ...ringVertices]);
+      setSegments(prev => [...prev, ...ringBonds]);
+      setTimeout(() => updateRingDetection(), 0);
+      return;
+    }
+
+    // Handle draw mode, stereochemistry mode, and triple bond mode clicks
+    if (mode !== 'draw' && mode !== 'wedge' && mode !== 'dash' && mode !== 'ambiguous' && mode !== 'triple') return;
     
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -1178,6 +1626,12 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
       return; // Exit early after handling suggestion click
     }
     
+    // Clear bond suggestions if we didn't click on a suggestion
+    // This ensures suggestions only appear right after bond creation
+    if (bondSuggestions.length > 0 && !isCreatingBond) {
+      setBondSuggestions([]);
+    }
+    
     // Check if clicking on an existing bond
     const clickedBondIndex = findHoveredBond(x, y);
     if (clickedBondIndex !== null && !isCreatingBond) {
@@ -1200,6 +1654,23 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
             // Update ring detection after double bond creation
             updateRingDetection();
           }, 0);
+          
+          return newSegments;
+        });
+        return; // Exit early
+      }
+      
+      // Handle triple bond mode: convert bond to triple bond
+      if (mode === 'triple' && (clickedBond.bondOrder === 1 || clickedBond.bondOrder === 2) && !clickedBond.bondType) {
+        // Convert to triple bond
+        setSegments(prev => {
+          const newSegments = [...prev];
+          const tripleBond = {
+            ...clickedBond,
+            bondOrder: 3,
+            bondType: null
+          };
+          newSegments[clickedBondIndex] = tripleBond;
           
           return newSegments;
         });
@@ -1236,6 +1707,9 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
           
           return newSegments;
         });
+        
+        // Clear bond suggestions when modifying stereochemistry
+        setBondSuggestions([]);
         return; // Exit early
       }
       
@@ -1278,8 +1752,23 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
           // Calculate the target angle
           let targetAngle = Math.atan2(deltaY, deltaX);
           
-          // Check if angle snapping should be applied
-          if (!shouldDisableAngleSnapping(bondStartPoint)) {
+          // Check for linear geometry constraint (triple bonds require 180°)
+          const tripleInfo = hasTripleBond(bondStartPoint);
+          if (tripleInfo.hasTriple) {
+            // Linear geometry: snap to 180° from existing triple bond
+            const linearAngle = getLinearAngle(bondStartPoint, tripleInfo.bond);
+            
+            // Allow free rotation but snap to the linear angle when close
+            const angleDiff = Math.abs(targetAngle - linearAngle);
+            const normalizedDiff = angleDiff > Math.PI ? 2 * Math.PI - angleDiff : angleDiff;
+            
+            // Snap if within 20 degrees of the linear angle
+            if (normalizedDiff < 20 * (Math.PI / 180)) {
+              targetAngle = linearAngle;
+            }
+            // Otherwise allow free rotation
+          } else if (!shouldDisableAngleSnapping(bondStartPoint)) {
+            // Normal angle snapping (120° intervals)
             const snappedAngle = findClosestSnapAngle(targetAngle, bondStartPoint);
             if (snappedAngle !== null) {
               targetAngle = snappedAngle;
@@ -1325,11 +1814,14 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
         return; // Exit early - we converted instead of creating
       }
       
-      // Determine bond type based on current mode
+      // Determine bond type and order based on current mode
       let bondType = null;
+      let bondOrder = 1;
+      
       if (mode === 'wedge') bondType = 'wedge';
       else if (mode === 'dash') bondType = 'dash';
       else if (mode === 'ambiguous') bondType = 'ambiguous';
+      else if (mode === 'triple') bondOrder = 3;
       
       // Create the bond
       const newBond = {
@@ -1337,7 +1829,7 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
         y1: bondStartPoint.y,
         x2: endVertex.x,
         y2: endVertex.y,
-        bondOrder: 1, // Always single bond for stereochemistry
+        bondOrder: bondOrder, // 1 for normal/stereo, 3 for triple
         bondType: bondType,
         bondDirection: 1,
         direction: calculateBondDirection(bondStartPoint.x, bondStartPoint.y, endVertex.x, endVertex.y),
@@ -1383,8 +1875,8 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
     // Update current mouse position for text input positioning
     setCurrentMousePosition({ x, y });
     
-    // Handle bond creation preview (for draw mode and stereochemistry modes)
-    if ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') && isCreatingBond) {
+    // Handle bond creation preview (for draw mode, stereochemistry modes, and triple bond mode)
+    if ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous' || mode === 'triple') && isCreatingBond) {
       // Convert to world coordinates
       const worldX = x - offset.x;
       const worldY = y - offset.y;
@@ -1399,8 +1891,23 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
           // Calculate the target angle
           let targetAngle = Math.atan2(deltaY, deltaX);
           
-          // Check if angle snapping should be applied
-          if (!shouldDisableAngleSnapping(bondStartPoint)) {
+          // Check for linear geometry constraint (triple bonds require 180°)
+          const tripleInfo = hasTripleBond(bondStartPoint);
+          if (tripleInfo.hasTriple) {
+            // Linear geometry: snap to 180° from existing triple bond
+            const linearAngle = getLinearAngle(bondStartPoint, tripleInfo.bond);
+            
+            // Allow free rotation but snap to the linear angle when close
+            const angleDiff = Math.abs(targetAngle - linearAngle);
+            const normalizedDiff = angleDiff > Math.PI ? 2 * Math.PI - angleDiff : angleDiff;
+            
+            // Snap if within 20 degrees of the linear angle
+            if (normalizedDiff < 20 * (Math.PI / 180)) {
+              targetAngle = linearAngle;
+            }
+            // Otherwise allow free rotation
+          } else if (!shouldDisableAngleSnapping(bondStartPoint)) {
+            // Normal angle snapping (120° intervals)
             const snappedAngle = findClosestSnapAngle(targetAngle, bondStartPoint);
             if (snappedAngle !== null) {
               targetAngle = snappedAngle;
@@ -1442,6 +1949,12 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
       setBondPreviewEnd(null);
       return;
     }
+    
+    // Handle Escape key for curved arrow creation
+    if (event.key === 'Escape' && curvedArrowStartPoint) {
+      setCurvedArrowStartPoint(null);
+      return;
+    }
 
     // Handle Enter key for text input on hovered vertex
     if (event.key === 'Enter' && hoveredVertex && !showAtomInput) {
@@ -1468,7 +1981,7 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
       );
       if (success) return;
     }
-  }, [isCreatingBond, hoveredVertex, showAtomInput, currentMousePosition, vertexAtoms, segments]);
+  }, [isCreatingBond, hoveredVertex, showAtomInput, currentMousePosition, vertexAtoms, segments, curvedArrowStartPoint]);
 
   // Handle mouse leaving canvas - clear hover states
   const handleCanvasMouseLeave = useCallback(() => {
@@ -1493,6 +2006,19 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
       return () => clearTimeout(timeoutId);
     }
   }, [vertices, checkAndPerformVertexMerging]);
+  
+  // Clear bond suggestions when atom text changes
+  const prevVertexAtomsRef = React.useRef(vertexAtoms);
+  React.useEffect(() => {
+    // Check if vertexAtoms changed (text, charges, lone pairs modified)
+    if (prevVertexAtomsRef.current !== vertexAtoms && Object.keys(prevVertexAtomsRef.current).length > 0) {
+      // Don't clear if we're in the middle of creating a bond
+      if (!isCreatingBond) {
+        setBondSuggestions([]);
+      }
+    }
+    prevVertexAtomsRef.current = vertexAtoms;
+  }, [vertexAtoms, isCreatingBond]);
 
   // Canvas drawing function
   const drawCanvas = useCallback(() => {
@@ -1541,6 +2067,35 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
           // Render normal double bond
           renderDoubleBondByCase(ctx, segment, offset, colors);
         }
+      } else if (segment.bondOrder === 3) {
+        // Triple bond rendering - three parallel lines
+        const bondAngle = Math.atan2(segment.y2 - segment.y1, segment.x2 - segment.x1);
+        const perpAngle = bondAngle + Math.PI / 2;
+        const lineSpacing = 8.5; // Distance between parallel lines (further apart)
+        
+        ctx.strokeStyle = hoveredBondIndex === index ? '#007bff' : colors.bonds;
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        
+        // Draw center line
+        ctx.beginPath();
+        ctx.moveTo(segment.x1 + offset.x, segment.y1 + offset.y);
+        ctx.lineTo(segment.x2 + offset.x, segment.y2 + offset.y);
+        ctx.stroke();
+        
+        // Draw top line
+        const topOffsetX = Math.cos(perpAngle) * lineSpacing;
+        const topOffsetY = Math.sin(perpAngle) * lineSpacing;
+        ctx.beginPath();
+        ctx.moveTo(segment.x1 + topOffsetX + offset.x, segment.y1 + topOffsetY + offset.y);
+        ctx.lineTo(segment.x2 + topOffsetX + offset.x, segment.y2 + topOffsetY + offset.y);
+        ctx.stroke();
+        
+        // Draw bottom line
+        ctx.beginPath();
+        ctx.moveTo(segment.x1 - topOffsetX + offset.x, segment.y1 - topOffsetY + offset.y);
+        ctx.lineTo(segment.x2 - topOffsetX + offset.x, segment.y2 - topOffsetY + offset.y);
+        ctx.stroke();
       }
     });
 
@@ -1561,12 +2116,13 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
 
     // Draw bond preview if creating a bond
     if (isCreatingBond && bondStartPoint && bondPreviewEnd) {
+      const previewBondOrder = mode === 'triple' ? 3 : 1;
       const previewBond = {
         x1: bondStartPoint.x,
         y1: bondStartPoint.y,
         x2: bondPreviewEnd.x,
         y2: bondPreviewEnd.y,
-        bondOrder: 1,
+        bondOrder: previewBondOrder,
         bondType: mode === 'wedge' || mode === 'dash' || mode === 'ambiguous' ? mode : null,
         bondDirection: 1
       };
@@ -1578,15 +2134,44 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
       if (previewBond.bondType) {
         // Render stereochemistry preview in gray
         renderStereochemistryBond(ctx, previewBond, offset, previewColors);
-      } else {
-        // Regular bond preview
-        ctx.strokeStyle = '#888888'; // Gray preview color
+      } else if (previewBond.bondOrder === 3) {
+        // Triple bond preview - three gray lines
+        const bondAngle = Math.atan2(bondPreviewEnd.y - bondStartPoint.y, bondPreviewEnd.x - bondStartPoint.x);
+        const perpAngle = bondAngle + Math.PI / 2;
+        const lineSpacing = 8.5; // Further spacing
+        
+        ctx.strokeStyle = '#888888';
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
+        
+        // Center line
         ctx.beginPath();
         ctx.moveTo(bondStartPoint.x + offset.x, bondStartPoint.y + offset.y);
         ctx.lineTo(bondPreviewEnd.x + offset.x, bondPreviewEnd.y + offset.y);
         ctx.stroke();
+        
+        // Top line
+        const topOffsetX = Math.cos(perpAngle) * lineSpacing;
+        const topOffsetY = Math.sin(perpAngle) * lineSpacing;
+        ctx.beginPath();
+        ctx.moveTo(bondStartPoint.x + topOffsetX + offset.x, bondStartPoint.y + topOffsetY + offset.y);
+        ctx.lineTo(bondPreviewEnd.x + topOffsetX + offset.x, bondPreviewEnd.y + topOffsetY + offset.y);
+        ctx.stroke();
+        
+        // Bottom line
+        ctx.beginPath();
+        ctx.moveTo(bondStartPoint.x - topOffsetX + offset.x, bondStartPoint.y - topOffsetY + offset.y);
+        ctx.lineTo(bondPreviewEnd.x - topOffsetX + offset.x, bondPreviewEnd.y - topOffsetY + offset.y);
+        ctx.stroke();
+      } else {
+        // Regular bond preview
+      ctx.strokeStyle = '#888888'; // Gray preview color
+        ctx.lineWidth = 3;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(bondStartPoint.x + offset.x, bondStartPoint.y + offset.y);
+      ctx.lineTo(bondPreviewEnd.x + offset.x, bondPreviewEnd.y + offset.y);
+      ctx.stroke();
       }
     }
 
@@ -1595,6 +2180,308 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
     
     // Draw lone pairs and charges
     renderAllLonePairsAndCharges(ctx, vertices, segments, vertexAtoms, offset, colors);
+    
+    // Draw arrows
+    renderAllArrows(ctx, arrows, offset, colors);
+    
+    // Draw benzene preview if in benzene mode
+    if (mode === 'benzene' && currentMousePosition) {
+      const worldMouseX = currentMousePosition.x - offset.x;
+      const worldMouseY = currentMousePosition.y - offset.y;
+      const benzeneRadius = hexRadius;
+      
+      // Check for snap target
+      const snapInfo = calculateBenzeneSnap({ x: worldMouseX, y: worldMouseY }, vertices, segments, benzeneRadius);
+      
+      // Use snap position if available
+      const previewCenterX = snapInfo ? snapInfo.center.x : worldMouseX;
+      const previewCenterY = snapInfo ? snapInfo.center.y : worldMouseY;
+      
+      // Use green color if snapping, gray if not
+      const isSnapping = snapInfo !== null;
+      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888'; // Green when snapping
+      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      
+      // Draw preview benzene hexagon
+      for (let i = 0; i < 6; i++) {
+        const angle1 = (Math.PI / 6) + (i * Math.PI / 3);
+        const angle2 = (Math.PI / 6) + ((i + 1) * Math.PI / 3);
+        
+        const x1 = previewCenterX + Math.cos(angle1) * benzeneRadius + offset.x;
+        const y1 = previewCenterY + Math.sin(angle1) * benzeneRadius + offset.y;
+        const x2 = previewCenterX + Math.cos(angle2) * benzeneRadius + offset.x;
+        const y2 = previewCenterY + Math.sin(angle2) * benzeneRadius + offset.y;
+        
+        // Draw bond line
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        
+        // Draw small dots at vertices
+        ctx.beginPath();
+        ctx.arc(x1, y1, 2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      
+      // Draw snap indicator
+      if (isSnapping) {
+        if (snapInfo.type === 'vertex') {
+          // Highlight the snap target vertex
+          ctx.fillStyle = 'rgba(0, 204, 0, 0.3)';
+          ctx.beginPath();
+          ctx.arc(snapInfo.target.x + offset.x, snapInfo.target.y + offset.y, 8, 0, 2 * Math.PI);
+          ctx.fill();
+        } else if (snapInfo.type === 'bond') {
+          // Highlight the snap target bond
+          ctx.strokeStyle = '#00CC00';
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(snapInfo.target.x1 + offset.x, snapInfo.target.y1 + offset.y);
+          ctx.lineTo(snapInfo.target.x2 + offset.x, snapInfo.target.y2 + offset.y);
+          ctx.stroke();
+        }
+      }
+    }
+    
+    // Draw cyclohexane preview with snapping
+    if (mode === 'cyclohexane' && currentMousePosition) {
+      const worldMouseX = currentMousePosition.x - offset.x;
+      const worldMouseY = currentMousePosition.y - offset.y;
+      
+      const snapInfo = calculateRingSnap({ x: worldMouseX, y: worldMouseY }, vertices, segments, hexRadius, 6);
+      const previewCenterX = snapInfo ? snapInfo.center.x : worldMouseX;
+      const previewCenterY = snapInfo ? snapInfo.center.y : worldMouseY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      const isSnapping = snapInfo !== null;
+      
+      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888';
+      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      
+      for (let i = 0; i < 6; i++) {
+        const angle1 = (Math.PI / 6) + (i * Math.PI / 3) + rotationOffset;
+        const angle2 = (Math.PI / 6) + ((i + 1) * Math.PI / 3) + rotationOffset;
+        const x1 = previewCenterX + Math.cos(angle1) * hexRadius + offset.x;
+        const y1 = previewCenterY + Math.sin(angle1) * hexRadius + offset.y;
+        const x2 = previewCenterX + Math.cos(angle2) * hexRadius + offset.x;
+        const y2 = previewCenterY + Math.sin(angle2) * hexRadius + offset.y;
+        
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.arc(x1, y1, 2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      
+      // Draw snap indicator
+      if (isSnapping && snapInfo.type === 'vertex') {
+        ctx.fillStyle = 'rgba(0, 204, 0, 0.3)';
+        ctx.beginPath();
+        ctx.arc(snapInfo.target.x + offset.x, snapInfo.target.y + offset.y, 8, 0, 2 * Math.PI);
+        ctx.fill();
+      } else if (isSnapping && snapInfo.type === 'bond') {
+        ctx.strokeStyle = '#00CC00';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(snapInfo.target.x1 + offset.x, snapInfo.target.y1 + offset.y);
+        ctx.lineTo(snapInfo.target.x2 + offset.x, snapInfo.target.y2 + offset.y);
+        ctx.stroke();
+      }
+    }
+    
+    // Draw cyclopentane preview with snapping
+    if (mode === 'cyclopentane' && currentMousePosition) {
+      const worldMouseX = currentMousePosition.x - offset.x;
+      const worldMouseY = currentMousePosition.y - offset.y;
+      const pentagonRadius = hexRadius / (2 * Math.sin(Math.PI / 5));
+      
+      const snapInfo = calculateRingSnap({ x: worldMouseX, y: worldMouseY }, vertices, segments, pentagonRadius, 5);
+      const previewCenterX = snapInfo ? snapInfo.center.x : worldMouseX;
+      const previewCenterY = snapInfo ? snapInfo.center.y : worldMouseY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      const isSnapping = snapInfo !== null;
+      
+      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888';
+      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      
+      for (let i = 0; i < 5; i++) {
+        const angle1 = (-Math.PI / 2) + (i * 2 * Math.PI / 5) + rotationOffset;
+        const angle2 = (-Math.PI / 2) + ((i + 1) * 2 * Math.PI / 5) + rotationOffset;
+        const x1 = previewCenterX + Math.cos(angle1) * pentagonRadius + offset.x;
+        const y1 = previewCenterY + Math.sin(angle1) * pentagonRadius + offset.y;
+        const x2 = previewCenterX + Math.cos(angle2) * pentagonRadius + offset.x;
+        const y2 = previewCenterY + Math.sin(angle2) * pentagonRadius + offset.y;
+        
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.arc(x1, y1, 2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      
+      if (isSnapping && snapInfo.type === 'vertex') {
+        ctx.fillStyle = 'rgba(0, 204, 0, 0.3)';
+        ctx.beginPath();
+        ctx.arc(snapInfo.target.x + offset.x, snapInfo.target.y + offset.y, 8, 0, 2 * Math.PI);
+        ctx.fill();
+      } else if (isSnapping && snapInfo.type === 'bond') {
+        ctx.strokeStyle = '#00CC00';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(snapInfo.target.x1 + offset.x, snapInfo.target.y1 + offset.y);
+        ctx.lineTo(snapInfo.target.x2 + offset.x, snapInfo.target.y2 + offset.y);
+        ctx.stroke();
+      }
+    }
+    
+    // Draw cyclobutane preview with snapping
+    if (mode === 'cyclobutane' && currentMousePosition) {
+      const worldMouseX = currentMousePosition.x - offset.x;
+      const worldMouseY = currentMousePosition.y - offset.y;
+      const squareRadius = hexRadius / (2 * Math.sin(Math.PI / 4));
+      
+      const snapInfo = calculateRingSnap({ x: worldMouseX, y: worldMouseY }, vertices, segments, squareRadius, 4);
+      const previewCenterX = snapInfo ? snapInfo.center.x : worldMouseX;
+      const previewCenterY = snapInfo ? snapInfo.center.y : worldMouseY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      const isSnapping = snapInfo !== null;
+      
+      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888';
+      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      
+      for (let i = 0; i < 4; i++) {
+        const angle1 = (Math.PI / 4) + (i * Math.PI / 2) + rotationOffset;
+        const angle2 = (Math.PI / 4) + ((i + 1) * Math.PI / 2) + rotationOffset;
+        const x1 = previewCenterX + Math.cos(angle1) * squareRadius + offset.x;
+        const y1 = previewCenterY + Math.sin(angle1) * squareRadius + offset.y;
+        const x2 = previewCenterX + Math.cos(angle2) * squareRadius + offset.x;
+        const y2 = previewCenterY + Math.sin(angle2) * squareRadius + offset.y;
+        
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.arc(x1, y1, 2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      
+      if (isSnapping && snapInfo.type === 'vertex') {
+        ctx.fillStyle = 'rgba(0, 204, 0, 0.3)';
+        ctx.beginPath();
+        ctx.arc(snapInfo.target.x + offset.x, snapInfo.target.y + offset.y, 8, 0, 2 * Math.PI);
+        ctx.fill();
+      } else if (isSnapping && snapInfo.type === 'bond') {
+        ctx.strokeStyle = '#00CC00';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(snapInfo.target.x1 + offset.x, snapInfo.target.y1 + offset.y);
+        ctx.lineTo(snapInfo.target.x2 + offset.x, snapInfo.target.y2 + offset.y);
+        ctx.stroke();
+      }
+    }
+    
+    // Draw cyclopropane preview with snapping
+    if (mode === 'cyclopropane' && currentMousePosition) {
+      const worldMouseX = currentMousePosition.x - offset.x;
+      const worldMouseY = currentMousePosition.y - offset.y;
+      const triangleRadius = hexRadius / (2 * Math.sin(Math.PI / 3));
+      
+      const snapInfo = calculateRingSnap({ x: worldMouseX, y: worldMouseY }, vertices, segments, triangleRadius, 3);
+      const previewCenterX = snapInfo ? snapInfo.center.x : worldMouseX;
+      const previewCenterY = snapInfo ? snapInfo.center.y : worldMouseY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      const isSnapping = snapInfo !== null;
+      
+      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888';
+      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
+      ctx.lineWidth = 2.5;
+      ctx.lineCap = 'round';
+      
+      for (let i = 0; i < 3; i++) {
+        const angle1 = (-Math.PI / 2) + (i * 2 * Math.PI / 3) + rotationOffset;
+        const angle2 = (-Math.PI / 2) + ((i + 1) * 2 * Math.PI / 3) + rotationOffset;
+        const x1 = previewCenterX + Math.cos(angle1) * triangleRadius + offset.x;
+        const y1 = previewCenterY + Math.sin(angle1) * triangleRadius + offset.y;
+        const x2 = previewCenterX + Math.cos(angle2) * triangleRadius + offset.x;
+        const y2 = previewCenterY + Math.sin(angle2) * triangleRadius + offset.y;
+        
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+        
+        ctx.beginPath();
+        ctx.arc(x1, y1, 2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+      
+      if (isSnapping && snapInfo.type === 'vertex') {
+        ctx.fillStyle = 'rgba(0, 204, 0, 0.3)';
+        ctx.beginPath();
+        ctx.arc(snapInfo.target.x + offset.x, snapInfo.target.y + offset.y, 8, 0, 2 * Math.PI);
+        ctx.fill();
+      } else if (isSnapping && snapInfo.type === 'bond') {
+        ctx.strokeStyle = '#00CC00';
+        ctx.lineWidth = 5;
+        ctx.beginPath();
+        ctx.moveTo(snapInfo.target.x1 + offset.x, snapInfo.target.y1 + offset.y);
+        ctx.lineTo(snapInfo.target.x2 + offset.x, snapInfo.target.y2 + offset.y);
+        ctx.stroke();
+      }
+    }
+    
+    // Draw arrow preview if in arrow mode
+    if (mode === 'arrow' && currentMousePosition) {
+      const worldMousePos = {
+        x: currentMousePosition.x - offset.x,
+        y: currentMousePosition.y - offset.y
+      };
+      renderArrowPreview(ctx, worldMousePos, 'forward', offset, colors);
+    } else if (mode === 'equil' && currentMousePosition) {
+      const worldMousePos = {
+        x: currentMousePosition.x - offset.x,
+        y: currentMousePosition.y - offset.y
+      };
+      renderArrowPreview(ctx, worldMousePos, 'equilibrium', offset, colors);
+    } else if ((mode === 'curve0' || mode === 'curve1' || mode === 'curve2' || 
+                mode === 'curve3' || mode === 'curve4' || mode === 'curve5') && currentMousePosition) {
+      // Curved arrow preview
+      if (curvedArrowStartPoint) {
+        // Show preview from start point to current mouse position
+        const previewArrow = {
+          x1: curvedArrowStartPoint.x,
+          y1: curvedArrowStartPoint.y,
+          x2: currentMousePosition.x - offset.x,
+          y2: currentMousePosition.y - offset.y,
+          type: 'curved',
+          curveType: mode,
+          direction: (mode === 'curve0' || mode === 'curve1' || mode === 'curve2') ? 'ccw' : 'cw' // Swapped
+        };
+        renderArrow(ctx, previewArrow, offset, colors, true);
+        
+        // Also draw a small circle at the start point
+        ctx.fillStyle = '#007bff';
+        ctx.beginPath();
+        ctx.arc(curvedArrowStartPoint.x + offset.x, curvedArrowStartPoint.y + offset.y, 4, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+    }
 
     // Draw hovered vertex highlight (always visible, even during bond creation)
     // This is drawn last so it appears on top of everything else
@@ -1604,7 +2491,7 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
       ctx.arc(hoveredVertex.x + offset.x, hoveredVertex.y + offset.y, 10, 0, 2 * Math.PI);
       ctx.fill();
     }
-  }, [colors, segments, vertices, vertexAtoms, offset, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode]);
+  }, [colors, segments, vertices, vertexAtoms, offset, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint]);
 
   // Redraw canvas when relevant data changes
   React.useEffect(() => {
@@ -2749,31 +3636,31 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
           
           {/* Benzene preset button */}
           <button
-            onClick={() => setPresetAndClearMode('benzene')}
+            onClick={() => setModeAndClearSelection('benzene')}
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'benzene' ? colors.buttonActive : colors.button,
+              backgroundColor: mode === 'benzene' ? colors.buttonActive : colors.button,
               border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
-              boxShadow: selectedPreset === 'benzene' ? 
+              boxShadow: mode === 'benzene' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
             }}
             onMouseEnter={(e) => {
-              if (selectedPreset !== 'benzene') {
+              if (mode !== 'benzene') {
                 e.target.style.backgroundColor = colors.buttonHover;
                 e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
-              if (selectedPreset !== 'benzene') {
+              if (mode !== 'benzene') {
                 e.target.style.backgroundColor = colors.button;
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
@@ -2786,48 +3673,48 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
               <g transform="translate(60, 60)">
                 {/* Bond 0: Double bond (top-right) */}
                 <g>
-                  <line x1="40" y1="-10" x2="80" y2="12" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
-                  <line x1="42" y1="8" x2="66" y2="22" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="40" y1="-10" x2="80" y2="12" stroke={mode === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="42" y1="8" x2="66" y2="22" stroke={mode === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 </g>
                 
                 {/* Bond 1: Single bond (right) */}
-                <line x1="80" y1="12" x2="80" y2="60" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="12" x2="80" y2="60" stroke={mode === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 
                 {/* Bond 2: Double bond (bottom-right) */}
                 <g>
-                  <line x1="80" y1="60" x2="40" y2="82" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
-                  <line x1="66" y1="52" x2="44" y2="65" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="80" y1="60" x2="40" y2="82" stroke={mode === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="66" y1="52" x2="44" y2="65" stroke={mode === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 </g>
                 
                 {/* Bond 3: Single bond (bottom-left) */}
-                <line x1="40" y1="82" x2="0" y2="60" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="82" x2="0" y2="60" stroke={mode === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 
                 {/* Bond 4: Double bond (left) */}
                 <g>
-                  <line x1="0" y1="60" x2="0" y2="12" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
-                  <line x1="14" y1="50" x2="14" y2="21" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="0" y1="60" x2="0" y2="12" stroke={mode === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                  <line x1="14" y1="50" x2="14" y2="21" stroke={mode === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
                 </g>
                 
                 {/* Bond 5: Single bond (top-left) */}
-                <line x1="0" y1="12" x2="40" y2="-10" stroke={selectedPreset === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="12" x2="40" y2="-10" stroke={mode === 'benzene' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
               </g>
             </svg>
           </button>
           
           {/* Cyclohexane preset button */}
           <button
-            onClick={() => setPresetAndClearMode('cyclohexane')}
+            onClick={() => setModeAndClearSelection('cyclohexane')}
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclohexane' ? colors.buttonActive : colors.button,
+              backgroundColor: mode === 'cyclohexane' ? colors.buttonActive : colors.button,
               border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
-              boxShadow: selectedPreset === 'cyclohexane' ? 
+              boxShadow: mode === 'cyclohexane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
@@ -2852,12 +3739,12 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
               {/* Cyclohexane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in hexagon pattern */}
-                <line x1="40" y1="-10" x2="80" y2="12" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="80" y1="12" x2="80" y2="60" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="80" y1="60" x2="40" y2="82" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="40" y1="82" x2="0" y2="60" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="0" y1="60" x2="0" y2="12" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
-                <line x1="0" y1="12" x2="40" y2="-10" stroke={selectedPreset === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="-10" x2="80" y2="12" stroke={mode === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="12" x2="80" y2="60" stroke={mode === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="80" y1="60" x2="40" y2="82" stroke={mode === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="40" y1="82" x2="0" y2="60" stroke={mode === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="60" x2="0" y2="12" stroke={mode === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
+                <line x1="0" y1="12" x2="40" y2="-10" stroke={mode === 'cyclohexane' ? '#fff' : colors.textSecondary} strokeWidth="7" strokeLinecap="round"/>
 
               </g>
             </svg>
@@ -2865,18 +3752,18 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
           
           {/* Cyclopentane preset button */}
           <button
-            onClick={() => setPresetAndClearMode('cyclopentane')}
+            onClick={() => setModeAndClearSelection('cyclopentane')}
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclopentane' ? colors.buttonActive : colors.button,
+              backgroundColor: mode === 'cyclopentane' ? colors.buttonActive : colors.button,
               border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
-              boxShadow: selectedPreset === 'cyclopentane' ? 
+              boxShadow: mode === 'cyclopentane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
@@ -2901,29 +3788,29 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
               {/* Cyclopentane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in pentagon pattern */}
-                <line x1="40" y1="0" x2="80" y2="30" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="80" y1="30" x2="66" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="66" y1="80" x2="20" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="0" y1="30" x2="16" y2="80" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
-                <line x1="40" y1="0" x2="0" y2="30" stroke={selectedPreset === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="40" y1="0" x2="80" y2="30" stroke={mode === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="80" y1="30" x2="66" y2="80" stroke={mode === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="66" y1="80" x2="20" y2="80" stroke={mode === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="0" y1="30" x2="16" y2="80" stroke={mode === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
+                <line x1="40" y1="0" x2="0" y2="30" stroke={mode === 'cyclopentane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap = "round"/>
               </g>
             </svg>
           </button>
           
           {/* Cyclobutane preset button */}
           <button
-            onClick={() => setPresetAndClearMode('cyclobutane')}
+            onClick={() => setModeAndClearSelection('cyclobutane')}
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclobutane' ? colors.buttonActive : colors.button,
+              backgroundColor: mode === 'cyclobutane' ? colors.buttonActive : colors.button,
               border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
-              boxShadow: selectedPreset === 'cyclobutane' ? 
+              boxShadow: mode === 'cyclobutane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
@@ -2948,28 +3835,28 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
               {/* Cyclobutane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in square pattern */}
-                <line x1="0" y1="0" x2="80" y2="0" stroke={selectedPreset === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="80" y1="0" x2="80" y2="80" stroke={selectedPreset === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="80" y1="80" x2="0" y2="80" stroke={selectedPreset === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="0" y1="80" x2="0" y2="0" stroke={selectedPreset === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="0" x2="80" y2="0" stroke={mode === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="0" x2="80" y2="80" stroke={mode === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="80" x2="0" y2="80" stroke={mode === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="0" y2="0" stroke={mode === 'cyclobutane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
               </g>
             </svg>
           </button>
           
           {/* Cyclopropane preset button */}
           <button
-            onClick={() => setPresetAndClearMode('cyclopropane')}
+            onClick={() => setModeAndClearSelection('cyclopropane')}
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: selectedPreset === 'cyclopropane' ? colors.buttonActive : colors.button,
+              backgroundColor: mode === 'cyclopropane' ? colors.buttonActive : colors.button,
               border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               cursor: 'pointer',
-              boxShadow: selectedPreset === 'cyclopropane' ? 
+              boxShadow: mode === 'cyclopropane' ? 
                 '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
@@ -2994,9 +3881,9 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
               {/* Cyclopropane ring structure with all single bonds */}
               <g transform="translate(60, 60)">
                 {/* All single bonds in triangle pattern */}
-                <line x1="80" y1="80" x2="40" y2="0" stroke={selectedPreset === 'cyclopropane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="0" y1="80" x2="80" y2="80" stroke={selectedPreset === 'cyclopropane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
-                <line x1="0" y1="80" x2="40" y2="0" stroke={selectedPreset === 'cyclopropane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="80" y1="80" x2="40" y2="0" stroke={mode === 'cyclopropane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="80" y2="80" stroke={mode === 'cyclopropane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
+                <line x1="0" y1="80" x2="40" y2="0" stroke={mode === 'cyclopropane' ? '#fff' : colors.textSecondary} strokeWidth="8" strokeLinecap="round"/>
               </g>
             </svg>
           </button>
@@ -3426,7 +4313,7 @@ import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rend
             )}
           </div>
           <div style={{ fontSize: '12px', opacity: '0.9' }}>
-            {(selectedPreset === 'cyclopentane' || selectedPreset === 'cyclobutane' || selectedPreset === 'cyclopropane' || selectedPreset === 'chair') ? 
+            {(mode === 'cyclopentane' || mode === 'cyclobutane' || mode === 'cyclopropane' || selectedPreset === 'chair') ? 
              (snapAlignment && snapAlignment.type === 'bond' ? 'Snapping to bond' : 'Move near bond to snap') : 
              selectedPreset ? 'Click to place multiple' : 'Press G to toggle'}
           </div>

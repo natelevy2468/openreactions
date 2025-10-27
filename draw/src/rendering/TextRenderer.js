@@ -30,19 +30,35 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
 
   // Render text with automatic subscript handling for numbers
   if (formatted.hasSegments && formatted.segments) {
-    // Render segmented text (with automatic subscripts for numbers)
-    let currentX = screenX;
-    
-    // Calculate total width to center the text properly
+    // Calculate total dimensions for bounding box
     let totalWidth = 0;
+    let maxHeight = 26; // Base font size
+    
     formatted.segments.forEach(segment => {
-      const fontSize = segment.isNumber ? 18 : 26; // Smaller for subscripts
+      const fontSize = segment.isNumber ? 18 : 26;
       ctx.font = `${fontSize}px Arial, sans-serif`;
       totalWidth += ctx.measureText(segment.text).width;
+      if (segment.isNumber) {
+        maxHeight = Math.max(maxHeight, 26 + 8); // Account for subscript offset
+      }
     });
     
-    // Start rendering from left
-    currentX = screenX - totalWidth / 2;
+    // Add padding to the bounding box
+    const padding = 2.5;
+    const boxX = screenX - totalWidth / 2 - padding;
+    const boxY = screenY - maxHeight / 2 - padding;
+    const boxWidth = totalWidth + padding * 2;
+    const boxHeight = maxHeight + padding * 2;
+    
+    // Draw white rounded rectangular background
+    ctx.fillStyle = '#FFFFFF';
+    const cornerRadius = 3;
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxWidth, boxHeight, cornerRadius);
+    ctx.fill();
+    
+    // Render segmented text on top of white background
+    let currentX = screenX - totalWidth / 2;
     
     formatted.segments.forEach((segment, index) => {
       const fontSize = segment.isNumber ? 18 : 26;
@@ -52,15 +68,6 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
       const segmentWidth = ctx.measureText(segment.text).width;
       const segmentX = currentX + segmentWidth / 2;
       const segmentY = screenY + yOffset;
-      
-      // Draw white outline (thicker to cover bonds in letter holes)
-      ctx.strokeStyle = '#FFFFFF';
-      ctx.lineWidth = segment.isNumber ? 6 : 10;
-      ctx.strokeText(segment.text, segmentX, segmentY);
-      
-      // Draw white fill to completely cover bonds
-      ctx.fillStyle = '#FFFFFF';
-      ctx.fillText(segment.text, segmentX, segmentY);
       
       // Draw black text
       ctx.fillStyle = '#000000';
@@ -72,58 +79,86 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
     // Simple text without segments (fallback)
     ctx.font = '26px Arial, sans-serif';
     
-    // Draw white outline for visibility over bonds (thicker to cover bonds)
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 10;
-    ctx.strokeText(formatted.mainText, screenX, screenY);
+    // Calculate tight bounding box for text
+    const textMetrics = ctx.measureText(formatted.mainText);
+    const textWidth = textMetrics.width;
+    const textHeight = 26; // Font size
     
-    // Draw white fill to cover holes in letters (O, P, etc.)
+    // Add padding
+    const padding = 2;
+    const boxX = screenX - textWidth / 2 - padding;
+    const boxY = screenY - textHeight / 2 - padding;
+    const boxWidth = textWidth + padding * 2;
+    const boxHeight = textHeight + padding * 2;
+    
+    // Draw white rounded rectangular background
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(formatted.mainText, screenX, screenY);
+    const cornerRadius = 3;
+    ctx.beginPath();
+    ctx.roundRect(boxX, boxY, boxWidth, boxHeight, cornerRadius);
+    ctx.fill();
     
-    // Draw black text with normal fill (thin font weight already applied)
+    // Draw black text on top
     ctx.fillStyle = '#000000';
     ctx.fillText(formatted.mainText, screenX, screenY);
   }
 
   // Handle subscript (only if manually specified - no automatic hydrogens)
   if (formatted.hasSubscript) {
-    ctx.font = '18px Arial, sans-serif'; // Increased from 16px to 17px (slightly bigger)
+    ctx.font = '18px Arial, sans-serif';
     const mainWidth = ctx.measureText(formatted.mainText).width;
     const subscriptX = screenX + mainWidth/2 + 6;
     const subscriptY = screenY + 8;
     
-    // White outline for subscript (thicker to cover bonds)
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 8;
-    ctx.strokeText(formatted.subscript, subscriptX, subscriptY);
+    // Calculate subscript bounding box
+    const subscriptMetrics = ctx.measureText(formatted.subscript);
+    const subscriptWidth = subscriptMetrics.width;
+    const subscriptHeight = 18;
+    const padding = 1.25;
     
-    // White fill to cover holes
+    const subBoxX = subscriptX - subscriptWidth / 2 - padding;
+    const subBoxY = subscriptY - subscriptHeight / 2 - padding;
+    const subBoxWidth = subscriptWidth + padding * 2;
+    const subBoxHeight = subscriptHeight + padding * 2;
+    
+    // Draw white rounded rectangular background
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(formatted.subscript, subscriptX, subscriptY);
+    const subCornerRadius = 2;
+    ctx.beginPath();
+    ctx.roundRect(subBoxX, subBoxY, subBoxWidth, subBoxHeight, subCornerRadius);
+    ctx.fill();
     
-    // Black subscript text with normal fill
+    // Draw black subscript text
     ctx.fillStyle = '#000000';
     ctx.fillText(formatted.subscript, subscriptX, subscriptY);
   }
 
-  // Handle superscript (charges)
+  // Handle superscript (charges - though these are now rendered separately)
   if (formatted.hasSuperscript) {
-    ctx.font = '18px Arial, sans-serif'; // Increased from 16px to 17px (slightly bigger)
+    ctx.font = '18px Arial, sans-serif';
     const mainWidth = ctx.measureText(formatted.mainText).width;
     const superscriptX = screenX + mainWidth/2 + 6;
     const superscriptY = screenY - 8;
     
-    // White outline for superscript (thicker to cover bonds)
-    ctx.strokeStyle = '#FFFFFF';
-    ctx.lineWidth = 8;
-    ctx.strokeText(formatted.superscript, superscriptX, superscriptY);
+    // Calculate superscript bounding box
+    const superscriptMetrics = ctx.measureText(formatted.superscript);
+    const superscriptWidth = superscriptMetrics.width;
+    const superscriptHeight = 18;
+    const padding = 1.25;
     
-    // White fill to cover holes
+    const supBoxX = superscriptX - superscriptWidth / 2 - padding;
+    const supBoxY = superscriptY - superscriptHeight / 2 - padding;
+    const supBoxWidth = superscriptWidth + padding * 2;
+    const supBoxHeight = superscriptHeight + padding * 2;
+    
+    // Draw white rounded rectangular background
     ctx.fillStyle = '#FFFFFF';
-    ctx.fillText(formatted.superscript, superscriptX, superscriptY);
+    const supCornerRadius = 2;
+    ctx.beginPath();
+    ctx.roundRect(supBoxX, supBoxY, supBoxWidth, supBoxHeight, supCornerRadius);
+    ctx.fill();
     
-    // Black superscript text with normal fill
+    // Draw black superscript text
     ctx.fillStyle = '#000000';
     ctx.fillText(formatted.superscript, superscriptX, superscriptY);
   }
