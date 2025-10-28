@@ -1,344 +1,312 @@
-// Arrow rendering functions - exact copy from HexGridWithToolbar.jsx
+/**
+ * Arrow Rendering System
+ * 
+ * Handles rendering of reaction arrows:
+ * - Forward arrows (straight right-pointing)
+ * - Equilibrium arrows (double-headed)
+ * - Curved arrows (for electron movement)
+ */
 
-export function drawArrowOnCanvas(ctx, x1, y1, x2, y2, color = "#000", width = 3, mode) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
+/**
+ * Renders a forward arrow (single-headed, pointing right)
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Object} arrow - Arrow data {x, y, length, angle}
+ * @param {Object} offset - Canvas offset
+ * @param {Object} colors - Color scheme
+ * @param {boolean} isPreview - Whether this is a preview (lighter color)
+ */
+export const renderForwardArrow = (ctx, arrow, offset, colors, isPreview = false) => {
+  const centerX = arrow.x + offset.x;
+  const centerY = arrow.y + offset.y;
+  const length = arrow.length || 80;
+  const angle = arrow.angle || 0;
+  
+  // Center the arrow on the given position
+  const screenX = centerX - Math.cos(angle) * length / 2;
+  const screenY = centerY - Math.sin(angle) * length / 2;
+  
+  // Calculate end point
+  const endX = screenX + Math.cos(angle) * length;
+  const endY = screenY + Math.sin(angle) * length;
+  
+  // Arrow styling
+  const arrowColor = isPreview ? '#888888' : (colors.bonds || '#000000');
+  const lineWidth = 2.5;
+  const headLength = 14; // Bigger arrowhead (matches equilibrium)
+  const headWidth = 10; // Wider arrowhead (matches equilibrium)
+  
+  ctx.strokeStyle = arrowColor;
+  ctx.fillStyle = arrowColor;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  
+  // Draw main arrow line
   ctx.beginPath();
-  ctx.moveTo(x1, y1);
-  ctx.lineTo(x2, y2);
+  ctx.moveTo(screenX, screenY);
+  ctx.lineTo(endX - Math.cos(angle) * headLength, endY - Math.sin(angle) * headLength);
   ctx.stroke();
   
-  // Draw filled triangle arrowhead shifted to the right from the end tip
-  const angle = Math.atan2(y2 - y1, x2 - x1);
-  // Offset the entire triangle to the right
-  const tipOffset = 3; // Move the tip 3px to the right
-  const arrowTipX = x2 + tipOffset * Math.cos(angle);
-  const arrowTipY = y2 + tipOffset * Math.sin(angle);
-  const headlen = 14;
-  const arrowX = arrowTipX - headlen * Math.cos(angle);
-  const arrowY = arrowTipY - headlen * Math.sin(angle);
+  // Draw arrowhead
+  const perpAngle = angle + Math.PI / 2;
+  const headBaseX = endX - Math.cos(angle) * headLength;
+  const headBaseY = endY - Math.sin(angle) * headLength;
+  
+  const point1X = headBaseX + Math.cos(perpAngle) * headWidth / 2;
+  const point1Y = headBaseY + Math.sin(perpAngle) * headWidth / 2;
+  const point2X = headBaseX - Math.cos(perpAngle) * headWidth / 2;
+  const point2Y = headBaseY - Math.sin(perpAngle) * headWidth / 2;
+  
   ctx.beginPath();
-  ctx.moveTo(arrowTipX, arrowTipY);
-  ctx.lineTo(
-    arrowX - 7 * Math.sin(angle),
-    arrowY + 7 * Math.cos(angle)
-  );
-  ctx.lineTo(
-    arrowX + 7 * Math.sin(angle),
-    arrowY - 7 * Math.cos(angle)
-  );
+  ctx.moveTo(endX, endY);
+  ctx.lineTo(point1X, point1Y);
+  ctx.lineTo(point2X, point2Y);
   ctx.closePath();
-  ctx.fillStyle = color;
   ctx.fill();
-  
-  // Add larger outward-pointing triangles at both ends of the arrow when in mouse mode
-  if (mode === 'mouse') {
-    // Triangle at the end (tip) - placed further beyond the arrow tip and larger
-    const tipTriangleSize = 12; // Doubled from 6 to 12
-    // Slightly increase distance from arrow tip
-    const tipDistance = 17;
-    const tipX = x2 + tipDistance * Math.cos(angle);
-    const tipY = y2 + tipDistance * Math.sin(angle);
-    
-    ctx.beginPath();
-    ctx.moveTo(tipX, tipY);
-    ctx.lineTo(
-      tipX - tipTriangleSize * Math.cos(angle) - tipTriangleSize * Math.sin(angle),
-      tipY - tipTriangleSize * Math.sin(angle) + tipTriangleSize * Math.cos(angle)
-    );
-    ctx.lineTo(
-      tipX - tipTriangleSize * Math.cos(angle) + tipTriangleSize * Math.sin(angle),
-      tipY - tipTriangleSize * Math.sin(angle) - tipTriangleSize * Math.cos(angle)
-    );
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(54, 98, 227, 0.7)';
-    ctx.fill();
-    
-    // Triangle at the start - placed further beyond the start point and larger
-    const startTriangleSize = 12; // Doubled from 6 to 12
-    // Slightly increase distance from arrow start
-    const startDistance = 17;
-    const startX = x1 - startDistance * Math.cos(angle);
-    const startY = y1 - startDistance * Math.sin(angle);
-    
-    ctx.beginPath();
-    ctx.moveTo(startX, startY);
-    ctx.lineTo(
-      startX + startTriangleSize * Math.cos(angle) - startTriangleSize * Math.sin(angle),
-      startY + startTriangleSize * Math.sin(angle) + startTriangleSize * Math.cos(angle)
-    );
-    ctx.lineTo(
-      startX + startTriangleSize * Math.cos(angle) + startTriangleSize * Math.sin(angle),
-      startY + startTriangleSize * Math.sin(angle) - startTriangleSize * Math.cos(angle)
-    );
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(54, 98, 227, 0.7)';
-    ctx.fill();
-  }
-  
-  ctx.restore();
-}
-
-export function drawEquilArrowOnCanvas(ctx, x1, y1, x2, y2, color = "#000", width = 3, topX1, topX2, bottomX1, bottomX2, arrowIndex = -1, mode, isPointInArrowCircle, offset) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = width;
-  
-  // Use separate coordinates if provided, otherwise use the defaults
-  const topStartX = topX1 !== undefined ? topX1 : x1;
-  const topEndX = topX2 !== undefined ? topX2 : x2;
-  const bottomStartX = bottomX1 !== undefined ? bottomX1 : x1;
-  const bottomEndX = bottomX2 !== undefined ? bottomX2 : x2;
-  
-  // Top arrow: left to right
-  ctx.beginPath();
-  ctx.moveTo(topStartX, y1 - 5);
-  ctx.lineTo(topEndX, y1 - 5);
-  ctx.stroke();
-  
-  // Right arrowhead (filled triangle) - shifted to the right
-  const angleR = 0; // horizontal
-  const headlen = 14;
-  // Offset the entire top triangle to the right
-  const tipOffset = 3; // Move the tip 3px to the right
-  const rx = topEndX + tipOffset;
-  const ry = y1 - 5;
-  const arrowX = rx - headlen * Math.cos(angleR);
-  const arrowY = ry - headlen * Math.sin(angleR);
-  ctx.beginPath();
-  ctx.moveTo(rx, ry);
-  ctx.lineTo(arrowX - 7 * Math.sin(angleR), arrowY + 7 * Math.cos(angleR));
-  ctx.lineTo(arrowX + 7 * Math.sin(angleR), arrowY - 7 * Math.cos(angleR));
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-  
-  // Add large outward-pointing triangle at the right end in mouse mode
-  if (mode === 'mouse') {
-    const triangleSize = 16; // Increased from 12 to 16
-    const triangleOffset = 18; // Increased from 14 to 18 for better positioning
-
-    // Get hover information for special hover effects
-    const { index: hoveredArrowIndex, part: hoveredArrowPart } = isPointInArrowCircle(
-      rx + offset.x, ry, true // Pass current coords and skipDistance=true to just check if this is the hovered arrow
-    );
-    const isHoveredTopEnd = hoveredArrowIndex === arrowIndex && hoveredArrowPart === 'topEnd';
-    
-    // Right triangle (pointing right) - top half only for equilibrium arrows to avoid overlap
-    ctx.beginPath();
-    ctx.moveTo(rx + triangleOffset, ry);
-    ctx.lineTo(rx + triangleOffset - triangleSize, ry - triangleSize);
-    ctx.lineTo(rx + triangleOffset - triangleSize, ry); // Changed: only go to center height, not below
-    ctx.closePath();
-    // Use darker color when hovered
-    ctx.fillStyle = isHoveredTopEnd ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.7)';
-    ctx.fill();
-    
-    // Top left triangle indicator has been removed
-  }
-  
-  // Bottom arrow: right to left
-  ctx.beginPath();
-  ctx.moveTo(bottomEndX, y2 + 5);
-  ctx.lineTo(bottomStartX, y2 + 5);
-  ctx.stroke();
-  
-  // Left arrowhead (filled triangle) - shifted to the left
-  const angleL = Math.PI; // horizontal, left
-  // Offset the entire bottom triangle to the left
-  const tipOffsetL = 3; // Move the tip 3px to the left
-  const lx = bottomStartX - tipOffsetL;
-  const ly = y2 + 5;
-  const arrowXL = lx - headlen * Math.cos(angleL);
-  const arrowYL = ly - headlen * Math.sin(angleL);
-  ctx.beginPath();
-  ctx.moveTo(lx, ly);
-  ctx.lineTo(arrowXL - 7 * Math.sin(angleL), arrowYL + 7 * Math.cos(angleL));
-  ctx.lineTo(arrowXL + 7 * Math.sin(angleL), arrowYL - 7 * Math.cos(angleL));
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-  
-  // Add large outward-pointing triangles at both ends in mouse mode
-  if (mode === 'mouse') {
-    const triangleSize = 16; // Increased from 12 to 16
-    const triangleOffset = 18; // Increased from 14 to 18 for better positioning
-    
-    // Get hover information for special hover effects
-    const { index: hoveredArrowIndex, part: hoveredArrowPart } = isPointInArrowCircle(
-      lx + offset.x, ly, true // Pass current coords and skipDistance=true to just check if this is the hovered arrow
-    );
-    const isHoveredBottomStart = hoveredArrowIndex === arrowIndex && hoveredArrowPart === 'bottomStart';
-    
-    // Left triangle (pointing left) for bottom arrow - bottom half only for equilibrium arrows to avoid overlap
-    ctx.beginPath();
-    ctx.moveTo(lx - triangleOffset, ly);
-    ctx.lineTo(lx - triangleOffset + triangleSize, ly); // Changed: only go to center height, not above
-    ctx.lineTo(lx - triangleOffset + triangleSize, ly + triangleSize);
-    ctx.closePath();
-    // Use darker color when hovered
-    ctx.fillStyle = isHoveredBottomStart ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.7)';
-    ctx.fill();
-    
-    // Bottom right triangle indicator has been removed
-  }
-  
-  ctx.restore();
-}
-
-// Helper function to calculate the peak position of a curved arrow
-export const calculateCurvedArrowPeak = (x1, y1, x2, y2, type) => {
-  // Calculate distance and midpoint between the two points
-  const deltaX = x2 - x1;
-  const deltaY = y2 - y1;
-  const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
-  const midX = (x1 + x2) / 2;
-  const midY = (y1 + y2) / 2;
-  
-  // Perpendicular vector to the line from start to end
-  const perpX = -deltaY / (distance || 1);
-  const perpY = deltaX / (distance || 1);
-  
-  // Determine direction and curvature level
-  const isTopRow = ['curve0', 'curve1', 'curve2'].includes(type);
-  const curvatureMap = {
-    'curve0': 0.25, 'curve1': 0.6, 'curve2': 1.0,
-    'curve3': 0.25, 'curve4': 0.6, 'curve5': 1.0
-  };
-  
-  // Get curvature factor for this arrow type
-  const curveFactor = curvatureMap[type] || 0.5;
-  
-  // Calculate peak position directly - simpler and more predictable
-  const peakHeight = distance * curveFactor;
-  
-  // Calculate peak position by moving perpendicular to the line
-  let peakX, peakY;
-  if (isTopRow) {
-    // Clockwise arrows (top row) - peak below the line
-    peakX = midX - perpX * peakHeight;
-    peakY = midY - perpY * peakHeight;
-  } else {
-    // Counterclockwise arrows (bottom row) - peak above the line
-    peakX = midX + perpX * peakHeight;
-    peakY = midY + perpY * peakHeight;
-  }
-  
-  return { x: peakX, y: peakY };
 };
 
-// Draw curved arrows based on type
-export function drawCurvedArrowOnCanvas(ctx, x1, y1, x2, y2, type, color = "#000", arrowIndex = -1, peakX = null, peakY = null, arrowsArray = null, mode, hoverCurvedArrow) {
-  ctx.save();
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 3;
-  ctx.fillStyle = color;
-
-  // Default values
-  let startX = x1;
-  let startY = y1;
-  let endX = x2;
-  let endY = y2;
+/**
+ * Renders an equilibrium arrow (double-headed)
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Object} arrow - Arrow data {x, y, length, angle}
+ * @param {Object} offset - Canvas offset
+ * @param {Object} colors - Color scheme
+ * @param {boolean} isPreview - Whether this is a preview (lighter color)
+ */
+export const renderEquilibriumArrow = (ctx, arrow, offset, colors, isPreview = false) => {
+  const centerX = arrow.x + offset.x;
+  const centerY = arrow.y + offset.y;
+  const length = arrow.length || 80;
+  const angle = arrow.angle || 0;
   
-  // If peak position is not provided, calculate it based on type
-  if (peakX === null || peakY === null) {
-    const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, type);
-    peakX = peakPos.x;
-    peakY = peakPos.y;
-  }
+  // Center the arrow on the given position
+  const screenX = centerX - Math.cos(angle) * length / 2;
+  const screenY = centerY - Math.sin(angle) * length / 2;
   
-  // Draw using quadratic Bezier curve with the peak as the control point
+  // Calculate end point
+  const endX = screenX + Math.cos(angle) * length;
+  const endY = screenY + Math.sin(angle) * length;
+  
+  // Arrow styling
+  const arrowColor = isPreview ? '#888888' : (colors.bonds || '#000000');
+  const lineWidth = 2.5;
+  const headLength = 14; // Bigger arrowheads
+  const headWidth = 10; // Wider arrowheads
+  const arrowSpacing = 3.5; // Closer spacing between the two arrows
+  
+  ctx.strokeStyle = arrowColor;
+  ctx.fillStyle = arrowColor;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  
+  const perpAngle = angle + Math.PI / 2;
+  
+  // Draw top arrow (pointing right)
+  const topOffsetX = Math.cos(perpAngle) * arrowSpacing;
+  const topOffsetY = Math.sin(perpAngle) * arrowSpacing;
+  
+  const topStartX = screenX + topOffsetX;
+  const topStartY = screenY + topOffsetY;
+  const topEndX = endX + topOffsetX;
+  const topEndY = endY + topOffsetY;
+  
+  // Top arrow line
   ctx.beginPath();
-  ctx.moveTo(startX, startY);
-  ctx.quadraticCurveTo(peakX, peakY, endX, endY);
+  ctx.moveTo(topStartX, topStartY);
+  ctx.lineTo(topEndX - Math.cos(angle) * headLength, topEndY - Math.sin(angle) * headLength);
   ctx.stroke();
   
-  // Calculate tangent at the end point for the arrowhead
-  // For a quadratic Bezier curve, the tangent at t=1 (end point) is the direction from the control point to the end point
-  const tangentX = endX - peakX;
-  const tangentY = endY - peakY;
-  const tangentLength = Math.sqrt(tangentX * tangentX + tangentY * tangentY);
-  
-  // Normalize the tangent vector
-  const normalizedTangentX = tangentX / tangentLength;
-  const normalizedTangentY = tangentY / tangentLength;
-  
-  // Draw arrowhead - move triangle forward so its center is at the curve end
-  const headlen = 14;
-  const triangleOffset = 7; // Move triangle forward by half its width
-  
-  // Move the tip forward along the tangent
-  const arrowTipX = endX + triangleOffset * normalizedTangentX;
-  const arrowTipY = endY + triangleOffset * normalizedTangentY;
-  
-  const arrowX = arrowTipX - headlen * normalizedTangentX;
-  const arrowY = arrowTipY - headlen * normalizedTangentY;
-  
-  const angle = Math.atan2(normalizedTangentY, normalizedTangentX);
+  // Top arrowhead - half triangle (top half only, harpoon style)
+  // Move harpoon closer to center by reducing its vertical offset
+  const harpoonCenterOffset = 1.3; // Move harpoon toward horizontal center
+  const topHarpoonTipX = topEndX - Math.cos(perpAngle) * harpoonCenterOffset;
+  const topHarpoonTipY = topEndY - Math.sin(perpAngle) * harpoonCenterOffset;
+  const topHeadBaseX = topHarpoonTipX - Math.cos(angle) * headLength;
+  const topHeadBaseY = topHarpoonTipY - Math.sin(angle) * headLength;
   
   ctx.beginPath();
-  ctx.moveTo(arrowTipX, arrowTipY);
-  ctx.lineTo(
-    arrowX - 7 * Math.sin(angle),
-    arrowY + 7 * Math.cos(angle)
-  );
-  ctx.lineTo(
-    arrowX + 7 * Math.sin(angle),
-    arrowY - 7 * Math.cos(angle)
-  );
+  ctx.moveTo(topHarpoonTipX, topHarpoonTipY);
+  ctx.lineTo(topHeadBaseX + Math.cos(perpAngle) * headWidth, topHeadBaseY + Math.sin(perpAngle) * headWidth);
+  ctx.lineTo(topHeadBaseX, topHeadBaseY);
   ctx.closePath();
   ctx.fill();
   
-  // Add blue circles at both endpoints when in mouse mode
-  if (mode === 'mouse') {
-    const circleRadius = 10;
-    
-    // Get hover information for special hover effects using the hover state
-    const isHoveredStart = hoverCurvedArrow.index === arrowIndex && hoverCurvedArrow.part === 'start';
-    const isHoveredEnd = hoverCurvedArrow.index === arrowIndex && hoverCurvedArrow.part === 'end';
-    const isHoveredPeak = hoverCurvedArrow.index === arrowIndex && hoverCurvedArrow.part === 'peak';
-    
-    // Blue circle at start point
-    ctx.beginPath();
-    ctx.arc(startX, startY, circleRadius, 0, 2 * Math.PI);
-    ctx.fillStyle = isHoveredStart ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
-    ctx.fill();
-    
-    // Blue circle at end point
-    ctx.beginPath();
-    ctx.arc(endX, endY, circleRadius, 0, 2 * Math.PI);
-    ctx.fillStyle = isHoveredEnd ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
-    ctx.fill();
-    
-    // Blue circle at peak point
-    // For quadratic Bezier curves, the actual peak on the curve at t=0.5 is:
-    // P(0.5) = 0.25 * P0 + 0.5 * P1 + 0.25 * P2
-    // where P0=start, P1=control point (peakX,peakY), P2=end
-    if (peakX !== null && peakY !== null) {
-      // Calculate the actual point on the curve at t=0.5
-      const actualCurvePeakX = 0.25 * startX + 0.5 * peakX + 0.25 * endX;
-      const actualCurvePeakY = 0.25 * startY + 0.5 * peakY + 0.25 * endY;
-      
-      ctx.beginPath();
-      ctx.arc(actualCurvePeakX, actualCurvePeakY, circleRadius, 0, 2 * Math.PI);
-      ctx.fillStyle = isHoveredPeak ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
-      ctx.fill();
-    } else {
-      // Fallback: calculate peak if not provided
-      const peakPos = calculateCurvedArrowPeak(startX, startY, endX, endY, type);
-      if (peakPos) {
-        // Calculate actual curve peak from control point
-        const actualCurvePeakX = 0.25 * startX + 0.5 * peakPos.x + 0.25 * endX;
-        const actualCurvePeakY = 0.25 * startY + 0.5 * peakPos.y + 0.25 * endY;
-        
-        ctx.beginPath();
-        ctx.arc(actualCurvePeakX, actualCurvePeakY, circleRadius, 0, 2 * Math.PI);
-        ctx.fillStyle = isHoveredPeak ? 'rgba(25, 98, 180, 0.85)' : 'rgba(54, 98, 227, 0.6)';
-        ctx.fill();
-      }
-    }
+  // Draw bottom arrow (pointing left)
+  const bottomOffsetX = -Math.cos(perpAngle) * arrowSpacing;
+  const bottomOffsetY = -Math.sin(perpAngle) * arrowSpacing;
+  
+  const bottomStartX = endX + bottomOffsetX;
+  const bottomStartY = endY + bottomOffsetY;
+  const bottomEndX = screenX + bottomOffsetX;
+  const bottomEndY = screenY + bottomOffsetY;
+  
+  // Bottom arrow line (pointing left, so reverse direction)
+  ctx.beginPath();
+  ctx.moveTo(bottomStartX, bottomStartY);
+  ctx.lineTo(bottomEndX + Math.cos(angle) * headLength, bottomEndY + Math.sin(angle) * headLength);
+  ctx.stroke();
+  
+  // Bottom arrowhead (pointing left) - half triangle (bottom half only, harpoon style)
+  // Move harpoon closer to center by reducing its vertical offset
+  const bottomHarpoonTipX = bottomEndX + Math.cos(perpAngle) * harpoonCenterOffset;
+  const bottomHarpoonTipY = bottomEndY + Math.sin(perpAngle) * harpoonCenterOffset;
+  const bottomHeadBaseX = bottomHarpoonTipX + Math.cos(angle) * headLength;
+  const bottomHeadBaseY = bottomHarpoonTipY + Math.sin(angle) * headLength;
+  
+  ctx.beginPath();
+  ctx.moveTo(bottomHarpoonTipX, bottomHarpoonTipY);
+  ctx.lineTo(bottomHeadBaseX - Math.cos(perpAngle) * headWidth, bottomHeadBaseY - Math.sin(perpAngle) * headWidth);
+  ctx.lineTo(bottomHeadBaseX, bottomHeadBaseY);
+  ctx.closePath();
+  ctx.fill();
+};
+
+/**
+ * Renders a curved arrow (for electron movement)
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Object} arrow - Arrow data {x1, y1, x2, y2, curveType, direction}
+ * @param {Object} offset - Canvas offset
+ * @param {Object} colors - Color scheme
+ * @param {boolean} isPreview - Whether this is a preview
+ */
+export const renderCurvedArrow = (ctx, arrow, offset, colors, isPreview = false) => {
+  const x1 = arrow.x1 + offset.x;
+  const y1 = arrow.y1 + offset.y;
+  const x2 = arrow.x2 + offset.x;
+  const y2 = arrow.y2 + offset.y;
+  
+  // Arrow styling
+  const arrowColor = isPreview ? '#888888' : (colors.bonds || '#000000');
+  const lineWidth = 2.5; // Thicker line
+  const headLength = 14; // Longer to cover line tip
+  const headWidth = 10; // Wider arrowhead
+  
+  // Determine curve intensity based on type
+  // curve0 = shallow (large circle), curve1 = medium, curve2 = high peak
+  let curveFactor = 0.5; // Default medium curve
+  
+  if (arrow.curveType === 'curve0') {
+    curveFactor = 0.25; // Shallow curve (part of bigger circle)
+  } else if (arrow.curveType === 'curve1') {
+    curveFactor = 0.5; // Medium curve
+  } else if (arrow.curveType === 'curve2') {
+    curveFactor = 0.95; // High peak
   }
   
-  ctx.restore();
-} 
+  // Determine curve direction (clockwise or counterclockwise)
+  const isClockwise = arrow.direction === 'cw';
+  const curveSign = isClockwise ? 1 : -1;
+  
+  // Calculate control point for quadratic curve
+  const midX = (x1 + x2) / 2;
+  const midY = (y1 + y2) / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  
+  // Perpendicular offset for control point
+  const perpX = -dy / distance;
+  const perpY = dx / distance;
+  
+  const controlX = midX + perpX * distance * curveFactor * curveSign;
+  const controlY = midY + perpY * distance * curveFactor * curveSign;
+  
+  // Calculate arrowhead angle at the end of the curve FIRST
+  // Tangent at end point of quadratic curve
+  const t = 1; // At end point
+  const tangentX = 2 * (1 - t) * (controlX - x1) + 2 * t * (x2 - controlX);
+  const tangentY = 2 * (1 - t) * (controlY - y1) + 2 * t * (y2 - controlY);
+  const tangentAngle = Math.atan2(tangentY, tangentX);
+  
+  // Calculate where the line should end (before the arrowhead)
+  const lineEndX = x2 - Math.cos(tangentAngle) * headLength;
+  const lineEndY = y2 - Math.sin(tangentAngle) * headLength;
+  
+  ctx.strokeStyle = arrowColor;
+  ctx.fillStyle = arrowColor;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  
+  // Draw curved line (stopping before arrowhead)
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.quadraticCurveTo(controlX, controlY, lineEndX, lineEndY);
+  ctx.stroke();
+  
+  // Draw arrowhead at the actual end point
+  const perpAngle = tangentAngle + Math.PI / 2;
+  const headBaseX = x2 - Math.cos(tangentAngle) * headLength;
+  const headBaseY = y2 - Math.sin(tangentAngle) * headLength;
+  
+  ctx.beginPath();
+  ctx.moveTo(x2, y2); // Tip at actual end point
+  ctx.lineTo(headBaseX + Math.cos(perpAngle) * headWidth / 2, headBaseY + Math.sin(perpAngle) * headWidth / 2);
+  ctx.lineTo(headBaseX - Math.cos(perpAngle) * headWidth / 2, headBaseY - Math.sin(perpAngle) * headWidth / 2);
+  ctx.closePath();
+  ctx.fill();
+};
+
+/**
+ * Main arrow rendering dispatcher
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Object} arrow - Arrow data
+ * @param {Object} offset - Canvas offset
+ * @param {Object} colors - Color scheme
+ * @param {boolean} isPreview - Whether this is a preview
+ */
+export const renderArrow = (ctx, arrow, offset, colors, isPreview = false) => {
+  if (!arrow) return;
+  
+  switch (arrow.type) {
+    case 'forward':
+      renderForwardArrow(ctx, arrow, offset, colors, isPreview);
+      break;
+    case 'equilibrium':
+    case 'equil':
+      renderEquilibriumArrow(ctx, arrow, offset, colors, isPreview);
+      break;
+    case 'curved':
+      renderCurvedArrow(ctx, arrow, offset, colors, isPreview);
+      break;
+    default:
+      // Unknown arrow type
+      break;
+  }
+};
+
+/**
+ * Renders all arrows in the molecule
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Array} arrows - Array of arrow data
+ * @param {Object} offset - Canvas offset
+ * @param {Object} colors - Color scheme
+ */
+export const renderAllArrows = (ctx, arrows, offset, colors) => {
+  arrows.forEach(arrow => {
+    renderArrow(ctx, arrow, offset, colors, false);
+  });
+};
+
+/**
+ * Renders an arrow preview at mouse position
+ * @param {CanvasRenderingContext2D} ctx - Canvas context
+ * @param {Object} mousePos - Mouse position {x, y} in world coordinates
+ * @param {string} arrowType - Type of arrow ('forward', 'equilibrium', etc.)
+ * @param {Object} offset - Canvas offset
+ * @param {Object} colors - Color scheme
+ */
+export const renderArrowPreview = (ctx, mousePos, arrowType, offset, colors) => {
+  if (!mousePos) return;
+  
+  const previewArrow = {
+    x: mousePos.x,
+    y: mousePos.y,
+    type: arrowType,
+    length: 80,
+    angle: 0
+  };
+  
+  renderArrow(ctx, previewArrow, offset, colors, true);
+};
