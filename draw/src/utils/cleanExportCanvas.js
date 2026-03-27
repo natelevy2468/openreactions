@@ -1,15 +1,9 @@
 /**
- * Renders molecule content to an offscreen canvas (no UI overlays, no previews).
- * Used for PNG export with tight crop and optional resolution scaling.
+ * Export: crop the live drawing canvas to the bounds of drawn content (zoom-to-fit).
+ * Uses pixel copy from the same buffer drawCanvas paints — identical to on-screen rendering.
  */
 
-import { renderDoubleBond } from '../rendering/DoubleBondRenderer.js';
-import { renderAllStereochemistryBonds } from '../rendering/StereochemistryRenderer.js';
-import { renderAllAtomText } from '../rendering/TextRenderer.js';
-import { renderAllLonePairsAndCharges } from '../rendering/LonePairRenderer.js';
-import { renderAllArrows } from '../rendering/ArrowRenderer.js';
-
-function expandBoundsForArrow(a, add) {
+function expandArrowPoints(a, add) {
   if (a.type === 'curved') {
     add(a.x1, a.y1);
     add(a.x2, a.y2);
@@ -29,19 +23,31 @@ function expandBoundsForArrow(a, add) {
 }
 
 /**
- * @returns {{ minX: number, minY: number, maxX: number, maxY: number } | null}
+ * Bounding box of drawn content in canvas pixel coordinates (same space as drawCanvas).
+ * @param {number} padding - Extra margin around geometry (labels, lone pairs)
+ * @returns {{ x: number, y: number, width: number, height: number } | null}
  */
-export function computeMoleculeBounds(vertices, segments, arrows) {
+export function computeCanvasContentBounds(
+  vertices,
+  segments,
+  arrows,
+  offset,
+  canvasWidth,
+  canvasHeight,
+  padding = 72
+) {
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
 
-  const add = (x, y) => {
-    minX = Math.min(minX, x);
-    minY = Math.min(minY, y);
-    maxX = Math.max(maxX, x);
-    maxY = Math.max(maxY, y);
+  const add = (wx, wy) => {
+    const cx = wx + offset.x;
+    const cy = wy + offset.y;
+    minX = Math.min(minX, cx);
+    minY = Math.min(minY, cy);
+    maxX = Math.max(maxX, cx);
+    maxY = Math.max(maxY, cy);
   };
 
   vertices.forEach((v) => add(v.x, v.y));
@@ -53,115 +59,62 @@ export function computeMoleculeBounds(vertices, segments, arrows) {
     }
   });
 
-  arrows.forEach((a) => expandBoundsForArrow(a, add));
+  arrows.forEach((a) => expandArrowPoints(a, add));
 
-  const pad = 80;
-  if (minX === Infinity) return null;
-
-  return {
-    minX: minX - pad,
-    minY: minY - pad,
-    maxX: maxX + pad,
-    maxY: maxY + pad,
-  };
-}
-
-/**
- * @param {object} options
- * @returns {{ imageUrl: string, width: number, height: number, scaleFactor: number } | null}
- */
-export function renderCleanCanvasExport(options) {
-  const {
-    vertices,
-    segments,
-    vertexAtoms,
-    arrows,
-    detectedRings,
-    colors,
-    isDarkMode,
-    resolution = 2,
-  } = options;
-
-  const hasBonds = segments.some((s) => s.bondOrder > 0);
-  if (vertices.length === 0 && !hasBonds && arrows.length === 0) {
+  if (minX === Infinity || !Number.isFinite(minX)) {
     return null;
   }
 
-  const b = computeMoleculeBounds(vertices, segments, arrows);
-  if (!b) return null;
+  const cropLeft = Math.max(0, Math.floor(minX - padding));
+  const cropTop = Math.max(0, Math.floor(minY - padding));
+  const cropRight = Math.min(canvasWidth, Math.ceil(maxX + padding));
+  const cropBottom = Math.min(canvasHeight, Math.ceil(maxY + padding));
+  const width = Math.max(1, cropRight - cropLeft);
+  const height = Math.max(1, cropBottom - cropTop);
 
-  const W = b.maxX - b.minX;
-  const H = b.maxY - b.minY;
-  if (W <= 0 || H <= 0) return null;
+  return { x: cropLeft, y: cropTop, width, height };
+}
 
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
+/**
+ * Crops a region from the live canvas and encodes PNG. Pixel copy — matches on-screen drawing
+ * (including double-bond styling). Scales with nearest-neighbor to avoid blurring line pairs.
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {{ x: number, y: number, width: number, height: number }} cropRect - Canvas pixel coords
+ * @param {number} [scaleFactor=2]
+ */
+export function exportCanvasCroppedSnapshot(canvas, cropRect, scaleFactor = 2) {
+  if (!canvas?.getContext || !cropRect) return null;
+
+  const { x, y, width, height } = cropRect;
+  if (width <= 0 || height <= 0) return null;
+
+  const cw = canvas.width;
+  const ch = canvas.height;
+  if (cw <= 0 || ch <= 0) return null;
+
+  const sx = Math.max(0, Math.min(x, cw - 1));
+  const sy = Math.max(0, Math.min(y, ch - 1));
+  const sw = Math.min(width, cw - sx);
+  const sh = Math.min(height, ch - sy);
+  if (sw <= 0 || sh <= 0) return null;
+
+  const s = Math.max(1, Math.min(4, Math.round(Number(scaleFactor) || 2)));
+
+  const out = document.createElement('canvas');
+  out.width = Math.round(sw * s);
+  out.height = Math.round(sh * s);
+  const ctx = out.getContext('2d');
   if (!ctx) return null;
 
-  const s = resolution;
-  canvas.width = Math.max(1, Math.ceil(W * s));
-  canvas.height = Math.max(1, Math.ceil(H * s));
+  // Nearest-neighbor upscale: keeps bond lines sharp and identical to source pixels
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
 
-  ctx.fillStyle = colors.canvasBackground;
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  ctx.setTransform(s, 0, 0, s, -b.minX * s, -b.minY * s);
-
-  const offset = { x: 0, y: 0 };
-  ctx.lineCap = 'round';
-
-  const stereoBondIndices = renderAllStereochemistryBonds(ctx, segments, offset, colors);
-
-  segments.forEach((segment, index) => {
-    if (segment.bondOrder <= 0) return;
-    if (stereoBondIndices.has(index)) return;
-
-    if (segment.bondOrder === 1) {
-      ctx.strokeStyle = colors.bonds;
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      ctx.moveTo(segment.x1 + offset.x, segment.y1 + offset.y);
-      ctx.lineTo(segment.x2 + offset.x, segment.y2 + offset.y);
-      ctx.stroke();
-    } else if (segment.bondOrder === 2) {
-      renderDoubleBond(ctx, segment, segments, vertices, offset, colors, detectedRings || []);
-    } else if (segment.bondOrder === 3) {
-      const bondAngle = Math.atan2(segment.y2 - segment.y1, segment.x2 - segment.x1);
-      const perpAngle = bondAngle + Math.PI / 2;
-      const lineSpacing = 8.5;
-
-      ctx.strokeStyle = colors.bonds;
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-
-      ctx.beginPath();
-      ctx.moveTo(segment.x1 + offset.x, segment.y1 + offset.y);
-      ctx.lineTo(segment.x2 + offset.x, segment.y2 + offset.y);
-      ctx.stroke();
-
-      const topOffsetX = Math.cos(perpAngle) * lineSpacing;
-      const topOffsetY = Math.sin(perpAngle) * lineSpacing;
-      ctx.beginPath();
-      ctx.moveTo(segment.x1 + topOffsetX + offset.x, segment.y1 + topOffsetY + offset.y);
-      ctx.lineTo(segment.x2 + topOffsetX + offset.x, segment.y2 + topOffsetY + offset.y);
-      ctx.stroke();
-
-      ctx.beginPath();
-      ctx.moveTo(segment.x1 - topOffsetX + offset.x, segment.y1 - topOffsetY + offset.y);
-      ctx.lineTo(segment.x2 - topOffsetX + offset.x, segment.y2 - topOffsetY + offset.y);
-      ctx.stroke();
-    }
-  });
-
-  renderAllAtomText(ctx, vertices, vertexAtoms, offset, colors, isDarkMode);
-  renderAllLonePairsAndCharges(ctx, vertices, segments, vertexAtoms, offset, colors);
-  renderAllArrows(ctx, arrows, offset, colors);
-
-  const imageUrl = canvas.toDataURL('image/png');
   return {
-    imageUrl,
-    width: canvas.width,
-    height: canvas.height,
-    scaleFactor: resolution,
+    imageUrl: out.toDataURL('image/png'),
+    width: out.width,
+    height: out.height,
+    scaleFactor: s,
   };
 }

@@ -14,14 +14,26 @@ import { renderAllAtomText } from './rendering/TextRenderer.js';
 import { renderAllLonePairsAndCharges } from './rendering/LonePairRenderer.js';
 import { getLonePairPositionOrder } from './utils/LonePairPositioning.js';
 import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rendering/StereochemistryRenderer.js';
-import { renderAllArrows, renderArrowPreview, renderArrow } from './rendering/ArrowRenderer.js';
+import {
+  renderAllArrows,
+  renderArrowPreview,
+  renderArrow,
+  getCurvedArrowMidHandleWorld,
+  getCurvedArrowPerpAndAlong,
+  strokeCurvedArrowShaft,
+} from './rendering/ArrowRenderer.js';
 import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
-import { renderCleanCanvasExport } from './utils/cleanExportCanvas.js';
+import {
+  computeCanvasContentBounds,
+  exportCanvasCroppedSnapshot,
+} from './utils/cleanExportCanvas.js';
 
 const RING_PRESET_MODES = ['benzene', 'cyclohexane', 'cyclopentane', 'cyclobutane', 'cyclopropane'];
 
 const HexGridWithToolbar = () => {
     const canvasRef = useRef(null);
+    const isExportingRef = useRef(false);
+    const curveControlDragRef = useRef(null);
     
     // State variables needed for visual appearance
     const [isDarkMode, setIsDarkMode] = useState(false);
@@ -293,22 +305,6 @@ const HexGridWithToolbar = () => {
   }, [isDarkMode]);
   
   const colors = getColors();
-
-  const renderCleanCanvas = useCallback(
-    async (resolution = 2) => {
-      return renderCleanCanvasExport({
-        vertices,
-        segments,
-        vertexAtoms,
-        arrows,
-        detectedRings,
-        colors,
-        isDarkMode,
-        resolution,
-      });
-    },
-    [vertices, segments, vertexAtoms, arrows, detectedRings, colors, isDarkMode]
-  );
 
   // Drawing constants
   const hexRadius = 60; // Standard bond length (doubled from 30 to 60)
@@ -923,44 +919,14 @@ const HexGridWithToolbar = () => {
     const endpointThreshold = 25; // Large threshold for easy clicking on endpoints
     
     if (arrow.type === 'curved') {
-      // Curved arrow - check control point FIRST, then start/end
-      const midX = (arrow.x1 + arrow.x2) / 2;
-      const midY = (arrow.y1 + arrow.y2) / 2;
-      const dx = arrow.x2 - arrow.x1;
-      const dy = arrow.y2 - arrow.y1;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distance > 0) {
-        // Perpendicular unit vector
-        const perpX = -dy / distance;
-        const perpY = dx / distance;
-        
-        // Calculate control offset (same logic as rendering)
-        let controlOffset;
-        if (arrow.controlOffset !== undefined) {
-          controlOffset = arrow.controlOffset;
-        } else {
-          // Calculate default based on curve type
-          let curveFactor = 0.5;
-          if (arrow.curveType === 'curve0') curveFactor = 0.25;
-          else if (arrow.curveType === 'curve1') curveFactor = 0.5;
-          else if (arrow.curveType === 'curve2') curveFactor = 0.95;
-          
-          const curveSign = arrow.direction === 'cw' ? 1 : -1;
-          controlOffset = distance * curveFactor * curveSign;
-        }
-        
-        const controlX = midX + perpX * controlOffset;
-        const controlY = midY + perpY * controlOffset;
-        
-        const controlDist = Math.sqrt(Math.pow(worldX - controlX, 2) + Math.pow(worldY - controlY, 2));
-        
-        // Check control point FIRST with higher priority
+      const handle = getCurvedArrowMidHandleWorld(arrow);
+      if (handle) {
+        const controlDist = Math.hypot(worldX - handle.x, worldY - handle.y);
         if (controlDist <= endpointThreshold) {
           return 'control';
         }
       }
-      
+
       // Then check endpoints
       const startDist = Math.sqrt(Math.pow(worldX - arrow.x1, 2) + Math.pow(worldY - arrow.y1, 2));
       const endDist = Math.sqrt(Math.pow(worldX - arrow.x2, 2) + Math.pow(worldY - arrow.y2, 2));
@@ -1007,38 +973,15 @@ const HexGridWithToolbar = () => {
           return i;
         }
         
-        // Check control point (middle of curve)
         const midX = (arrow.x1 + arrow.x2) / 2;
         const midY = (arrow.y1 + arrow.y2) / 2;
-        const dx = arrow.x2 - arrow.x1;
-        const dy = arrow.y2 - arrow.y1;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance === 0) continue;
-        
-        // Calculate control point position
-        const perpX = -dy / distance;
-        const perpY = dx / distance;
-        
-        let controlOffset;
-        if (arrow.controlOffset !== undefined) {
-          controlOffset = arrow.controlOffset;
-        } else {
-          let curveFactor = 0.5;
-          if (arrow.curveType === 'curve0') curveFactor = 0.25;
-          else if (arrow.curveType === 'curve1') curveFactor = 0.5;
-          else if (arrow.curveType === 'curve2') curveFactor = 0.95;
-          
-          const curveSign = arrow.direction === 'cw' ? 1 : -1;
-          controlOffset = distance * curveFactor * curveSign;
-        }
-        
-        const controlX = midX + perpX * controlOffset;
-        const controlY = midY + perpY * controlOffset;
-        const controlDist = Math.sqrt(Math.pow(worldX - controlX, 2) + Math.pow(worldY - controlY, 2));
-        
-        if (controlDist <= clickThreshold) {
-          return i;
+
+        const handle = getCurvedArrowMidHandleWorld(arrow);
+        if (handle) {
+          const controlDist = Math.hypot(worldX - handle.x, worldY - handle.y);
+          if (controlDist <= clickThreshold) {
+            return i;
+          }
         }
         
         // Also check along the curve path (use midpoint as approximation)
@@ -2499,44 +2442,42 @@ const HexGridWithToolbar = () => {
           if (arrow.type === 'curved') {
             // Curved arrow editing
             if (draggingArrowEnd === 'start') {
-              console.log('START DRAG - Moving start point');
               return { ...arrow, x1: worldX, y1: worldY };
             } else if (draggingArrowEnd === 'end') {
-              console.log('END DRAG - Moving end point');
               return { ...arrow, x2: worldX, y2: worldY };
             } else if (draggingArrowEnd === 'control') {
-              // Adjust curve height by changing control offset
               const midX = (arrow.x1 + arrow.x2) / 2;
               const midY = (arrow.y1 + arrow.y2) / 2;
-              
-              // Calculate perpendicular direction
               const dx = arrow.x2 - arrow.x1;
               const dy = arrow.y2 - arrow.y1;
               const distance = Math.sqrt(dx * dx + dy * dy);
-              
               if (distance === 0) return arrow;
-              
-              // Perpendicular unit vector
+
               const perpX = -dy / distance;
               const perpY = dx / distance;
-              
-              // Project mouse position onto perpendicular axis from midpoint
+              const ux = dx / distance;
+              const uy = dy / distance;
+
+              const ref = curveControlDragRef.current;
               const toMouseX = worldX - midX;
               const toMouseY = worldY - midY;
-              
-              // Dot product to get offset along perpendicular
-              const controlOffset = toMouseX * perpX + toMouseY * perpY;
-              
-              console.log('CONTROL DRAG - New offset:', controlOffset, 'Endpoints FIXED at x1:', arrow.x1, 'y1:', arrow.y1, 'x2:', arrow.x2, 'y2:', arrow.y2);
-              
-              // ONLY update controlOffset, keep endpoints fixed
-              return { 
-                ...arrow, 
-                controlOffset
+              if (ref) {
+                const currentPerp = toMouseX * perpX + toMouseY * perpY;
+                const currentAlong = toMouseX * ux + toMouseY * uy;
+                return {
+                  ...arrow,
+                  controlOffset:
+                    ref.initialPerp + (currentPerp - ref.startMousePerp),
+                  controlAlong:
+                    ref.initialAlong + (currentAlong - ref.startMouseAlong),
+                };
+              }
+              return {
+                ...arrow,
+                controlOffset: toMouseX * perpX + toMouseY * perpY,
+                controlAlong: toMouseX * ux + toMouseY * uy,
               };
             } else if (draggingArrowEnd === 'body') {
-              // Move entire curved arrow
-              console.log('BODY DRAG - Moving entire arrow');
               const deltaX = worldX - dragSelectionStart.x;
               const deltaY = worldY - dragSelectionStart.y;
               return {
@@ -2941,8 +2882,37 @@ const HexGridWithToolbar = () => {
     const arrowIdx = findHoveredArrow(x, y);
     if (arrowIdx !== null) {
       const arrowPart = detectArrowPart(x, y, arrowIdx);
-      console.log('ARROW EDIT START - Arrow:', arrowIdx, 'Part:', arrowPart);
+      const arrow = arrows[arrowIdx];
+      if (arrowPart === 'control' && arrow?.type === 'curved') {
+        const midX = (arrow.x1 + arrow.x2) / 2;
+        const midY = (arrow.y1 + arrow.y2) / 2;
+        const dx = arrow.x2 - arrow.x1;
+        const dy = arrow.y2 - arrow.y1;
+        const d = Math.sqrt(dx * dx + dy * dy) || 1;
+        const perpX = -dy / d;
+        const perpY = dx / d;
+        const ux = dx / d;
+        const uy = dy / d;
+        const { perp: initialPerp, along: initialAlong } = getCurvedArrowPerpAndAlong(arrow);
+        curveControlDragRef.current = {
+          startMousePerp: (worldX - midX) * perpX + (worldY - midY) * perpY,
+          startMouseAlong: (worldX - midX) * ux + (worldY - midY) * uy,
+          initialPerp,
+          initialAlong,
+        };
+      } else {
+        curveControlDragRef.current = null;
+      }
       saveToHistory(); // Save before editing arrow
+      // Clear molecule/vertex selection so the floating Copy UI does not stay up from a prior marquee.
+      setSelectedVertices(new Set());
+      setSelectedSegments(new Set());
+      setSelectedMolecules([]);
+      setSelectedArrows(prev => {
+        const next = new Set(prev);
+        next.add(arrowIdx);
+        return next;
+      });
       setDraggingArrow(arrowIdx);
       setDraggingArrowEnd(arrowPart);
       setDragSelectionStart({ x: worldX, y: worldY });
@@ -2981,7 +2951,7 @@ const HexGridWithToolbar = () => {
     setIsSelecting(true);
     setSelectionStart({ x: worldX, y: worldY });
     setSelectionEnd({ x: worldX, y: worldY });
-  }, [mode, offset, selectedMolecules, selectedVertices, selectedArrows, findNearestVertex, findHoveredArrow, saveToHistory, isPastePreviewMode, detectArrowPart]);
+  }, [mode, offset, arrows, selectedMolecules, selectedVertices, selectedArrows, findNearestVertex, findHoveredArrow, saveToHistory, isPastePreviewMode, detectArrowPart]);
 
   // Handle mouse up for completing drag or selection
   const handleCanvasMouseUp = useCallback((event) => {
@@ -2989,6 +2959,7 @@ const HexGridWithToolbar = () => {
     
     // Complete arrow dragging
     if (draggingArrow !== null) {
+      curveControlDragRef.current = null;
       setDraggingArrow(null);
       setDraggingArrowEnd(null);
       return;
@@ -3136,7 +3107,7 @@ const HexGridWithToolbar = () => {
       
       if (segment.bondOrder === 1) {
         // Single bond rendering
-        ctx.strokeStyle = hoveredBondIndex === index ? '#007bff' : colors.bonds;
+        ctx.strokeStyle = (!isExportingRef.current && hoveredBondIndex === index) ? '#007bff' : colors.bonds;
         ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(segment.x1 + offset.x, segment.y1 + offset.y);
@@ -3144,9 +3115,8 @@ const HexGridWithToolbar = () => {
         ctx.stroke();
       } else if (segment.bondOrder === 2) {
         // Double bond rendering with hover support
-        if (hoveredBondIndex === index) {
+        if (!isExportingRef.current && hoveredBondIndex === index) {
           // Render hovered double bond in blue
-          const originalBondsColor = colors.bonds;
           const tempColors = { ...colors, bonds: '#007bff' };
           renderDoubleBondByCase(ctx, segment, offset, tempColors);
         } else {
@@ -3159,7 +3129,7 @@ const HexGridWithToolbar = () => {
         const perpAngle = bondAngle + Math.PI / 2;
         const lineSpacing = 8.5; // Distance between parallel lines (further apart)
         
-        ctx.strokeStyle = hoveredBondIndex === index ? '#007bff' : colors.bonds;
+        ctx.strokeStyle = (!isExportingRef.current && hoveredBondIndex === index) ? '#007bff' : colors.bonds;
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
         
@@ -3186,7 +3156,7 @@ const HexGridWithToolbar = () => {
     });
 
     // Draw bond suggestions
-    if (bondSuggestions.length > 0 && !isCreatingBond) {
+    if (!isExportingRef.current && bondSuggestions.length > 0 && !isCreatingBond) {
       bondSuggestions.forEach((suggestion, index) => {
         // Use subtle gray for suggestions, blue if hovered
         ctx.strokeStyle = hoveredSuggestionIndex === index ? 'rgba(0, 123, 255, 0.6)' : 'rgba(136, 136, 136, 0.5)';
@@ -3201,7 +3171,7 @@ const HexGridWithToolbar = () => {
     }
 
     // Draw bond preview angle suggestions during creation
-    if (isCreatingBond && bondStartPoint && !shouldDisableAngleSnapping(bondStartPoint)) {
+    if (!isExportingRef.current && isCreatingBond && bondStartPoint && !shouldDisableAngleSnapping(bondStartPoint)) {
       // Get available angles for this vertex
       const availableAngles = getAvailableBondAngles(bondStartPoint);
       
@@ -3222,7 +3192,7 @@ const HexGridWithToolbar = () => {
     }
 
     // Draw bond preview if creating a bond
-    if (isCreatingBond && bondStartPoint && bondPreviewEnd) {
+    if (!isExportingRef.current && isCreatingBond && bondStartPoint && bondPreviewEnd) {
       const previewBondOrder = mode === 'triple' ? 3 : 1;
       const previewBond = {
         x1: bondStartPoint.x,
@@ -3292,7 +3262,7 @@ const HexGridWithToolbar = () => {
     renderAllArrows(ctx, arrows, offset, colors);
     
     // Draw benzene preview if in benzene mode
-    if (mode === 'benzene' && currentMousePosition) {
+    if (!isExportingRef.current && mode === 'benzene' && currentMousePosition) {
       const worldMouseX = currentMousePosition.x - offset.x;
       const worldMouseY = currentMousePosition.y - offset.y;
       const benzeneRadius = hexRadius;
@@ -3354,7 +3324,7 @@ const HexGridWithToolbar = () => {
     }
     
     // Draw cyclohexane preview with snapping
-    if (mode === 'cyclohexane' && currentMousePosition) {
+    if (!isExportingRef.current && mode === 'cyclohexane' && currentMousePosition) {
       const worldMouseX = currentMousePosition.x - offset.x;
       const worldMouseY = currentMousePosition.y - offset.y;
       
@@ -3404,7 +3374,7 @@ const HexGridWithToolbar = () => {
     }
     
     // Draw cyclopentane preview with snapping
-    if (mode === 'cyclopentane' && currentMousePosition) {
+    if (!isExportingRef.current && mode === 'cyclopentane' && currentMousePosition) {
       const worldMouseX = currentMousePosition.x - offset.x;
       const worldMouseY = currentMousePosition.y - offset.y;
       const pentagonRadius = hexRadius / (2 * Math.sin(Math.PI / 5));
@@ -3454,7 +3424,7 @@ const HexGridWithToolbar = () => {
     }
     
     // Draw cyclobutane preview with snapping
-    if (mode === 'cyclobutane' && currentMousePosition) {
+    if (!isExportingRef.current && mode === 'cyclobutane' && currentMousePosition) {
       const worldMouseX = currentMousePosition.x - offset.x;
       const worldMouseY = currentMousePosition.y - offset.y;
       const squareRadius = hexRadius / (2 * Math.sin(Math.PI / 4));
@@ -3504,7 +3474,7 @@ const HexGridWithToolbar = () => {
     }
     
     // Draw cyclopropane preview with snapping
-    if (mode === 'cyclopropane' && currentMousePosition) {
+    if (!isExportingRef.current && mode === 'cyclopropane' && currentMousePosition) {
       const worldMouseX = currentMousePosition.x - offset.x;
       const worldMouseY = currentMousePosition.y - offset.y;
       const triangleRadius = hexRadius / (2 * Math.sin(Math.PI / 3));
@@ -3553,45 +3523,43 @@ const HexGridWithToolbar = () => {
       }
     }
     
-    // Draw arrow preview if in arrow mode
-    if (mode === 'arrow' && currentMousePosition) {
-      const worldMousePos = {
-        x: currentMousePosition.x - offset.x,
-        y: currentMousePosition.y - offset.y
-      };
-      renderArrowPreview(ctx, worldMousePos, 'forward', offset, colors);
-    } else if (mode === 'equil' && currentMousePosition) {
-      const worldMousePos = {
-        x: currentMousePosition.x - offset.x,
-        y: currentMousePosition.y - offset.y
-      };
-      renderArrowPreview(ctx, worldMousePos, 'equilibrium', offset, colors);
-    } else if ((mode === 'curve0' || mode === 'curve1' || mode === 'curve2' || 
-                mode === 'curve3' || mode === 'curve4' || mode === 'curve5') && currentMousePosition) {
-      // Curved arrow preview
-      if (curvedArrowStartPoint) {
-        // Show preview from start point to current mouse position
-        const previewArrow = {
-          x1: curvedArrowStartPoint.x,
-          y1: curvedArrowStartPoint.y,
-          x2: currentMousePosition.x - offset.x,
-          y2: currentMousePosition.y - offset.y,
-          type: 'curved',
-          curveType: mode,
-          direction: (mode === 'curve0' || mode === 'curve1' || mode === 'curve2') ? 'ccw' : 'cw' // Swapped
+    // Draw arrow preview if in arrow mode (suppressed during export)
+    if (!isExportingRef.current) {
+      if (mode === 'arrow' && currentMousePosition) {
+        const worldMousePos = {
+          x: currentMousePosition.x - offset.x,
+          y: currentMousePosition.y - offset.y
         };
-        renderArrow(ctx, previewArrow, offset, colors, true);
-        
-        // Also draw a small circle at the start point
-        ctx.fillStyle = '#007bff';
-        ctx.beginPath();
-        ctx.arc(curvedArrowStartPoint.x + offset.x, curvedArrowStartPoint.y + offset.y, 4, 0, 2 * Math.PI);
-        ctx.fill();
+        renderArrowPreview(ctx, worldMousePos, 'forward', offset, colors);
+      } else if (mode === 'equil' && currentMousePosition) {
+        const worldMousePos = {
+          x: currentMousePosition.x - offset.x,
+          y: currentMousePosition.y - offset.y
+        };
+        renderArrowPreview(ctx, worldMousePos, 'equilibrium', offset, colors);
+      } else if ((mode === 'curve0' || mode === 'curve1' || mode === 'curve2' || 
+                  mode === 'curve3' || mode === 'curve4' || mode === 'curve5') && currentMousePosition) {
+        if (curvedArrowStartPoint) {
+          const previewArrow = {
+            x1: curvedArrowStartPoint.x,
+            y1: curvedArrowStartPoint.y,
+            x2: currentMousePosition.x - offset.x,
+            y2: currentMousePosition.y - offset.y,
+            type: 'curved',
+            curveType: mode,
+            direction: (mode === 'curve0' || mode === 'curve1' || mode === 'curve2') ? 'ccw' : 'cw'
+          };
+          renderArrow(ctx, previewArrow, offset, colors, true);
+          ctx.fillStyle = '#007bff';
+          ctx.beginPath();
+          ctx.arc(curvedArrowStartPoint.x + offset.x, curvedArrowStartPoint.y + offset.y, 4, 0, 2 * Math.PI);
+          ctx.fill();
+        }
       }
     }
 
     // Draw paste preview
-    if (isPastePreviewMode && clipboard) {
+    if (!isExportingRef.current && isPastePreviewMode && clipboard) {
       // Calculate center of clipboard items
       let totalX = 0, totalY = 0, count = 0;
       clipboard.molecules.forEach(mol => {
@@ -3780,274 +3748,62 @@ const HexGridWithToolbar = () => {
     }
 
     // Draw selection indicators in mouse mode
-    if (mode === 'mouse') {
+    if (!isExportingRef.current && mode === 'mouse') {
       // Draw control points on all arrows to show they're editable
+      const ARROW_HANDLE_BLUE = 'rgba(0, 123, 255, 0.82)';
+      const ARROW_HANDLE_YELLOW = 'rgba(255, 193, 7, 0.88)';
+      const ARROW_HANDLE_BLUE_DIM = 'rgba(0, 123, 255, 0.58)';
+
       arrows.forEach((arrow, idx) => {
-        // Different styling based on state
         const isSelected = selectedArrows.has(idx);
         const isHovered = hoveredArrow === idx;
         const isDragging = draggingArrow === idx;
-        
-        // Skip if dragging (will be drawn separately)
+
         if (isDragging) return;
-        
-        // Determine circle size and color - BIGGER and MORE VISIBLE
-        let circleSize = 10; // Base size increased from 5 to 10
-        let fillColor = 'rgba(70, 130, 180, 0.7)'; // Steel blue, more visible
-        let strokeColor = 'rgba(255, 255, 255, 0.95)';
-        let strokeWidth = 2.5;
-        
-        if (isSelected) {
-          circleSize = 13;
-          fillColor = 'rgba(0, 123, 255, 0.95)';
-          strokeColor = '#ffffff';
-          strokeWidth = 3;
-        } else if (isHovered) {
-          circleSize = 12;
-          fillColor = 'rgba(0, 123, 255, 0.85)';
-          strokeColor = '#ffffff';
-          strokeWidth = 3;
-        }
-        
+
+        let circleSize = 10;
+        if (isSelected) circleSize = 12;
+        else if (isHovered) circleSize = 11;
+
+        const blueFill = isSelected || isHovered ? ARROW_HANDLE_BLUE : ARROW_HANDLE_BLUE_DIM;
+
         if (arrow.type === 'curved') {
-          // Draw start point with shadow for depth
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-          ctx.shadowBlur = 4;
-          ctx.shadowOffsetX = 1;
-          ctx.shadowOffsetY = 1;
-          
-          ctx.fillStyle = fillColor;
-          ctx.strokeStyle = strokeColor;
-          ctx.lineWidth = strokeWidth;
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+
+          ctx.fillStyle = blueFill;
           ctx.beginPath();
           ctx.arc(arrow.x1 + offset.x, arrow.y1 + offset.y, circleSize, 0, 2 * Math.PI);
           ctx.fill();
-          ctx.stroke();
-          
-          // Add inner highlight
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-          ctx.beginPath();
-          ctx.arc(arrow.x1 + offset.x - 2, arrow.y1 + offset.y - 2, circleSize / 3, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          // Add small drag indicator on start point (when selected/hovered)
-          if (isSelected || isHovered) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-            ctx.lineWidth = 1.5;
-            const indicatorSize = 3;
-            ctx.beginPath();
-            ctx.moveTo(arrow.x1 + offset.x - indicatorSize, arrow.y1 + offset.y);
-            ctx.lineTo(arrow.x1 + offset.x + indicatorSize, arrow.y1 + offset.y);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(arrow.x1 + offset.x, arrow.y1 + offset.y - indicatorSize);
-            ctx.lineTo(arrow.x1 + offset.x, arrow.y1 + offset.y + indicatorSize);
-            ctx.stroke();
-          }
-          
-          // Draw end point with shadow
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-          ctx.shadowBlur = 4;
-          ctx.shadowOffsetX = 1;
-          ctx.shadowOffsetY = 1;
-          
-          ctx.fillStyle = fillColor;
-          ctx.strokeStyle = strokeColor;
-          ctx.lineWidth = strokeWidth;
+
+          ctx.fillStyle = blueFill;
           ctx.beginPath();
           ctx.arc(arrow.x2 + offset.x, arrow.y2 + offset.y, circleSize, 0, 2 * Math.PI);
           ctx.fill();
-          ctx.stroke();
-          
-          // Add inner highlight
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-          ctx.beginPath();
-          ctx.arc(arrow.x2 + offset.x - 2, arrow.y2 + offset.y - 2, circleSize / 3, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          // Add small drag indicator on end point (when selected/hovered)
-          if (isSelected || isHovered) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-            ctx.lineWidth = 1.5;
-            const indicatorSize = 3;
+
+          const handle = getCurvedArrowMidHandleWorld(arrow);
+          if (handle) {
+            ctx.fillStyle = ARROW_HANDLE_YELLOW;
             ctx.beginPath();
-            ctx.moveTo(arrow.x2 + offset.x - indicatorSize, arrow.y2 + offset.y);
-            ctx.lineTo(arrow.x2 + offset.x + indicatorSize, arrow.y2 + offset.y);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(arrow.x2 + offset.x, arrow.y2 + offset.y - indicatorSize);
-            ctx.lineTo(arrow.x2 + offset.x, arrow.y2 + offset.y + indicatorSize);
-            ctx.stroke();
-          }
-          
-          // Draw middle control point (for curve adjustment) - ALWAYS VISIBLE AND LARGER
-          const midX = (arrow.x1 + arrow.x2) / 2;
-          const midY = (arrow.y1 + arrow.y2) / 2;
-          const dx = arrow.x2 - arrow.x1;
-          const dy = arrow.y2 - arrow.y1;
-          const distance = Math.sqrt(dx * dx + dy * dy);
-          
-          // Perpendicular direction
-          const perpX = -dy / distance;
-          const perpY = dx / distance;
-          
-          // Use stored controlOffset or calculate default
-          let controlOffset;
-          if (arrow.controlOffset !== undefined) {
-            controlOffset = arrow.controlOffset;
-          } else {
-            // Calculate default based on curve type
-            let curveFactor = 0.5;
-            if (arrow.curveType === 'curve0') curveFactor = 0.25;
-            else if (arrow.curveType === 'curve1') curveFactor = 0.5;
-            else if (arrow.curveType === 'curve2') curveFactor = 0.95;
-            
-            const curveSign = arrow.direction === 'cw' ? 1 : -1;
-            controlOffset = distance * curveFactor * curveSign;
-          }
-          
-          const controlX = midX + perpX * controlOffset;
-          const controlY = midY + perpY * controlOffset;
-          
-          // Draw control point with orange/yellow color - LARGER with shadow
-          const controlSize = (isSelected || isHovered) ? circleSize + 2 : circleSize;
-          
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-          ctx.shadowBlur = 5;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-          
-          ctx.fillStyle = (isSelected || isHovered) ? 'rgba(255, 165, 0, 0.95)' : 'rgba(255, 193, 7, 0.9)';
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = strokeWidth;
-          ctx.beginPath();
-          ctx.arc(controlX + offset.x, controlY + offset.y, controlSize, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.stroke();
-          
-          // Reset shadow
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          
-          // Add inner circle for depth effect
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.beginPath();
-          ctx.arc(controlX + offset.x - 2, controlY + offset.y - 2, controlSize / 2.5, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          // Draw dashed guide lines - ALWAYS visible for curved arrows
-          ctx.strokeStyle = (isSelected || isHovered) ? 'rgba(150, 150, 150, 0.6)' : 'rgba(150, 150, 150, 0.35)';
-          ctx.lineWidth = (isSelected || isHovered) ? 2 : 1.5;
-          ctx.setLineDash([6, 4]);
-          
-          ctx.beginPath();
-          ctx.moveTo(arrow.x1 + offset.x, arrow.y1 + offset.y);
-          ctx.lineTo(controlX + offset.x, controlY + offset.y);
-          ctx.lineTo(arrow.x2 + offset.x, arrow.y2 + offset.y);
-          ctx.stroke();
-          
-          ctx.setLineDash([]);
-          
-          // Add small directional indicators on control points
-          if (isSelected || isHovered) {
-            // Small crosshair on middle control to show it's moveable
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
-            ctx.lineWidth = 2;
-            
-            ctx.beginPath();
-            ctx.moveTo(controlX + offset.x - 4, controlY + offset.y);
-            ctx.lineTo(controlX + offset.x + 4, controlY + offset.y);
-            ctx.stroke();
-            
-            ctx.beginPath();
-            ctx.moveTo(controlX + offset.x, controlY + offset.y - 4);
-            ctx.lineTo(controlX + offset.x, controlY + offset.y + 4);
-            ctx.stroke();
+            ctx.arc(handle.x + offset.x, handle.y + offset.y, circleSize, 0, 2 * Math.PI);
+            ctx.fill();
           }
         } else {
-          // Straight arrow control points with shadows
           const endX = arrow.x + arrow.length * Math.cos(arrow.angle);
           const endY = arrow.y + arrow.length * Math.sin(arrow.angle);
-          
-          // Start point with shadow
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-          ctx.shadowBlur = 4;
-          ctx.shadowOffsetX = 1;
-          ctx.shadowOffsetY = 1;
-          
-          ctx.fillStyle = fillColor;
-          ctx.strokeStyle = strokeColor;
-          ctx.lineWidth = strokeWidth;
-          
+
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+
+          ctx.fillStyle = blueFill;
           ctx.beginPath();
           ctx.arc(arrow.x + offset.x, arrow.y + offset.y, circleSize, 0, 2 * Math.PI);
           ctx.fill();
-          ctx.stroke();
-          
-          // Inner highlight
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-          ctx.beginPath();
-          ctx.arc(arrow.x + offset.x - 2, arrow.y + offset.y - 2, circleSize / 3, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          // Add drag indicator (when selected/hovered)
-          if (isSelected || isHovered) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-            ctx.lineWidth = 1.5;
-            const indicatorSize = 3;
-            ctx.beginPath();
-            ctx.moveTo(arrow.x + offset.x - indicatorSize, arrow.y + offset.y);
-            ctx.lineTo(arrow.x + offset.x + indicatorSize, arrow.y + offset.y);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(arrow.x + offset.x, arrow.y + offset.y - indicatorSize);
-            ctx.lineTo(arrow.x + offset.x, arrow.y + offset.y + indicatorSize);
-            ctx.stroke();
-          }
-          
-          // End point with shadow
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
-          ctx.shadowBlur = 4;
-          ctx.shadowOffsetX = 1;
-          ctx.shadowOffsetY = 1;
-          
-          ctx.fillStyle = fillColor;
-          ctx.strokeStyle = strokeColor;
-          ctx.lineWidth = strokeWidth;
-          
+
+          ctx.fillStyle = blueFill;
           ctx.beginPath();
           ctx.arc(endX + offset.x, endY + offset.y, circleSize, 0, 2 * Math.PI);
           ctx.fill();
-          ctx.stroke();
-          
-          // Inner highlight
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-          ctx.beginPath();
-          ctx.arc(endX + offset.x - 2, endY + offset.y - 2, circleSize / 3, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          // Add drag indicator (when selected/hovered)
-          if (isSelected || isHovered) {
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-            ctx.lineWidth = 1.5;
-            const indicatorSize = 3;
-            ctx.beginPath();
-            ctx.moveTo(endX + offset.x - indicatorSize, endY + offset.y);
-            ctx.lineTo(endX + offset.x + indicatorSize, endY + offset.y);
-            ctx.stroke();
-            ctx.beginPath();
-            ctx.moveTo(endX + offset.x, endY + offset.y - indicatorSize);
-            ctx.lineTo(endX + offset.x, endY + offset.y + indicatorSize);
-            ctx.stroke();
-          }
         }
       });
       
@@ -4109,11 +3865,13 @@ const HexGridWithToolbar = () => {
             ctx.lineCap = 'round';
             
             if (arrow.type === 'curved') {
-              // Draw thicker curve overlay
-              ctx.beginPath();
-              ctx.moveTo(arrow.x1 + offset.x, arrow.y1 + offset.y);
-              ctx.lineTo(arrow.x2 + offset.x, arrow.y2 + offset.y);
-              ctx.stroke();
+              strokeCurvedArrowShaft(
+                ctx,
+                arrow,
+                offset,
+                'rgba(0, 123, 255, 0.5)',
+                8
+              );
             } else {
               const endX = arrow.x + arrow.length * Math.cos(arrow.angle);
               const endY = arrow.y + arrow.length * Math.sin(arrow.angle);
@@ -4126,216 +3884,66 @@ const HexGridWithToolbar = () => {
         });
       }
       
-      // Draw control points for arrow being dragged (with emphasis on active point)
+      // Draw control points for arrow being dragged (same geometry as idle handles; active = yellow)
       if (draggingArrow !== null && draggingArrow < arrows.length) {
         const arrow = arrows[draggingArrow];
-        
+        const dragBlue = 'rgba(0, 123, 255, 0.82)';
+        const dragYellow = 'rgba(255, 193, 7, 0.88)';
+        const rActive = 12;
+        const rIdle = 10;
+
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+
         if (arrow.type === 'curved') {
           const x1 = arrow.x1 + offset.x;
           const y1 = arrow.y1 + offset.y;
           const x2 = arrow.x2 + offset.x;
           const y2 = arrow.y2 + offset.y;
-          
-          // Calculate middle control point
-          const midX = (arrow.x1 + arrow.x2) / 2;
-          const midY = (arrow.y1 + arrow.y2) / 2;
-          const arrowAngle = Math.atan2(arrow.y2 - arrow.y1, arrow.x2 - arrow.x1);
-          const perpAngle = arrowAngle + Math.PI / 2;
-          const controlOffset = arrow.controlOffset || (arrow.direction === 'ccw' ? -40 : 40);
-          const controlX = midX + Math.cos(perpAngle) * controlOffset + offset.x;
-          const controlY = midY + Math.sin(perpAngle) * controlOffset + offset.y;
-          
-          // Draw all control points with shadows
-          // Start point
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-          ctx.shadowBlur = 6;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-          
-          ctx.fillStyle = draggingArrowEnd === 'start' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 123, 255, 0.9)';
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 4;
+
+          const handleW = getCurvedArrowMidHandleWorld(arrow);
+          const hx = handleW ? handleW.x + offset.x : x1;
+          const hy = handleW ? handleW.y + offset.y : y1;
+
+          const rs = draggingArrowEnd === 'start' ? rActive : rIdle;
+          const re = draggingArrowEnd === 'end' ? rActive : rIdle;
+          const rc = draggingArrowEnd === 'control' ? rActive : rIdle;
+
+          ctx.fillStyle = draggingArrowEnd === 'start' ? dragYellow : dragBlue;
           ctx.beginPath();
-          ctx.arc(x1, y1, draggingArrowEnd === 'start' ? 14 : 11, 0, 2 * Math.PI);
+          ctx.arc(x1, y1, rs, 0, 2 * Math.PI);
           ctx.fill();
-          ctx.stroke();
-          
-          // Inner highlight
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+
+          ctx.fillStyle = draggingArrowEnd === 'end' ? dragYellow : dragBlue;
           ctx.beginPath();
-          ctx.arc(x1 - 2, y1 - 2, (draggingArrowEnd === 'start' ? 14 : 11) / 3, 0, 2 * Math.PI);
+          ctx.arc(x2, y2, re, 0, 2 * Math.PI);
           ctx.fill();
-          
-          // End point
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-          ctx.shadowBlur = 6;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-          
-          ctx.fillStyle = draggingArrowEnd === 'end' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 123, 255, 0.9)';
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.arc(x2, y2, draggingArrowEnd === 'end' ? 14 : 11, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.stroke();
-          
-          // Inner highlight
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.beginPath();
-          ctx.arc(x2 - 2, y2 - 2, (draggingArrowEnd === 'end' ? 14 : 11) / 3, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          // Middle control point (curve adjustment)
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-          ctx.shadowBlur = 6;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-          
-          ctx.fillStyle = draggingArrowEnd === 'control' ? 'rgba(255, 193, 7, 1)' : 'rgba(255, 165, 0, 0.9)';
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.arc(controlX, controlY, draggingArrowEnd === 'control' ? 14 : 11, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.stroke();
-          
-          // Inner highlight
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.beginPath();
-          ctx.arc(controlX - 2, controlY - 2, (draggingArrowEnd === 'control' ? 14 : 11) / 3, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          // Draw guide lines
-          ctx.strokeStyle = 'rgba(150, 150, 150, 0.6)';
-          ctx.lineWidth = 2;
-          ctx.setLineDash([6, 4]);
-          ctx.beginPath();
-          ctx.moveTo(x1, y1);
-          ctx.lineTo(controlX, controlY);
-          ctx.lineTo(x2, y2);
-          ctx.stroke();
-          ctx.setLineDash([]);
-          
-          // Add crosshair indicators on all control points
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-          ctx.lineWidth = 2;
-          const crossSize = 4;
-          
-          // Start point crosshair
-          ctx.beginPath();
-          ctx.moveTo(x1 - crossSize, y1);
-          ctx.lineTo(x1 + crossSize, y1);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(x1, y1 - crossSize);
-          ctx.lineTo(x1, y1 + crossSize);
-          ctx.stroke();
-          
-          // End point crosshair
-          ctx.beginPath();
-          ctx.moveTo(x2 - crossSize, y2);
-          ctx.lineTo(x2 + crossSize, y2);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(x2, y2 - crossSize);
-          ctx.lineTo(x2, y2 + crossSize);
-          ctx.stroke();
-          
-          // Middle control crosshair
-          ctx.beginPath();
-          ctx.moveTo(controlX - crossSize, controlY);
-          ctx.lineTo(controlX + crossSize, controlY);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(controlX, controlY - crossSize);
-          ctx.lineTo(controlX, controlY + crossSize);
-          ctx.stroke();
+
+          if (handleW) {
+            ctx.fillStyle = draggingArrowEnd === 'control' ? dragYellow : ARROW_HANDLE_YELLOW;
+            ctx.beginPath();
+            ctx.arc(hx, hy, rc, 0, 2 * Math.PI);
+            ctx.fill();
+          }
         } else {
           const x = arrow.x + offset.x;
           const y = arrow.y + offset.y;
           const endX = x + arrow.length * Math.cos(arrow.angle);
           const endY = y + arrow.length * Math.sin(arrow.angle);
-          
-          // Draw start point with shadow
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-          ctx.shadowBlur = 6;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-          
-          ctx.fillStyle = draggingArrowEnd === 'start' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 123, 255, 0.9)';
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 4;
+
+          const rs = draggingArrowEnd === 'start' ? rActive : rIdle;
+          const re = draggingArrowEnd === 'end' ? rActive : rIdle;
+
+          ctx.fillStyle = draggingArrowEnd === 'start' ? dragYellow : dragBlue;
           ctx.beginPath();
-          ctx.arc(x, y, draggingArrowEnd === 'start' ? 14 : 11, 0, 2 * Math.PI);
+          ctx.arc(x, y, rs, 0, 2 * Math.PI);
           ctx.fill();
-          ctx.stroke();
-          
-          // Inner highlight
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+
+          ctx.fillStyle = draggingArrowEnd === 'end' ? dragYellow : dragBlue;
           ctx.beginPath();
-          ctx.arc(x - 2, y - 2, (draggingArrowEnd === 'start' ? 14 : 11) / 3, 0, 2 * Math.PI);
+          ctx.arc(endX, endY, re, 0, 2 * Math.PI);
           ctx.fill();
-          
-          // Draw end point with shadow
-          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-          ctx.shadowBlur = 6;
-          ctx.shadowOffsetX = 2;
-          ctx.shadowOffsetY = 2;
-          
-          ctx.fillStyle = draggingArrowEnd === 'end' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 123, 255, 0.9)';
-          ctx.strokeStyle = '#ffffff';
-          ctx.lineWidth = 4;
-          ctx.beginPath();
-          ctx.arc(endX, endY, draggingArrowEnd === 'end' ? 14 : 11, 0, 2 * Math.PI);
-          ctx.fill();
-          ctx.stroke();
-          
-          // Inner highlight
-          ctx.shadowColor = 'transparent';
-          ctx.shadowBlur = 0;
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.beginPath();
-          ctx.arc(endX - 2, endY - 2, (draggingArrowEnd === 'end' ? 14 : 11) / 3, 0, 2 * Math.PI);
-          ctx.fill();
-          
-          // Add crosshairs to both points
-          ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-          ctx.lineWidth = 2;
-          const crossSize = 5;
-          
-          // Start crosshair
-          ctx.beginPath();
-          ctx.moveTo(x - crossSize, y);
-          ctx.lineTo(x + crossSize, y);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(x, y - crossSize);
-          ctx.lineTo(x, y + crossSize);
-          ctx.stroke();
-          
-          // End crosshair
-          ctx.beginPath();
-          ctx.moveTo(endX - crossSize, endY);
-          ctx.lineTo(endX + crossSize, endY);
-          ctx.stroke();
-          ctx.beginPath();
-          ctx.moveTo(endX, endY - crossSize);
-          ctx.lineTo(endX, endY + crossSize);
-          ctx.stroke();
         }
-        
-        // Reset shadow settings
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
       }
       
       // Draw selection box
@@ -4359,13 +3967,39 @@ const HexGridWithToolbar = () => {
 
     // Draw hovered vertex highlight (always visible, even during bond creation)
     // This is drawn last so it appears on top of everything else
-    if (hoveredVertex && mode !== 'mouse') {
+    if (!isExportingRef.current && hoveredVertex && mode !== 'mouse') {
       ctx.fillStyle = 'rgba(0, 123, 255, 0.3)'; // Blue highlight color with transparency
       ctx.beginPath();
       ctx.arc(hoveredVertex.x + offset.x, hoveredVertex.y + offset.y, 10, 0, 2 * Math.PI);
       ctx.fill();
     }
   }, [colors, segments, vertices, vertexAtoms, offset, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint, getAvailableBondAngles, shouldDisableAngleSnapping, hexRadius, vertexBondStates, selectedMolecules, selectedArrows, hoveredMolecule, hoveredArrow, isSelecting, selectionStart, selectionEnd, isDraggingSelection, selectedVertices, isPastePreviewMode, clipboard, pastePreviewPosition, draggingArrow, draggingArrowEnd]);
+
+  /** PNG of the live canvas, cropped to drawn content. Redraws without any interactive overlays. */
+  const renderCleanCanvas = useCallback(
+    async (resolution = 2) => {
+      isExportingRef.current = true;
+      try {
+        drawCanvas();
+      } finally {
+        isExportingRef.current = false;
+      }
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      const crop = computeCanvasContentBounds(
+        vertices,
+        segments,
+        arrows,
+        offset,
+        canvas.width,
+        canvas.height,
+        72
+      );
+      if (!crop) return null;
+      return exportCanvasCroppedSnapshot(canvas, crop, resolution);
+    },
+    [drawCanvas, vertices, segments, arrows, offset]
+  );
 
   // Redraw canvas when relevant data changes
   React.useEffect(() => {
@@ -6113,92 +5747,60 @@ const HexGridWithToolbar = () => {
         </>
       )}
       
-      {/* Copy Button - appears above selection */}
-      {(selectedSegments.size > 0 || selectedVertices.size > 0 || selectedArrows.size > 0) && !isPasteMode && (() => {
-        // Calculate current screen bounds of selected items
-        let minX = Infinity, maxX = -Infinity, minY = Infinity;
-        
-        // Check selected vertices
-        selectedVertices.forEach(vertexIndex => {
-          const vertex = vertices[vertexIndex];
-          if (vertex) {
-            const screenX = vertex.x + offset.x;
-            const screenY = vertex.y + offset.y;
-            minX = Math.min(minX, screenX);
-            maxX = Math.max(maxX, screenX);
-            minY = Math.min(minY, screenY);
-          }
-        });
-        
-        // Check selected segments
-        selectedSegments.forEach(segmentIndex => {
-          const segment = segments[segmentIndex];
-          if (segment) {
-            const screenX1 = segment.x1 + offset.x;
-            const screenY1 = segment.y1 + offset.y;
-            const screenX2 = segment.x2 + offset.x;
-            const screenY2 = segment.y2 + offset.y;
-            minX = Math.min(minX, screenX1, screenX2);
-            maxX = Math.max(maxX, screenX1, screenX2);
-            minY = Math.min(minY, screenY1, screenY2);
-          }
-        });
-        
-        // Check selected arrows
-        selectedArrows.forEach(arrowIndex => {
-          const arrow = arrows[arrowIndex];
-          if (arrow) {
-            const screenX1 = arrow.x1 + offset.x;
-            const screenY1 = arrow.y1 + offset.y;
-            const screenX2 = arrow.x2 + offset.x;
-            const screenY2 = arrow.y2 + offset.y;
-            minX = Math.min(minX, screenX1, screenX2);
-            maxX = Math.max(maxX, screenX1, screenX2);
-            minY = Math.min(minY, screenY1, screenY2);
-          }
-        });
-        
-        // If no valid bounds found, don't render the button
-        if (minX === Infinity) return null;
-        
-        const centerX = (minX + maxX) / 2;
-        
-        return (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              copySelectionToClipboard();
-            }}
-            style={{
-              position: 'absolute',
-              top: `${minY - 40}px`,
-              left: `${centerX}px`,
-              transform: 'translateX(-50%)',
-              zIndex: 4,
-              backgroundColor: 'rgb(54, 98, 227)',
-              color: 'white',
-              border: `1px solid ${colors.border}`,
-              borderRadius: '6px',
-              padding: '6px 12px',
-              fontSize: '13px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              boxShadow: '0 2px 8px rgba(0,0,0,0.2)',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-            }}
-            title="Copy (Cmd/Ctrl+C)"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
-              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-            </svg>
-            Copy
-          </button>
-        );
-      })()}
+      {/* Copy — fixed top-center (molecule selection only; arrows use sidebar / Cmd+C) */}
+      {(selectedSegments.size > 0 ||
+        selectedVertices.size > 0 ||
+        selectedMolecules.length > 0) &&
+        draggingArrow === null &&
+        !isDraggingSelection &&
+        !isPasteMode && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            copySelectionToClipboard();
+          }}
+          style={{
+            position: 'fixed',
+            top: '78px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 12,
+            backgroundColor: '#28a745',
+            color: '#fff',
+            border: '1px solid rgba(0,0,0,0.12)',
+            borderRadius: '10px',
+            padding: '10px 20px',
+            fontSize: '15px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            boxShadow: '0 2px 10px rgba(40, 167, 69, 0.35), 0 2px 6px rgba(0,0,0,0.12)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+          }}
+          onMouseEnter={(e) => {
+            const el = e.currentTarget;
+            el.style.backgroundColor = '#218838';
+            el.style.boxShadow =
+              '0 4px 14px rgba(40, 167, 69, 0.45), 0 2px 6px rgba(0,0,0,0.15)';
+          }}
+          onMouseLeave={(e) => {
+            const el = e.currentTarget;
+            el.style.backgroundColor = '#28a745';
+            el.style.boxShadow =
+              '0 2px 10px rgba(40, 167, 69, 0.35), 0 2px 6px rgba(0,0,0,0.12)';
+          }}
+          title="Copy (Cmd/Ctrl+C)"
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+          </svg>
+          Copy
+        </button>
+      )}
       
       {/* Paste Mode Indicator */}
       {isPasteMode && (
@@ -6528,10 +6130,10 @@ const HexGridWithToolbar = () => {
             }}>
               {exportMetadata ? (
                 <>
-                  Smart cropped: {exportMetadata.width}×{exportMetadata.height}px • {exportMetadata.scaleFactor}x resolution • Clean background
+                  Cropped to drawing: {exportMetadata.width}×{exportMetadata.height}px • {exportMetadata.scaleFactor}× scale (same pixels as canvas)
                 </>
               ) : (
-                'High-quality PNG export • Clean background • No grid lines'
+                'PNG zoomed to your structure — copied from the canvas'
               )}
             </div>
         

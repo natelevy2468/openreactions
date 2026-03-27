@@ -38,7 +38,8 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
   const formatted = formatAtomTextForDisplay(atomData);
   if (!formatted) return;
 
-  const labelBg = isDarkMode ? 'rgba(46, 48, 52, 0.94)' : 'rgba(255, 255, 255, 0.94)';
+  // Opaque fill matching the canvas so bonds behind the label do not show through (avoids gray “box” artifacts)
+  const labelBg = colors.canvasBackground ?? (isDarkMode ? '#1a1a1a' : '#ffffff');
   const labelFg = isDarkMode ? (colors.atoms || colors.text || '#f0f0f0') : '#111111';
 
   ctx.textAlign = 'left';
@@ -118,10 +119,6 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
   ctx.roundRect(boxLeft, boxTop, boxW, boxH, cornerRadius);
   ctx.fill();
 
-  ctx.strokeStyle = isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-  ctx.lineWidth = 1;
-  ctx.stroke();
-
   ctx.fillStyle = labelFg;
   let cursorX = leftX;
   runs.forEach((r, i) => {
@@ -145,8 +142,6 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
     ctx.beginPath();
     ctx.roundRect(supLeft, supTop, supW, supH, 3);
     ctx.fill();
-    ctx.strokeStyle = isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
-    ctx.stroke();
     ctx.fillStyle = labelFg;
     ctx.font = `${SUB_FONT_PX}px Arial, sans-serif`;
     ctx.fillText(formatted.superscript, supX, supBaseline);

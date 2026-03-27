@@ -162,6 +162,90 @@ export const renderEquilibriumArrow = (ctx, arrow, offset, colors, isPreview = f
   ctx.fill();
 };
 
+/** Must match lineEnd / head gap in renderCurvedArrow */
+export const CURVED_ARROW_HEAD_LENGTH = 14;
+
+function defaultCurvePerpDistance(arrow, distance) {
+  let curveFactor = 0.5;
+  if (arrow.curveType === 'curve0') curveFactor = 0.25;
+  else if (arrow.curveType === 'curve1') curveFactor = 0.5;
+  else if (arrow.curveType === 'curve2') curveFactor = 0.95;
+  const curveSign = arrow.direction === 'cw' ? 1 : -1;
+  return distance * curveFactor * curveSign;
+}
+
+/**
+ * Quadratic Bezier control (world). controlOffset = perp from chord midpoint; controlAlong = along chord from midpoint (+ toward end).
+ */
+export function getCurvedArrowControlPointWorld(arrow) {
+  const x1 = arrow.x1;
+  const y1 = arrow.y1;
+  const x2 = arrow.x2;
+  const y2 = arrow.y2;
+  const midX = (x1 + x2) / 2;
+  const midY = (y1 + y2) / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  if (distance <= 0) return { x: midX, y: midY };
+
+  const perpX = -dy / distance;
+  const perpY = dx / distance;
+  const ux = dx / distance;
+  const uy = dy / distance;
+
+  const perpD =
+    arrow.controlOffset !== undefined ? arrow.controlOffset : defaultCurvePerpDistance(arrow, distance);
+  const alongD = arrow.controlAlong !== undefined && arrow.controlAlong !== null ? arrow.controlAlong : 0;
+
+  return {
+    x: midX + ux * alongD + perpX * perpD,
+    y: midY + uy * alongD + perpY * perpD,
+  };
+}
+
+/** Stored perpendicular / along-chord scalars (for relative control dragging). */
+export function getCurvedArrowPerpAndAlong(arrow) {
+  const x1 = arrow.x1;
+  const y1 = arrow.y1;
+  const x2 = arrow.x2;
+  const y2 = arrow.y2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const distance = Math.sqrt(dx * dx + dy * dy);
+  if (distance <= 0) return { perp: 0, along: 0 };
+  const perpD =
+    arrow.controlOffset !== undefined ? arrow.controlOffset : defaultCurvePerpDistance(arrow, distance);
+  const alongD = arrow.controlAlong !== undefined && arrow.controlAlong !== null ? arrow.controlAlong : 0;
+  return { perp: perpD, along: alongD };
+}
+
+/**
+ * Point on the visible curved stroke at t = 0.5 (world). Yellow handle position.
+ */
+export function getCurvedArrowMidHandleWorld(arrow) {
+  const x1 = arrow.x1;
+  const y1 = arrow.y1;
+  const x2 = arrow.x2;
+  const y2 = arrow.y2;
+  const c = getCurvedArrowControlPointWorld(arrow);
+  const controlX = c.x;
+  const controlY = c.y;
+
+  const tangentX = 2 * (x2 - controlX);
+  const tangentY = 2 * (y2 - controlY);
+  const tangentAngle = Math.atan2(tangentY, tangentX);
+  const lineEndX = x2 - Math.cos(tangentAngle) * CURVED_ARROW_HEAD_LENGTH;
+  const lineEndY = y2 - Math.sin(tangentAngle) * CURVED_ARROW_HEAD_LENGTH;
+
+  const t = 0.5;
+  const u = 1 - t;
+  return {
+    x: u * u * x1 + 2 * u * t * controlX + t * t * lineEndX,
+    y: u * u * y1 + 2 * u * t * controlY + t * t * lineEndY,
+  };
+}
+
 /**
  * Renders a curved arrow (for electron movement)
  * @param {CanvasRenderingContext2D} ctx - Canvas context
@@ -181,36 +265,10 @@ export const renderCurvedArrow = (ctx, arrow, offset, colors, isPreview = false)
   const lineWidth = 2.5; // Thicker line
   const headLength = 14; // Longer to cover line tip
   const headWidth = 10; // Wider arrowhead
-  
-  // Determine curve intensity based on type
-  // curve0 = shallow (large circle), curve1 = medium, curve2 = high peak
-  let curveFactor = 0.5; // Default medium curve
-  
-  if (arrow.curveType === 'curve0') {
-    curveFactor = 0.25; // Shallow curve (part of bigger circle)
-  } else if (arrow.curveType === 'curve1') {
-    curveFactor = 0.5; // Medium curve
-  } else if (arrow.curveType === 'curve2') {
-    curveFactor = 0.95; // High peak
-  }
-  
-  // Determine curve direction (clockwise or counterclockwise)
-  const isClockwise = arrow.direction === 'cw';
-  const curveSign = isClockwise ? 1 : -1;
-  
-  // Calculate control point for quadratic curve
-  const midX = (x1 + x2) / 2;
-  const midY = (y1 + y2) / 2;
-  const dx = x2 - x1;
-  const dy = y2 - y1;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  
-  // Perpendicular offset for control point
-  const perpX = -dy / distance;
-  const perpY = dx / distance;
-  
-  const controlX = midX + perpX * distance * curveFactor * curveSign;
-  const controlY = midY + perpY * distance * curveFactor * curveSign;
+
+  const c = getCurvedArrowControlPointWorld(arrow);
+  const controlX = c.x + offset.x;
+  const controlY = c.y + offset.y;
   
   // Calculate arrowhead angle at the end of the curve FIRST
   // Tangent at end point of quadratic curve
@@ -247,6 +305,33 @@ export const renderCurvedArrow = (ctx, arrow, offset, colors, isPreview = false)
   ctx.closePath();
   ctx.fill();
 };
+
+/**
+ * Stroke the visible curved shaft (quadratic, stopping before arrowhead) — same path as renderCurvedArrow.
+ */
+export function strokeCurvedArrowShaft(ctx, arrow, offset, strokeStyle, lineWidth) {
+  const x1 = arrow.x1 + offset.x;
+  const y1 = arrow.y1 + offset.y;
+  const x2 = arrow.x2 + offset.x;
+  const y2 = arrow.y2 + offset.y;
+  const c = getCurvedArrowControlPointWorld(arrow);
+  const controlX = c.x + offset.x;
+  const controlY = c.y + offset.y;
+  const t = 1;
+  const tangentX = 2 * (1 - t) * (controlX - x1) + 2 * t * (x2 - controlX);
+  const tangentY = 2 * (1 - t) * (controlY - y1) + 2 * t * (y2 - controlY);
+  const tangentAngle = Math.atan2(tangentY, tangentX);
+  const lineEndX = x2 - Math.cos(tangentAngle) * CURVED_ARROW_HEAD_LENGTH;
+  const lineEndY = y2 - Math.sin(tangentAngle) * CURVED_ARROW_HEAD_LENGTH;
+
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(x1, y1);
+  ctx.quadraticCurveTo(controlX, controlY, lineEndX, lineEndY);
+  ctx.stroke();
+}
 
 /**
  * Main arrow rendering dispatcher

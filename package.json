@@ -142,7 +142,7 @@
   "scripts": {
     "dev": "cd draw && npm run dev",
     "build": "cd draw && npm run build",
-    "predeploy": "npm run build && mkdir -p deploy && cp index.html logoFinal4.png gear.png Draw.png Animate.png Search.png deploy/ && cp -r draw/dist deploy/draw && echo openreactions.com > deploy/CNAME",
+    "predeploy": "npm run build && mkdir -p deploy && cp index.html logoFinal4.png gear.png Draw.png Animate.png Search.png deploy/ && rm -rf deploy/draw && cp -R draw/dist deploy/draw && echo openreactions.com > deploy/CNAME",
     "deploy": "cd draw && npx gh-pages -d ../deploy",
     "clean": "rm -rf deploy"
   },
