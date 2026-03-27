@@ -53,10 +53,12 @@
       justify-content: center;
       flex: 1;
       margin-top: 3px;
+      min-width: 0;
+      padding: 0 6px;
     }
 
     .navbar-title {
-      font-size: 28px;
+      font-size: clamp(11px, 1.65vw, 18px);
       font-weight: 300;
       background: linear-gradient(135deg, #1042e8 0%, #7921f3 50%, #9C27B0 100%);
       -webkit-background-clip: text;
@@ -64,6 +66,9 @@
       background-clip: text;
       font-family: 'Roboto', sans-serif;
       letter-spacing: -0.5px;
+      line-height: 1.15;
+      max-width: min(92vw, 560px);
+      text-align: center;
     }
 
     .navbar-right {
@@ -241,18 +246,19 @@
     }
 
     .hero-title {
-      font-size: 4.5rem;
+      font-size: clamp(1.35rem, 4.2vw, 2.5rem);
       font-weight: 500;
       background: linear-gradient(135deg, #1a202c 0%, #2d3748 50%, #4a5568 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
       font-family: 'Inter', sans-serif;
-      letter-spacing: -3px;
-      margin: 0 0 20px 0;
-      line-height: 1.05;
+      letter-spacing: -0.5px;
+      margin: 0 auto 20px;
+      line-height: 1.15;
       text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
       position: relative;
+      max-width: 22ch;
     }
 
     .hero-subtitle {
