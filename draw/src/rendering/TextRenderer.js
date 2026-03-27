@@ -3,7 +3,22 @@
  * Handles rendering of atom labels, element symbols, and chemical text on canvas
  */
 
-import { formatAtomTextForDisplay, getElementColor } from '../handlers/TextHandler.js';
+import { formatAtomTextForDisplay } from '../handlers/TextHandler.js';
+
+const MAIN_FONT_PX = 26;
+const SUB_FONT_PX = 18;
+/** Vertical offset (px) from main alphabetic baseline to subscript baseline */
+const SUB_BASELINE_DROP = 6;
+const LABEL_PAD = 3;
+const IMPLICIT_H_GAP = 2;
+
+function measureRun(ctx, fontSizePx, text) {
+  ctx.font = `${fontSizePx}px Arial, sans-serif`;
+  const m = ctx.measureText(text);
+  const ascent = m.actualBoundingBoxAscent ?? fontSizePx * 0.72;
+  const descent = m.actualBoundingBoxDescent ?? fontSizePx * 0.24;
+  return { width: m.width, ascent, descent };
+}
 
 /**
  * Renders atom text at a vertex position
@@ -20,147 +35,121 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
   const screenX = vertex.x + offset.x;
   const screenY = vertex.y + offset.y;
 
-  // Format the atom text
   const formatted = formatAtomTextForDisplay(atomData);
   if (!formatted) return;
 
-  // Set text properties
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  const labelBg = isDarkMode ? 'rgba(46, 48, 52, 0.94)' : 'rgba(255, 255, 255, 0.94)';
+  const labelFg = isDarkMode ? (colors.atoms || colors.text || '#f0f0f0') : '#111111';
 
-  // Render text with automatic subscript handling for numbers
-  if (formatted.hasSegments && formatted.segments) {
-    // Calculate total dimensions for bounding box
-    let totalWidth = 0;
-    let maxHeight = 26; // Base font size
-    
-    formatted.segments.forEach(segment => {
-      const fontSize = segment.isNumber ? 18 : 26;
-      ctx.font = `${fontSize}px Arial, sans-serif`;
-      totalWidth += ctx.measureText(segment.text).width;
-      if (segment.isNumber) {
-        maxHeight = Math.max(maxHeight, 26 + 8); // Account for subscript offset
-      }
-    });
-    
-    // Add padding to the bounding box
-    const padding = 2.5;
-    const boxX = screenX - totalWidth / 2 - padding;
-    const boxY = screenY - maxHeight / 2 - padding;
-    const boxWidth = totalWidth + padding * 2;
-    const boxHeight = maxHeight + padding * 2;
-    
-    // Draw white rounded rectangular background
-    ctx.fillStyle = '#FFFFFF';
-    const cornerRadius = 3;
-    ctx.beginPath();
-    ctx.roundRect(boxX, boxY, boxWidth, boxHeight, cornerRadius);
-    ctx.fill();
-    
-    // Render segmented text on top of white background
-    let currentX = screenX - totalWidth / 2;
-    
-    formatted.segments.forEach((segment, index) => {
-      const fontSize = segment.isNumber ? 18 : 26;
-      const yOffset = segment.isNumber ? 8 : 0; // Lower for subscripts
-      
-      ctx.font = `${fontSize}px Arial, sans-serif`;
-      const segmentWidth = ctx.measureText(segment.text).width;
-      const segmentX = currentX + segmentWidth / 2;
-      const segmentY = screenY + yOffset;
-      
-      // Draw black text
-      ctx.fillStyle = '#000000';
-      ctx.fillText(segment.text, segmentX, segmentY);
-      
-      currentX += segmentWidth;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  // --- Build horizontal runs: symbol segments + optional implicit H subscript
+  const runs = [];
+
+  if (formatted.hasSegments && formatted.segments && formatted.segments.length > 0) {
+    formatted.segments.forEach((segment) => {
+      const fontSize = segment.isNumber ? SUB_FONT_PX : MAIN_FONT_PX;
+      const m = measureRun(ctx, fontSize, segment.text);
+      runs.push({
+        text: segment.text,
+        fontSize,
+        width: m.width,
+        ascent: m.ascent,
+        descent: m.descent,
+        isSub: segment.isNumber,
+      });
     });
   } else {
-    // Simple text without segments (fallback)
-    ctx.font = '26px Arial, sans-serif';
-    
-    // Calculate tight bounding box for text
-    const textMetrics = ctx.measureText(formatted.mainText);
-    const textWidth = textMetrics.width;
-    const textHeight = 26; // Font size
-    
-    // Add padding
-    const padding = 2;
-    const boxX = screenX - textWidth / 2 - padding;
-    const boxY = screenY - textHeight / 2 - padding;
-    const boxWidth = textWidth + padding * 2;
-    const boxHeight = textHeight + padding * 2;
-    
-    // Draw white rounded rectangular background
-    ctx.fillStyle = '#FFFFFF';
-    const cornerRadius = 3;
-    ctx.beginPath();
-    ctx.roundRect(boxX, boxY, boxWidth, boxHeight, cornerRadius);
-    ctx.fill();
-    
-    // Draw black text on top
-    ctx.fillStyle = '#000000';
-    ctx.fillText(formatted.mainText, screenX, screenY);
+    const m = measureRun(ctx, MAIN_FONT_PX, formatted.mainText);
+    runs.push({
+      text: formatted.mainText,
+      fontSize: MAIN_FONT_PX,
+      width: m.width,
+      ascent: m.ascent,
+      descent: m.descent,
+      isSub: false,
+    });
   }
 
-  // Handle subscript (only if manually specified - no automatic hydrogens)
-  if (formatted.hasSubscript) {
-    ctx.font = '18px Arial, sans-serif';
-    const mainWidth = ctx.measureText(formatted.mainText).width;
-    const subscriptX = screenX + mainWidth/2 + 6;
-    const subscriptY = screenY + 8;
-    
-    // Calculate subscript bounding box
-    const subscriptMetrics = ctx.measureText(formatted.subscript);
-    const subscriptWidth = subscriptMetrics.width;
-    const subscriptHeight = 18;
-    const padding = 1.25;
-    
-    const subBoxX = subscriptX - subscriptWidth / 2 - padding;
-    const subBoxY = subscriptY - subscriptHeight / 2 - padding;
-    const subBoxWidth = subscriptWidth + padding * 2;
-    const subBoxHeight = subscriptHeight + padding * 2;
-    
-    // Draw white rounded rectangular background
-    ctx.fillStyle = '#FFFFFF';
-    const subCornerRadius = 2;
-    ctx.beginPath();
-    ctx.roundRect(subBoxX, subBoxY, subBoxWidth, subBoxHeight, subCornerRadius);
-    ctx.fill();
-    
-    // Draw black subscript text
-    ctx.fillStyle = '#000000';
-    ctx.fillText(formatted.subscript, subscriptX, subscriptY);
+  if (formatted.hasSubscript && formatted.subscript) {
+    const m = measureRun(ctx, SUB_FONT_PX, formatted.subscript);
+    runs.push({
+      text: formatted.subscript,
+      fontSize: SUB_FONT_PX,
+      width: m.width,
+      ascent: m.ascent,
+      descent: m.descent,
+      isSub: true,
+      implicitGap: runs.length > 0,
+    });
   }
 
-  // Handle superscript (charges - though these are now rendered separately)
-  if (formatted.hasSuperscript) {
-    ctx.font = '18px Arial, sans-serif';
-    const mainWidth = ctx.measureText(formatted.mainText).width;
-    const superscriptX = screenX + mainWidth/2 + 6;
-    const superscriptY = screenY - 8;
-    
-    // Calculate superscript bounding box
-    const superscriptMetrics = ctx.measureText(formatted.superscript);
-    const superscriptWidth = superscriptMetrics.width;
-    const superscriptHeight = 18;
-    const padding = 1.25;
-    
-    const supBoxX = superscriptX - superscriptWidth / 2 - padding;
-    const supBoxY = superscriptY - superscriptHeight / 2 - padding;
-    const supBoxWidth = superscriptWidth + padding * 2;
-    const supBoxHeight = superscriptHeight + padding * 2;
-    
-    // Draw white rounded rectangular background
-    ctx.fillStyle = '#FFFFFF';
-    const supCornerRadius = 2;
+  const totalWidth =
+    runs.reduce((sum, r, i) => {
+      const gap = r.implicitGap ? IMPLICIT_H_GAP : 0;
+      return sum + gap + r.width;
+    }, 0);
+
+  // Vertical extent: each run uses baseline offset 0 for main, SUB_BASELINE_DROP for subscripts
+  let minTop = Infinity;
+  let maxBot = -Infinity;
+  runs.forEach((r) => {
+    const baseOff = r.isSub ? SUB_BASELINE_DROP : 0;
+    minTop = Math.min(minTop, baseOff - r.ascent);
+    maxBot = Math.max(maxBot, baseOff + r.descent);
+  });
+  if (!Number.isFinite(minTop)) {
+    minTop = -MAIN_FONT_PX * 0.72;
+    maxBot = MAIN_FONT_PX * 0.28;
+  }
+
+  const mainBaselineY = screenY - (minTop + maxBot) / 2;
+
+  const leftX = screenX - totalWidth / 2;
+  const boxTop = mainBaselineY + minTop - LABEL_PAD;
+  const boxH = maxBot - minTop + LABEL_PAD * 2;
+  const boxW = totalWidth + LABEL_PAD * 2;
+  const boxLeft = leftX - LABEL_PAD;
+
+  const cornerRadius = 4;
+  ctx.fillStyle = labelBg;
+  ctx.beginPath();
+  ctx.roundRect(boxLeft, boxTop, boxW, boxH, cornerRadius);
+  ctx.fill();
+
+  ctx.strokeStyle = isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  ctx.fillStyle = labelFg;
+  let cursorX = leftX;
+  runs.forEach((r, i) => {
+    if (r.implicitGap) cursorX += IMPLICIT_H_GAP;
+    const baseline = mainBaselineY + (r.isSub ? SUB_BASELINE_DROP : 0);
+    ctx.font = `${r.fontSize}px Arial, sans-serif`;
+    ctx.fillText(r.text, cursorX, baseline);
+    cursorX += r.width;
+  });
+
+  // Legacy superscript path (charges usually drawn elsewhere; keep for edge cases)
+  if (formatted.hasSuperscript && formatted.superscript) {
+    const m = measureRun(ctx, SUB_FONT_PX, formatted.superscript);
+    const supX = leftX + totalWidth + 4;
+    const supBaseline = mainBaselineY - 10;
+    const supLeft = supX - LABEL_PAD;
+    const supTop = supBaseline - m.ascent - LABEL_PAD;
+    const supW = m.width + LABEL_PAD * 2;
+    const supH = m.ascent + m.descent + LABEL_PAD * 2;
+    ctx.fillStyle = labelBg;
     ctx.beginPath();
-    ctx.roundRect(supBoxX, supBoxY, supBoxWidth, supBoxHeight, supCornerRadius);
+    ctx.roundRect(supLeft, supTop, supW, supH, 3);
     ctx.fill();
-    
-    // Draw black superscript text
-    ctx.fillStyle = '#000000';
-    ctx.fillText(formatted.superscript, superscriptX, superscriptY);
+    ctx.strokeStyle = isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)';
+    ctx.stroke();
+    ctx.fillStyle = labelFg;
+    ctx.font = `${SUB_FONT_PX}px Arial, sans-serif`;
+    ctx.fillText(formatted.superscript, supX, supBaseline);
   }
 };
 
@@ -205,35 +194,54 @@ export const calculateTextBounds = (ctx, vertex, atomData, offset) => {
   const screenX = vertex.x + offset.x;
   const screenY = vertex.y + offset.y;
 
-  // Format the text to get proper dimensions
   const formatted = formatAtomTextForDisplay(atomData);
   if (!formatted) return null;
 
-  let totalWidth = 0;
-  let totalHeight = 26; // Base font size
-  
-  // Calculate width based on segments if available
-  if (formatted.hasSegments && formatted.segments) {
-    formatted.segments.forEach(segment => {
-      const fontSize = segment.isNumber ? 18 : 26;
-      ctx.font = `${fontSize}px Arial, sans-serif`;
-      totalWidth += ctx.measureText(segment.text).width;
+  const runs = [];
+  if (formatted.hasSegments && formatted.segments && formatted.segments.length > 0) {
+    formatted.segments.forEach((segment) => {
+      const fontSize = segment.isNumber ? SUB_FONT_PX : MAIN_FONT_PX;
+      const m = measureRun(ctx, fontSize, segment.text);
+      runs.push({ width: m.width, ascent: m.ascent, descent: m.descent, isSub: segment.isNumber });
     });
   } else {
-    ctx.font = '26px Arial, sans-serif';
-    totalWidth = ctx.measureText(atomData.symbol).width;
+    const m = measureRun(ctx, MAIN_FONT_PX, formatted.mainText);
+    runs.push({ width: m.width, ascent: m.ascent, descent: m.descent, isSub: false });
   }
-  
-  // Add padding for better clipping
-  const padding = 12;
-  totalWidth += padding * 2;
-  totalHeight += padding * 2;
+  if (formatted.hasSubscript && formatted.subscript) {
+    const m = measureRun(ctx, SUB_FONT_PX, formatted.subscript);
+    runs.push({
+      width: m.width,
+      ascent: m.ascent,
+      descent: m.descent,
+      isSub: true,
+      implicitGap: runs.length > 0,
+    });
+  }
+
+  const totalWidth = runs.reduce((sum, r) => sum + (r.implicitGap ? IMPLICIT_H_GAP : 0) + r.width, 0);
+
+  let minTop = Infinity;
+  let maxBot = -Infinity;
+  runs.forEach((r) => {
+    const baseOff = r.isSub ? SUB_BASELINE_DROP : 0;
+    minTop = Math.min(minTop, baseOff - r.ascent);
+    maxBot = Math.max(maxBot, baseOff + r.descent);
+  });
+  if (!Number.isFinite(minTop)) {
+    minTop = -MAIN_FONT_PX * 0.72;
+    maxBot = MAIN_FONT_PX * 0.28;
+  }
+
+  const extraPad = 10;
+  const w = totalWidth + (LABEL_PAD + extraPad) * 2;
+  const h = maxBot - minTop + (LABEL_PAD + extraPad) * 2;
 
   return {
-    x: screenX - totalWidth / 2,
-    y: screenY - totalHeight / 2,
-    width: totalWidth,
-    height: totalHeight
+    x: screenX - w / 2,
+    y: screenY - h / 2,
+    width: w,
+    height: h,
   };
 };
 

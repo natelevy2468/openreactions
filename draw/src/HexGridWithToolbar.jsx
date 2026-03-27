@@ -16,9 +16,11 @@ import { getLonePairPositionOrder } from './utils/LonePairPositioning.js';
 import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rendering/StereochemistryRenderer.js';
 import { renderAllArrows, renderArrowPreview, renderArrow } from './rendering/ArrowRenderer.js';
 import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
+import { renderCleanCanvasExport } from './utils/cleanExportCanvas.js';
 
+const RING_PRESET_MODES = ['benzene', 'cyclohexane', 'cyclopentane', 'cyclobutane', 'cyclopropane'];
 
-  const HexGridWithToolbar = () => {
+const HexGridWithToolbar = () => {
     const canvasRef = useRef(null);
     
     // State variables needed for visual appearance
@@ -29,9 +31,9 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
     const [mode, setMode] = useState('draw');
     const [atomInputValue, setAtomInputValue] = useState('');
     const [showAtomInput, setShowAtomInput] = useState(false);
-    const [selectedPreset, setSelectedPreset] = useState(null);
     const [atomInputPosition, setAtomInputPosition] = useState({ x: 0, y: 0 });
-    const [historyIndex, setHistoryIndex] = useState(0);
+    const [history, setHistory] = useState([]);
+    const [historyIndex, setHistoryIndex] = useState(-1);
     const [isPasteMode, setIsPasteMode] = useState(false);
     const [selectedSegments, setSelectedSegments] = useState(new Set());
     const [selectedVertices, setSelectedVertices] = useState(new Set());
@@ -60,10 +62,20 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
     const [selectionStart, setSelectionStart] = useState({ x: 0, y: 0 });
     const [selectionEnd, setSelectionEnd] = useState({ x: 0, y: 0 });
     const [selectionBounds, setSelectionBounds] = useState(null);
+    const [selectedMolecules, setSelectedMolecules] = useState([]); // Array of molecule vertex sets
+    const [isDraggingSelection, setIsDraggingSelection] = useState(false);
+    const [dragSelectionStart, setDragSelectionStart] = useState({ x: 0, y: 0 });
+    const [hoveredMolecule, setHoveredMolecule] = useState(null); // For hover preview
+    const [hoveredArrow, setHoveredArrow] = useState(null); // Arrow under cursor
+    const [draggingArrow, setDraggingArrow] = useState(null); // Arrow being dragged
+    const [draggingArrowEnd, setDraggingArrowEnd] = useState(null); // Which end: 'start', 'end', or 'middle'
+    const [justCompletedSelection, setJustCompletedSelection] = useState(false); // Prevent click after selection
+    const [arrowControlOffsets, setArrowControlOffsets] = useState({}); // Store control offset for curved arrows
     
     // Copy/paste state
     const [clipboard, setClipboard] = useState(null);
     const [pastePreviewPosition, setPastePreviewPosition] = useState({ x: 0, y: 0 });
+    const [isPastePreviewMode, setIsPastePreviewMode] = useState(false);
     
     // Grid and snapping state
     const [gridVertexIndex, setGridVertexIndex] = useState(new Map());
@@ -101,19 +113,9 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
     const [detectedRings, setDetectedRings] = useState([]);
     
     // Additional UI state
-    const [isPropertiesPanelExpanded, setIsPropertiesPanelExpanded] = useState(false);
     const [showExportPopup, setShowExportPopup] = useState(false);
     const [exportImageUrl, setExportImageUrl] = useState(null);
-    
-    // Placeholder function for renderCleanCanvas
-    const renderCleanCanvas = async (resolution) => {
-      return null; // Removed functionality
-    };
-    
-    // Placeholder function for getActiveMolecule
-    const getActiveMolecule = () => {
-      return null; // Removed functionality
-    };
+    const [exportMetadata, setExportMetadata] = useState(null);
     
     // Mode switching function
     const setModeAndClearSelection = (newMode) => {
@@ -122,18 +124,132 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       setSelectedSegments(new Set());
       setSelectedVertices(new Set());
       setSelectedArrows(new Set());
-      setSelectedPreset(null);
     };
-    
-    // Preset switching function
-    const setPresetAndClearMode = (presetName) => {
-      setSelectedPreset(selectedPreset === presetName ? null : presetName);
-      setMode('draw'); // Reset to draw mode when selecting presets
-      // Clear any selections when switching presets
+
+    // Erase All function - clears the entire canvas
+    const handleEraseAll = () => {
+      saveToHistory(); // Save state before clearing
+      setVertices([]);
+      setSegments([]);
+      setVertexAtoms({});
+      setArrows([]);
+      setBondSuggestions([]);
+      setDetectedRings([]);
+      setVertexBondStates({});
       setSelectedSegments(new Set());
       setSelectedVertices(new Set());
       setSelectedArrows(new Set());
+      setClipboard(null);
+      setIsPasteMode(false);
+      setShowAtomInput(false);
+      setIsCreatingBond(false);
+      setBondStartPoint(null);
+      setHoveredVertex(null);
+      setHoveredBondIndex(null);
+      setCurvedArrowStartPoint(null);
+      setFourthBondMode(false);
+      setFourthBondSource(null);
+      setFourthBondPreview(null);
     };
+
+    // Save current state to history
+    const saveToHistory = useCallback(() => {
+      const snapshot = {
+        vertices: JSON.parse(JSON.stringify(vertices)),
+        segments: JSON.parse(JSON.stringify(segments)),
+        vertexAtoms: JSON.parse(JSON.stringify(vertexAtoms)),
+        arrows: JSON.parse(JSON.stringify(arrows)),
+        detectedRings: JSON.parse(JSON.stringify(detectedRings)),
+        vertexBondStates: JSON.parse(JSON.stringify(vertexBondStates))
+      };
+      
+      setHistory(prev => {
+        // If we're not at the end of history, remove future states
+        const newHistory = prev.slice(0, historyIndex + 1);
+        // Add new snapshot
+        newHistory.push(snapshot);
+        // Limit history to 50 states to avoid memory issues
+        if (newHistory.length > 50) {
+          newHistory.shift();
+          return newHistory;
+        }
+        return newHistory;
+      });
+      
+      setHistoryIndex(prev => {
+        const newIndex = prev + 1;
+        return newIndex > 50 ? 50 : newIndex;
+      });
+    }, [vertices, segments, vertexAtoms, arrows, detectedRings, vertexBondStates, historyIndex]);
+
+    // Undo function - restore previous state
+    const handleUndo = useCallback(() => {
+      if (historyIndex > 0) {
+        const prevIndex = historyIndex - 1;
+        const prevState = history[prevIndex];
+        
+        if (prevState) {
+          setVertices(JSON.parse(JSON.stringify(prevState.vertices)));
+          setSegments(JSON.parse(JSON.stringify(prevState.segments)));
+          setVertexAtoms(JSON.parse(JSON.stringify(prevState.vertexAtoms)));
+          setArrows(JSON.parse(JSON.stringify(prevState.arrows)));
+          setDetectedRings(JSON.parse(JSON.stringify(prevState.detectedRings)));
+          setVertexBondStates(JSON.parse(JSON.stringify(prevState.vertexBondStates)));
+          setHistoryIndex(prevIndex);
+          
+          // Clear temporary states
+          setBondSuggestions([]);
+          setIsCreatingBond(false);
+          setBondStartPoint(null);
+          setBondPreviewEnd(null);
+          setCurvedArrowStartPoint(null);
+        }
+      }
+    }, [history, historyIndex]);
+
+    const copySelectionToClipboard = useCallback(() => {
+      if (selectedMolecules.length === 0 && selectedArrows.size === 0) return;
+
+      const clipboardData = {
+        molecules: selectedMolecules.map((m) => ({
+          vertices: m.vertices.map((v) => ({ ...v })),
+          bonds: m.bonds.map((b) => ({ ...b })),
+          atoms: {},
+          bondStates: {},
+        })),
+        arrows: Array.from(selectedArrows).map((idx) => ({ ...arrows[idx] })),
+      };
+
+      clipboardData.molecules.forEach((mol) => {
+        mol.vertices.forEach((v) => {
+          const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+          if (vertexAtoms[key]) {
+            mol.atoms[key] = { ...vertexAtoms[key] };
+          }
+          if (vertexBondStates[key]) {
+            mol.bondStates[key] = { ...vertexBondStates[key] };
+          }
+        });
+      });
+
+      setClipboard(clipboardData);
+      const worldX = currentMousePosition.x - offset.x;
+      const worldY = currentMousePosition.y - offset.y;
+      setPastePreviewPosition({ x: worldX, y: worldY });
+      setIsPastePreviewMode(true);
+      setSelectedMolecules([]);
+      setSelectedVertices(new Set());
+      setSelectedSegments(new Set());
+      setSelectedArrows(new Set());
+    }, [
+      selectedMolecules,
+      selectedArrows,
+      arrows,
+      vertexAtoms,
+      vertexBondStates,
+      currentMousePosition,
+      offset,
+    ]);
   
   // Color scheme function - returns appropriate colors based on dark mode
   const getColors = useCallback(() => {
@@ -177,6 +293,22 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
   }, [isDarkMode]);
   
   const colors = getColors();
+
+  const renderCleanCanvas = useCallback(
+    async (resolution = 2) => {
+      return renderCleanCanvasExport({
+        vertices,
+        segments,
+        vertexAtoms,
+        arrows,
+        detectedRings,
+        colors,
+        isDarkMode,
+        resolution,
+      });
+    },
+    [vertices, segments, vertexAtoms, arrows, detectedRings, colors, isDarkMode]
+  );
 
   // Drawing constants
   const hexRadius = 60; // Standard bond length (doubled from 30 to 60)
@@ -726,6 +858,232 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
     return null;
   };
 
+  // Helper function to find connected molecule (all vertices connected by bonds)
+  const findMolecule = useCallback((startVertex) => {
+    const moleculeVertices = new Set();
+    const moleculeBonds = [];
+    const queue = [startVertex];
+    const visited = new Set();
+    
+    while (queue.length > 0) {
+      const vertex = queue.shift();
+      const vertexKey = `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+      
+      if (visited.has(vertexKey)) continue;
+      visited.add(vertexKey);
+      moleculeVertices.add(vertex);
+      
+      // Find all bonds connected to this vertex
+      segments.forEach(seg => {
+        if (seg.bondOrder <= 0) return; // Skip grid lines
+        
+        const isConnectedToStart = Math.abs(seg.x1 - vertex.x) < 0.01 && Math.abs(seg.y1 - vertex.y) < 0.01;
+        const isConnectedToEnd = Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01;
+        
+        if (isConnectedToStart || isConnectedToEnd) {
+          if (!moleculeBonds.some(b => b === seg)) {
+            moleculeBonds.push(seg);
+          }
+          
+          // Add the other vertex to queue
+          if (isConnectedToStart) {
+            const otherVertex = vertices.find(v => 
+              Math.abs(v.x - seg.x2) < 0.01 && Math.abs(v.y - seg.y2) < 0.01
+            );
+            if (otherVertex) queue.push(otherVertex);
+          } else {
+            const otherVertex = vertices.find(v => 
+              Math.abs(v.x - seg.x1) < 0.01 && Math.abs(v.y - seg.y1) < 0.01
+            );
+            if (otherVertex) queue.push(otherVertex);
+          }
+        }
+      });
+    }
+    
+    return { vertices: Array.from(moleculeVertices), bonds: moleculeBonds };
+  }, [vertices, segments]);
+
+  // Helper function to check if a point is inside a molecule's bounding box
+  const isPointInMolecule = useCallback((worldX, worldY, molecule) => {
+    const threshold = 20; // Pixels
+    return molecule.vertices.some(v => {
+      const dist = Math.sqrt(Math.pow(v.x - worldX, 2) + Math.pow(v.y - worldY, 2));
+      return dist <= threshold;
+    });
+  }, []);
+
+  // Helper function to detect which part of arrow is clicked (start, end, or middle)
+  const detectArrowPart = useCallback((x, y, arrowIndex) => {
+    if (arrowIndex === null || arrowIndex < 0 || arrowIndex >= arrows.length) return null;
+    
+    const arrow = arrows[arrowIndex];
+    const worldX = x - offset.x;
+    const worldY = y - offset.y;
+    const endpointThreshold = 25; // Large threshold for easy clicking on endpoints
+    
+    if (arrow.type === 'curved') {
+      // Curved arrow - check control point FIRST, then start/end
+      const midX = (arrow.x1 + arrow.x2) / 2;
+      const midY = (arrow.y1 + arrow.y2) / 2;
+      const dx = arrow.x2 - arrow.x1;
+      const dy = arrow.y2 - arrow.y1;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance > 0) {
+        // Perpendicular unit vector
+        const perpX = -dy / distance;
+        const perpY = dx / distance;
+        
+        // Calculate control offset (same logic as rendering)
+        let controlOffset;
+        if (arrow.controlOffset !== undefined) {
+          controlOffset = arrow.controlOffset;
+        } else {
+          // Calculate default based on curve type
+          let curveFactor = 0.5;
+          if (arrow.curveType === 'curve0') curveFactor = 0.25;
+          else if (arrow.curveType === 'curve1') curveFactor = 0.5;
+          else if (arrow.curveType === 'curve2') curveFactor = 0.95;
+          
+          const curveSign = arrow.direction === 'cw' ? 1 : -1;
+          controlOffset = distance * curveFactor * curveSign;
+        }
+        
+        const controlX = midX + perpX * controlOffset;
+        const controlY = midY + perpY * controlOffset;
+        
+        const controlDist = Math.sqrt(Math.pow(worldX - controlX, 2) + Math.pow(worldY - controlY, 2));
+        
+        // Check control point FIRST with higher priority
+        if (controlDist <= endpointThreshold) {
+          return 'control';
+        }
+      }
+      
+      // Then check endpoints
+      const startDist = Math.sqrt(Math.pow(worldX - arrow.x1, 2) + Math.pow(worldY - arrow.y1, 2));
+      const endDist = Math.sqrt(Math.pow(worldX - arrow.x2, 2) + Math.pow(worldY - arrow.y2, 2));
+      
+      if (startDist <= endpointThreshold) {
+        return 'start';
+      }
+      if (endDist <= endpointThreshold) {
+        return 'end';
+      }
+      
+      return 'body';
+    } else {
+      // Straight arrow - check start and end
+      const endX = arrow.x + arrow.length * Math.cos(arrow.angle);
+      const endY = arrow.y + arrow.length * Math.sin(arrow.angle);
+      
+      const startDist = Math.sqrt(Math.pow(worldX - arrow.x, 2) + Math.pow(worldY - arrow.y, 2));
+      const endDist = Math.sqrt(Math.pow(worldX - endX, 2) + Math.pow(worldY - endY, 2));
+      
+      if (startDist <= endpointThreshold) return 'start';
+      if (endDist <= endpointThreshold) return 'end';
+      return 'middle';
+    }
+  }, [arrows, offset]);
+
+  // Helper function to find if mouse is over an arrow
+  const findHoveredArrow = (x, y) => {
+    const worldX = x - offset.x;
+    const worldY = y - offset.y;
+    const clickThreshold = 30; // Large threshold for easy clicking on arrows
+    
+    for (let i = 0; i < arrows.length; i++) {
+      const arrow = arrows[i];
+      
+      // Handle curved arrows
+      if (arrow.type === 'curved' || (arrow.type && arrow.type.startsWith('curve'))) {
+        // For curved arrows, check if point is near the curve path
+        // Check if near start or end point FIRST (most important)
+        const startDist = Math.sqrt(Math.pow(worldX - arrow.x1, 2) + Math.pow(worldY - arrow.y1, 2));
+        const endDist = Math.sqrt(Math.pow(worldX - arrow.x2, 2) + Math.pow(worldY - arrow.y2, 2));
+        
+        if (startDist <= clickThreshold || endDist <= clickThreshold) {
+          return i;
+        }
+        
+        // Check control point (middle of curve)
+        const midX = (arrow.x1 + arrow.x2) / 2;
+        const midY = (arrow.y1 + arrow.y2) / 2;
+        const dx = arrow.x2 - arrow.x1;
+        const dy = arrow.y2 - arrow.y1;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance === 0) continue;
+        
+        // Calculate control point position
+        const perpX = -dy / distance;
+        const perpY = dx / distance;
+        
+        let controlOffset;
+        if (arrow.controlOffset !== undefined) {
+          controlOffset = arrow.controlOffset;
+        } else {
+          let curveFactor = 0.5;
+          if (arrow.curveType === 'curve0') curveFactor = 0.25;
+          else if (arrow.curveType === 'curve1') curveFactor = 0.5;
+          else if (arrow.curveType === 'curve2') curveFactor = 0.95;
+          
+          const curveSign = arrow.direction === 'cw' ? 1 : -1;
+          controlOffset = distance * curveFactor * curveSign;
+        }
+        
+        const controlX = midX + perpX * controlOffset;
+        const controlY = midY + perpY * controlOffset;
+        const controlDist = Math.sqrt(Math.pow(worldX - controlX, 2) + Math.pow(worldY - controlY, 2));
+        
+        if (controlDist <= clickThreshold) {
+          return i;
+        }
+        
+        // Also check along the curve path (use midpoint as approximation)
+        const midDist = Math.sqrt(Math.pow(worldX - midX, 2) + Math.pow(worldY - midY, 2));
+        if (midDist <= clickThreshold * 1.5) {
+          return i;
+        }
+      } else {
+        // For straight arrows (forward and equilibrium)
+        const arrowEndX = arrow.x + arrow.length * Math.cos(arrow.angle);
+        const arrowEndY = arrow.y + arrow.length * Math.sin(arrow.angle);
+        
+        // Calculate distance from point to line segment
+        const A = worldX - arrow.x;
+        const B = worldY - arrow.y;
+        const C = arrowEndX - arrow.x;
+        const D = arrowEndY - arrow.y;
+        
+        const dot = A * C + B * D;
+        const lenSq = C * C + D * D;
+        
+        if (lenSq === 0) continue; // Zero-length arrow
+        
+        let param = dot / lenSq;
+        
+        // Clamp to segment bounds
+        if (param < 0) param = 0;
+        else if (param > 1) param = 1;
+        
+        const xx = arrow.x + param * C;
+        const yy = arrow.y + param * D;
+        
+        const dx = worldX - xx;
+        const dy = worldY - yy;
+        const distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance <= clickThreshold) {
+          return i;
+        }
+      }
+    }
+    
+    return null;
+  };
+
   // Helper function to check if a suggested bond would overlap with existing bonds
   const wouldOverlapExistingBond = (suggestionStart, suggestionEnd) => {
     const suggestionAngle = Math.atan2(suggestionEnd.y - suggestionStart.y, suggestionEnd.x - suggestionStart.x);
@@ -1150,6 +1508,161 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       return;
     }
 
+    // Handle mouse/selection mode clicks
+    if (mode === 'mouse') {
+      // Skip if we just completed a selection box
+      if (justCompletedSelection) {
+        setJustCompletedSelection(false);
+        return;
+      }
+      
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      // Handle paste preview mode - place the copied items
+      if (isPastePreviewMode && clipboard) {
+        // Calculate center of clipboard items
+        let totalX = 0, totalY = 0, count = 0;
+        clipboard.molecules.forEach(mol => {
+          mol.vertices.forEach(v => {
+            totalX += v.x;
+            totalY += v.y;
+            count++;
+          });
+        });
+        clipboard.arrows.forEach(arrow => {
+          if (arrow.type === 'curved') {
+            totalX += arrow.x1;
+            totalY += arrow.y1;
+            count++;
+          } else {
+            totalX += arrow.x;
+            totalY += arrow.y;
+            count++;
+          }
+        });
+        
+        if (count > 0) {
+          const centerX = totalX / count;
+          const centerY = totalY / count;
+          
+          // Place at current mouse position
+          const offsetX = worldX - centerX;
+          const offsetY = worldY - centerY;
+          
+          saveToHistory(); // Save before pasting
+          
+          // Paste molecules
+          clipboard.molecules.forEach(mol => {
+            const newVertices = mol.vertices.map(v => ({
+              x: v.x + offsetX,
+              y: v.y + offsetY,
+              isOffGrid: v.isOffGrid
+            }));
+            
+            const newBonds = mol.bonds.map(b => ({
+              ...b,
+              x1: b.x1 + offsetX,
+              y1: b.y1 + offsetY,
+              x2: b.x2 + offsetX,
+              y2: b.y2 + offsetY
+            }));
+            
+            setVertices(prev => [...prev, ...newVertices]);
+            setSegments(prev => [...prev, ...newBonds]);
+            
+            // Paste atoms
+            Object.keys(mol.atoms).forEach(oldKey => {
+              const [xStr, yStr] = oldKey.split(',');
+              const newKey = `${(parseFloat(xStr) + offsetX).toFixed(2)},${(parseFloat(yStr) + offsetY).toFixed(2)}`;
+              setVertexAtoms(prev => ({
+                ...prev,
+                [newKey]: mol.atoms[oldKey]
+              }));
+            });
+            
+            // Paste bond states
+            Object.keys(mol.bondStates || {}).forEach(oldKey => {
+              const [xStr, yStr] = oldKey.split(',');
+              const newKey = `${(parseFloat(xStr) + offsetX).toFixed(2)},${(parseFloat(yStr) + offsetY).toFixed(2)}`;
+              setVertexBondStates(prev => ({
+                ...prev,
+                [newKey]: mol.bondStates[oldKey]
+              }));
+            });
+          });
+          
+          // Paste arrows
+          clipboard.arrows.forEach(arrow => {
+            const newArrow = {
+              ...arrow,
+              x: arrow.x !== undefined ? arrow.x + offsetX : arrow.x,
+              y: arrow.y !== undefined ? arrow.y + offsetY : arrow.y,
+              x1: arrow.x1 !== undefined ? arrow.x1 + offsetX : arrow.x1,
+              y1: arrow.y1 !== undefined ? arrow.y1 + offsetY : arrow.y1,
+              x2: arrow.x2 !== undefined ? arrow.x2 + offsetX : arrow.x2,
+              y2: arrow.y2 !== undefined ? arrow.y2 + offsetY : arrow.y2
+            };
+            setArrows(prev => [...prev, newArrow]);
+          });
+          
+          setTimeout(() => updateRingDetection(), 10);
+        }
+        
+        // Exit paste preview mode
+        setIsPastePreviewMode(false);
+        return;
+      }
+      
+      // Check if clicking on an arrow first
+      const clickedArrowIndex = findHoveredArrow(x, y);
+      if (clickedArrowIndex !== null) {
+        // Select this arrow
+        setSelectedArrows(new Set([clickedArrowIndex]));
+        setSelectedMolecules([]);
+        setSelectedVertices(new Set());
+        setSelectedSegments(new Set());
+        return;
+      }
+      
+      // Check if clicking on a vertex/molecule
+      const clickedVertex = findNearestVertex(x, y);
+      if (clickedVertex) {
+        // Find the entire molecule this vertex belongs to
+        const molecule = findMolecule(clickedVertex);
+        setSelectedMolecules([molecule]);
+        
+        // Convert to sets for compatibility
+        const vertexSet = new Set();
+        molecule.vertices.forEach(v => {
+          vertexSet.add(`${v.x.toFixed(2)},${v.y.toFixed(2)}`);
+        });
+        setSelectedVertices(vertexSet);
+        
+        const bondSet = new Set();
+        molecule.bonds.forEach((bond, idx) => {
+          const bondIdx = segments.indexOf(bond);
+          if (bondIdx !== -1) bondSet.add(bondIdx);
+        });
+        setSelectedSegments(bondSet);
+        setSelectedArrows(new Set());
+        return;
+      }
+      
+      // If clicking on empty space, clear selections
+      setSelectedMolecules([]);
+      setSelectedVertices(new Set());
+      setSelectedSegments(new Set());
+      setSelectedArrows(new Set());
+      return;
+    }
+
     // Handle charge and lone pair mode clicks
     if (mode === 'plus' || mode === 'minus' || mode === 'lone') {
       const canvas = canvasRef.current;
@@ -1164,6 +1677,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       if (clickedVertex) {
         const vertexKey = `${clickedVertex.x.toFixed(2)},${clickedVertex.y.toFixed(2)}`;
         
+        saveToHistory(); // Save before modifying charges/lone pairs
         setVertexAtoms(prev => {
           const prevVal = prev[vertexKey] || { 
             symbol: 'C', 
@@ -1195,6 +1709,81 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       return;
     }
 
+    // Handle erase mode clicks
+    if (mode === 'erase') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      
+      // Convert to world coordinates
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      // Priority 1: Check if clicking on a vertex
+      const clickedVertex = findNearestVertex(x, y);
+      if (clickedVertex) {
+        const vertexKey = `${clickedVertex.x.toFixed(2)},${clickedVertex.y.toFixed(2)}`;
+        
+        saveToHistory(); // Save before erasing
+        // Remove the vertex
+        setVertices(prev => prev.filter(v => 
+          !(Math.abs(v.x - clickedVertex.x) < 0.01 && Math.abs(v.y - clickedVertex.y) < 0.01)
+        ));
+        
+        // Remove any bonds connected to this vertex
+        setSegments(prev => prev.filter(seg => {
+          const isConnected = (
+            (Math.abs(seg.x1 - clickedVertex.x) < 0.01 && Math.abs(seg.y1 - clickedVertex.y) < 0.01) ||
+            (Math.abs(seg.x2 - clickedVertex.x) < 0.01 && Math.abs(seg.y2 - clickedVertex.y) < 0.01)
+          );
+          return !isConnected;
+        }));
+        
+        // Remove vertex atom data
+        setVertexAtoms(prev => {
+          const newAtoms = { ...prev };
+          delete newAtoms[vertexKey];
+          return newAtoms;
+        });
+        
+        // Clear bond suggestions
+        setBondSuggestions([]);
+        
+        // Update ring detection
+        setTimeout(() => updateRingDetection(), 10);
+        
+        return;
+      }
+      
+      // Priority 2: Check if clicking on a bond
+      const clickedBondIndex = findHoveredBond(x, y);
+      if (clickedBondIndex !== null) {
+        // Remove the bond
+        setSegments(prev => prev.filter((_, index) => index !== clickedBondIndex));
+        
+        // Clear bond suggestions
+        setBondSuggestions([]);
+        
+        // Update ring detection
+        setTimeout(() => updateRingDetection(), 10);
+        
+        return;
+      }
+      
+      // Priority 3: Check if clicking on an arrow
+      const clickedArrowIndex = findHoveredArrow(x, y);
+      if (clickedArrowIndex !== null) {
+        // Remove the arrow
+        setArrows(prev => prev.filter((_, index) => index !== clickedArrowIndex));
+        return;
+      }
+      
+      return;
+    }
+
     // Handle arrow mode clicks
     if (mode === 'arrow') {
       const canvas = canvasRef.current;
@@ -1218,6 +1807,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         angle: 0 // Points to the right (0 degrees)
       };
       
+      saveToHistory(); // Save before placing arrow
       setArrows(prev => [...prev, newArrow]);
       
       // Clear bond suggestions when placing arrow
@@ -1248,6 +1838,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         angle: 0 // Points to the right (0 degrees)
       };
       
+      saveToHistory(); // Save before placing equilibrium arrow
       setArrows(prev => [...prev, newArrow]);
       
       // Clear bond suggestions when placing arrow
@@ -1274,6 +1865,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         setCurvedArrowStartPoint({ x: worldX, y: worldY });
       } else {
         // Second click: create curved arrow
+        saveToHistory(); // Save before creating curved arrow
         const newArrow = {
           x1: curvedArrowStartPoint.x,
           y1: curvedArrowStartPoint.y,
@@ -1348,6 +1940,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       }
       
       // Add all vertices and bonds to state
+      saveToHistory(); // Save before placing benzene ring
       setVertices(prev => [...prev, ...benzeneVertices]);
       setSegments(prev => [...prev, ...benzeneBonds]);
       
@@ -1401,6 +1994,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         });
       }
       
+      saveToHistory(); // Save before placing cyclohexane ring
       setVertices(prev => [...prev, ...ringVertices]);
       setSegments(prev => [...prev, ...ringBonds]);
       setTimeout(() => updateRingDetection(), 0);
@@ -1448,6 +2042,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         });
       }
       
+      saveToHistory(); // Save before placing cyclopentane ring
       setVertices(prev => [...prev, ...ringVertices]);
       setSegments(prev => [...prev, ...ringBonds]);
       setTimeout(() => updateRingDetection(), 0);
@@ -1495,6 +2090,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         });
       }
       
+      saveToHistory(); // Save before placing cyclobutane ring
       setVertices(prev => [...prev, ...ringVertices]);
       setSegments(prev => [...prev, ...ringBonds]);
       setTimeout(() => updateRingDetection(), 0);
@@ -1542,6 +2138,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         });
       }
       
+      saveToHistory(); // Save before placing cyclopropane ring
       setVertices(prev => [...prev, ...ringVertices]);
       setSegments(prev => [...prev, ...ringBonds]);
       setTimeout(() => updateRingDetection(), 0);
@@ -1587,6 +2184,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       else if (mode === 'ambiguous') bondType = 'ambiguous';
       
       // Create the suggested bond
+      saveToHistory(); // Save before creating bond from suggestion
       const newVertex = { x: suggestion.x2, y: suggestion.y2, isOffGrid: false };
       setVertices(prev => [...prev, newVertex]);
       
@@ -1640,6 +2238,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       // Handle draw mode: convert to double bond
       if (mode === 'draw' && clickedBond.bondOrder === 1 && !clickedBond.bondType) {
         // Convert to double bond
+        saveToHistory(); // Save before converting to double bond
         setSegments(prev => {
           const newSegments = [...prev];
           const doubleBond = {
@@ -1663,6 +2262,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       // Handle triple bond mode: convert bond to triple bond
       if (mode === 'triple' && (clickedBond.bondOrder === 1 || clickedBond.bondOrder === 2) && !clickedBond.bondType) {
         // Convert to triple bond
+        saveToHistory(); // Save before converting to triple bond
         setSegments(prev => {
           const newSegments = [...prev];
           const tripleBond = {
@@ -1679,6 +2279,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       
       // Handle stereochemistry modes: convert bond or flip if same type
       if (mode === 'wedge' || mode === 'dash' || mode === 'ambiguous') {
+        saveToHistory(); // Save before modifying stereochemistry
         setSegments(prev => {
           const newSegments = [...prev];
           
@@ -1792,6 +2393,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       
       if (overlappingBond && overlappingBond.bondOrder === 1) {
         // Convert the existing bond to a double bond instead of creating a new one
+        saveToHistory(); // Save before converting overlapping bond to double bond
         setSegments(prev => {
           return prev.map(seg => {
             if (seg === overlappingBond) {
@@ -1824,6 +2426,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       else if (mode === 'triple') bondOrder = 3;
       
       // Create the bond
+      saveToHistory(); // Save before creating new bond
       const newBond = {
         x1: bondStartPoint.x,
         y1: bondStartPoint.y,
@@ -1862,7 +2465,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       setBondStartPoint(null);
       setBondPreviewEnd(null);
     }
-  }, [mode, isCreatingBond, bondStartPoint, vertices, segments, offset, hexRadius, bondSuggestions, findHoveredSuggestion, generateBondSuggestions, checkAndPerformVertexMerging, shouldDisableAngleSnapping, findClosestSnapAngle, updateVertexBondState, calculateBondDirection, molecularBoundaryRadius]);
+  }, [mode, isCreatingBond, bondStartPoint, vertices, segments, offset, hexRadius, bondSuggestions, findHoveredSuggestion, generateBondSuggestions, checkAndPerformVertexMerging, shouldDisableAngleSnapping, findClosestSnapAngle, updateVertexBondState, calculateBondDirection, molecularBoundaryRadius, justCompletedSelection, clipboard, isPastePreviewMode, updateRingDetection, saveToHistory, vertexAtoms, arrows, findMolecule, findHoveredArrow]);
 
   const handleCanvasMouseMove = useCallback((event) => {
     const canvas = canvasRef.current;
@@ -1874,6 +2477,220 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
     
     // Update current mouse position for text input positioning
     setCurrentMousePosition({ x, y });
+    
+    // Handle paste preview mode - update preview position (center on cursor)
+    if (isPastePreviewMode && clipboard) {
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      setPastePreviewPosition({ x: worldX, y: worldY });
+      return;
+    }
+    
+    // Handle arrow dragging/editing in mouse mode
+    if (mode === 'mouse' && draggingArrow !== null && draggingArrowEnd !== null) {
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      // Use functional setState to avoid stale state issues during rapid updates
+      setArrows(prevArrows => {
+        return prevArrows.map((arrow, idx) => {
+          if (idx !== draggingArrow) return arrow;
+          
+          if (arrow.type === 'curved') {
+            // Curved arrow editing
+            if (draggingArrowEnd === 'start') {
+              console.log('START DRAG - Moving start point');
+              return { ...arrow, x1: worldX, y1: worldY };
+            } else if (draggingArrowEnd === 'end') {
+              console.log('END DRAG - Moving end point');
+              return { ...arrow, x2: worldX, y2: worldY };
+            } else if (draggingArrowEnd === 'control') {
+              // Adjust curve height by changing control offset
+              const midX = (arrow.x1 + arrow.x2) / 2;
+              const midY = (arrow.y1 + arrow.y2) / 2;
+              
+              // Calculate perpendicular direction
+              const dx = arrow.x2 - arrow.x1;
+              const dy = arrow.y2 - arrow.y1;
+              const distance = Math.sqrt(dx * dx + dy * dy);
+              
+              if (distance === 0) return arrow;
+              
+              // Perpendicular unit vector
+              const perpX = -dy / distance;
+              const perpY = dx / distance;
+              
+              // Project mouse position onto perpendicular axis from midpoint
+              const toMouseX = worldX - midX;
+              const toMouseY = worldY - midY;
+              
+              // Dot product to get offset along perpendicular
+              const controlOffset = toMouseX * perpX + toMouseY * perpY;
+              
+              console.log('CONTROL DRAG - New offset:', controlOffset, 'Endpoints FIXED at x1:', arrow.x1, 'y1:', arrow.y1, 'x2:', arrow.x2, 'y2:', arrow.y2);
+              
+              // ONLY update controlOffset, keep endpoints fixed
+              return { 
+                ...arrow, 
+                controlOffset
+              };
+            } else if (draggingArrowEnd === 'body') {
+              // Move entire curved arrow
+              console.log('BODY DRAG - Moving entire arrow');
+              const deltaX = worldX - dragSelectionStart.x;
+              const deltaY = worldY - dragSelectionStart.y;
+              return {
+                ...arrow,
+                x1: arrow.x1 + deltaX,
+                y1: arrow.y1 + deltaY,
+                x2: arrow.x2 + deltaX,
+                y2: arrow.y2 + deltaY
+              };
+            }
+            console.log('WARNING: Unexpected draggingArrowEnd value:', draggingArrowEnd);
+            return arrow;
+          } else {
+            // Straight arrow editing (forward, equilibrium)
+            const currentEndX = arrow.x + arrow.length * Math.cos(arrow.angle);
+            const currentEndY = arrow.y + arrow.length * Math.sin(arrow.angle);
+            
+            if (draggingArrowEnd === 'start') {
+              // Move start point, recalculate angle and length
+              const newLength = Math.sqrt(Math.pow(currentEndX - worldX, 2) + Math.pow(currentEndY - worldY, 2));
+              const newAngle = Math.atan2(currentEndY - worldY, currentEndX - worldX);
+              return { ...arrow, x: worldX, y: worldY, length: newLength, angle: newAngle };
+            } else if (draggingArrowEnd === 'end') {
+              // Move end point, recalculate angle and length
+              const newLength = Math.sqrt(Math.pow(worldX - arrow.x, 2) + Math.pow(worldY - arrow.y, 2));
+              const newAngle = Math.atan2(worldY - arrow.y, worldX - arrow.x);
+              return { ...arrow, length: newLength, angle: newAngle };
+            } else if (draggingArrowEnd === 'middle') {
+              // Move entire arrow
+              const deltaX = worldX - dragSelectionStart.x;
+              const deltaY = worldY - dragSelectionStart.y;
+              return { ...arrow, x: arrow.x + deltaX, y: arrow.y + deltaY };
+            }
+          }
+          return arrow;
+        });
+      });
+      
+      // Update drag start for continuous dragging (whole arrow movement)
+      if (draggingArrowEnd === 'middle' || draggingArrowEnd === 'body') {
+        setDragSelectionStart({ x: worldX, y: worldY });
+      }
+      
+      return;
+    }
+    
+    // Handle selection box dragging in mouse mode
+    if (mode === 'mouse' && isSelecting) {
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      setSelectionEnd({ x: worldX, y: worldY });
+      return;
+    }
+    
+    // Handle dragging selected items in mouse mode  
+    if (mode === 'mouse' && isDraggingSelection) {
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      const deltaX = worldX - dragSelectionStart.x;
+      const deltaY = worldY - dragSelectionStart.y;
+      
+      // Move selected molecules
+      if (selectedMolecules.length > 0) {
+        const newVertices = vertices.map(v => {
+          const vertexKey = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+          if (selectedVertices.has(vertexKey)) {
+            return { ...v, x: v.x + deltaX, y: v.y + deltaY };
+          }
+          return v;
+        });
+        
+        const newSegments = segments.map(seg => {
+          const seg1Key = `${seg.x1.toFixed(2)},${seg.y1.toFixed(2)}`;
+          const seg2Key = `${seg.x2.toFixed(2)},${seg.y2.toFixed(2)}`;
+          
+          if (selectedVertices.has(seg1Key) || selectedVertices.has(seg2Key)) {
+            return {
+              ...seg,
+              x1: selectedVertices.has(seg1Key) ? seg.x1 + deltaX : seg.x1,
+              y1: selectedVertices.has(seg1Key) ? seg.y1 + deltaY : seg.y1,
+              x2: selectedVertices.has(seg2Key) ? seg.x2 + deltaX : seg.x2,
+              y2: selectedVertices.has(seg2Key) ? seg.y2 + deltaY : seg.y2
+            };
+          }
+          return seg;
+        });
+        
+        setVertices(newVertices);
+        setSegments(newSegments);
+        
+        // Update vertex atoms
+        const newVertexAtoms = {};
+        Object.keys(vertexAtoms).forEach(key => {
+          const [xStr, yStr] = key.split(',');
+          const vx = parseFloat(xStr);
+          const vy = parseFloat(yStr);
+          
+          if (selectedVertices.has(key)) {
+            const newKey = `${(vx + deltaX).toFixed(2)},${(vy + deltaY).toFixed(2)}`;
+            newVertexAtoms[newKey] = vertexAtoms[key];
+          } else {
+            newVertexAtoms[key] = vertexAtoms[key];
+          }
+        });
+        setVertexAtoms(newVertexAtoms);
+      }
+      
+      // Move selected arrows
+      if (selectedArrows.size > 0) {
+        const newArrows = arrows.map((arrow, idx) => {
+          if (selectedArrows.has(idx)) {
+            if (arrow.type === 'curved') {
+              return {
+                ...arrow,
+                x1: arrow.x1 + deltaX,
+                y1: arrow.y1 + deltaY,
+                x2: arrow.x2 + deltaX,
+                y2: arrow.y2 + deltaY
+              };
+            } else {
+              return {
+                ...arrow,
+                x: arrow.x + deltaX,
+                y: arrow.y + deltaY
+              };
+            }
+          }
+          return arrow;
+        });
+        setArrows(newArrows);
+      }
+      
+      setDragSelectionStart({ x: worldX, y: worldY });
+      return;
+    }
+    
+    // Handle hover detection for molecules in mouse mode
+    if (mode === 'mouse' && !isSelecting && !isDraggingSelection) {
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      const hoveredVertex = findNearestVertex(x, y);
+      
+      if (hoveredVertex) {
+        const molecule = findMolecule(hoveredVertex);
+        setHoveredMolecule(molecule);
+      } else {
+        setHoveredMolecule(null);
+      }
+      
+      // Check for arrow hover
+      const arrowIdx = findHoveredArrow(x, y);
+      setHoveredArrow(arrowIdx);
+      return;
+    }
     
     // Handle bond creation preview (for draw mode, stereochemistry modes, and triple bond mode)
     if ((mode === 'draw' || mode === 'wedge' || mode === 'dash' || mode === 'ambiguous' || mode === 'triple') && isCreatingBond) {
@@ -1938,10 +2755,121 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
     setHoveredVertex(hoveredVertex);
     setHoveredBondIndex(hoveredBond);
     setHoveredSuggestionIndex(hoveredSuggestion);
-  }, [mode, isCreatingBond, offset, bondStartPoint, hexRadius, vertices, segments, vertexThreshold, lineThreshold, bondSuggestions, shouldDisableAngleSnapping, findClosestSnapAngle, getAvailableBondAngles]);
+  }, [mode, isCreatingBond, offset, bondStartPoint, hexRadius, vertices, segments, vertexThreshold, lineThreshold, bondSuggestions, shouldDisableAngleSnapping, findClosestSnapAngle, getAvailableBondAngles, isPastePreviewMode, clipboard, isSelecting, isDraggingSelection, selectedMolecules, selectedVertices, selectedArrows, dragSelectionStart, vertexAtoms, arrows, findMolecule, findNearestVertex, findHoveredArrow, vertexBondStates, draggingArrow, draggingArrowEnd]);
 
   // Enhanced keyboard handler for text and bond creation
   const handleKeyDown = useCallback((event) => {
+    // Handle Cmd/Ctrl+Z for undo
+    if ((event.metaKey || event.ctrlKey) && event.key === 'z' && !event.shiftKey) {
+      event.preventDefault();
+      handleUndo();
+      return;
+    }
+    
+    // Handle Cmd/Ctrl+C for copy
+    if ((event.metaKey || event.ctrlKey) && event.key === 'c' && (selectedMolecules.length > 0 || selectedArrows.size > 0)) {
+      event.preventDefault();
+      copySelectionToClipboard();
+      return;
+    }
+    
+    // Handle Cmd/Ctrl+V for paste (enter paste preview mode)
+    if ((event.metaKey || event.ctrlKey) && event.key === 'v' && clipboard && !isPastePreviewMode) {
+      event.preventDefault();
+      setIsPastePreviewMode(true);
+      return;
+    }
+    
+    // Legacy Cmd/Ctrl+V direct paste (keeping for backwards compatibility)
+    if (false && (event.metaKey || event.ctrlKey) && event.key === 'v' && clipboard) {
+      event.preventDefault();
+      
+      // Calculate center of clipboard items
+      let totalX = 0, totalY = 0, count = 0;
+      clipboard.molecules.forEach(mol => {
+        mol.vertices.forEach(v => {
+          totalX += v.x;
+          totalY += v.y;
+          count++;
+        });
+      });
+      clipboard.arrows.forEach(arrow => {
+        if (arrow.type === 'curved') {
+          totalX += arrow.x1;
+          totalY += arrow.y1;
+          count++;
+        } else {
+          totalX += arrow.x;
+          totalY += arrow.y;
+          count++;
+        }
+      });
+      
+      if (count > 0) {
+        const centerX = totalX / count;
+        const centerY = totalY / count;
+        
+        // Paste at mouse position
+        const offsetX = currentMousePosition.x - offset.x - centerX + 50;
+        const offsetY = currentMousePosition.y - offset.y - centerY + 50;
+        
+        saveToHistory(); // Save before pasting
+        
+        // Paste molecules
+        clipboard.molecules.forEach(mol => {
+          const newVertices = mol.vertices.map(v => ({
+            x: v.x + offsetX,
+            y: v.y + offsetY,
+            isOffGrid: v.isOffGrid
+          }));
+          
+          const newBonds = mol.bonds.map(b => ({
+            ...b,
+            x1: b.x1 + offsetX,
+            y1: b.y1 + offsetY,
+            x2: b.x2 + offsetX,
+            y2: b.y2 + offsetY
+          }));
+          
+          setVertices(prev => [...prev, ...newVertices]);
+          setSegments(prev => [...prev, ...newBonds]);
+          
+          // Paste atoms
+          Object.keys(mol.atoms).forEach(oldKey => {
+            const [xStr, yStr] = oldKey.split(',');
+            const newKey = `${(parseFloat(xStr) + offsetX).toFixed(2)},${(parseFloat(yStr) + offsetY).toFixed(2)}`;
+            setVertexAtoms(prev => ({
+              ...prev,
+              [newKey]: mol.atoms[oldKey]
+            }));
+          });
+        });
+        
+        // Paste arrows
+        clipboard.arrows.forEach(arrow => {
+          const newArrow = {
+            ...arrow,
+            x: arrow.x ? arrow.x + offsetX : arrow.x,
+            y: arrow.y ? arrow.y + offsetY : arrow.y,
+            x1: arrow.x1 ? arrow.x1 + offsetX : arrow.x1,
+            y1: arrow.y1 ? arrow.y1 + offsetY : arrow.y1,
+            x2: arrow.x2 ? arrow.x2 + offsetX : arrow.x2,
+            y2: arrow.y2 ? arrow.y2 + offsetY : arrow.y2
+          };
+          setArrows(prev => [...prev, newArrow]);
+        });
+        
+        setTimeout(() => updateRingDetection(), 10);
+      }
+      return;
+    }
+    
+    // Handle Escape key for paste preview mode
+    if (event.key === 'Escape' && isPastePreviewMode) {
+      setIsPastePreviewMode(false);
+      return;
+    }
+    
     // Handle Escape key for bond creation
     if (event.key === 'Escape' && isCreatingBond) {
       setIsCreatingBond(false);
@@ -1973,6 +2901,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
 
     // Handle single letter keys for quick element placement
     if (event.key.length === 1 && /[A-Za-z]/.test(event.key) && hoveredVertex && !showAtomInput) {
+      saveToHistory(); // Save before quick element placement
       const success = handleQuickElementKey(
         event.key,
         hoveredVertex,
@@ -1981,14 +2910,171 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       );
       if (success) return;
     }
-  }, [isCreatingBond, hoveredVertex, showAtomInput, currentMousePosition, vertexAtoms, segments, curvedArrowStartPoint]);
+  }, [isCreatingBond, hoveredVertex, showAtomInput, currentMousePosition, vertexAtoms, segments, curvedArrowStartPoint, handleUndo, saveToHistory, copySelectionToClipboard, updateRingDetection, isPastePreviewMode]);
 
   // Handle mouse leaving canvas - clear hover states
   const handleCanvasMouseLeave = useCallback(() => {
     setHoveredVertex(null);
     setHoveredBondIndex(null);
     setHoveredSuggestionIndex(null);
+    setHoveredMolecule(null);
+    setHoveredArrow(null);
   }, []);
+
+  // Handle mouse down for dragging
+  const handleCanvasMouseDown = useCallback((event) => {
+    if (mode !== 'mouse') return;
+    
+    // Don't start selection box in paste preview mode
+    if (isPastePreviewMode) return;
+    
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    const worldX = x - offset.x;
+    const worldY = y - offset.y;
+    
+    // Check if clicking on any arrow to edit it (in mouse mode, arrows are always editable)
+    const arrowIdx = findHoveredArrow(x, y);
+    if (arrowIdx !== null) {
+      const arrowPart = detectArrowPart(x, y, arrowIdx);
+      console.log('ARROW EDIT START - Arrow:', arrowIdx, 'Part:', arrowPart);
+      saveToHistory(); // Save before editing arrow
+      setDraggingArrow(arrowIdx);
+      setDraggingArrowEnd(arrowPart);
+      setDragSelectionStart({ x: worldX, y: worldY });
+      return;
+    }
+    
+    // Check if clicking on selected items to start dragging
+    if (selectedMolecules.length > 0 || selectedArrows.size > 0) {
+      // Check if clicking within selected molecule
+      const clickedVertex = findNearestVertex(x, y);
+      if (clickedVertex) {
+        const vertexKey = `${clickedVertex.x.toFixed(2)},${clickedVertex.y.toFixed(2)}`;
+        if (selectedVertices.has(vertexKey)) {
+          setIsDraggingSelection(true);
+          setDragSelectionStart({ x: worldX, y: worldY });
+          saveToHistory(); // Save before dragging
+          return;
+        }
+      }
+    }
+    
+    // Check if clicking on any vertex or arrow (for new selection)
+    const clickedVertex = findNearestVertex(x, y);
+    if (clickedVertex) {
+      // Don't start selection box, click handler will handle selection
+      return;
+    }
+    
+    const arrowIdx2 = findHoveredArrow(x, y);
+    if (arrowIdx2 !== null) {
+      // Don't start selection box, click handler will handle selection
+      return;
+    }
+    
+    // Clicking on empty space - start selection box
+    setIsSelecting(true);
+    setSelectionStart({ x: worldX, y: worldY });
+    setSelectionEnd({ x: worldX, y: worldY });
+  }, [mode, offset, selectedMolecules, selectedVertices, selectedArrows, findNearestVertex, findHoveredArrow, saveToHistory, isPastePreviewMode, detectArrowPart]);
+
+  // Handle mouse up for completing drag or selection
+  const handleCanvasMouseUp = useCallback((event) => {
+    if (mode !== 'mouse') return;
+    
+    // Complete arrow dragging
+    if (draggingArrow !== null) {
+      setDraggingArrow(null);
+      setDraggingArrowEnd(null);
+      return;
+    }
+    
+    // Complete selection box
+    if (isSelecting) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      
+      // Calculate selection box bounds
+      const minX = Math.min(selectionStart.x, worldX);
+      const maxX = Math.max(selectionStart.x, worldX);
+      const minY = Math.min(selectionStart.y, worldY);
+      const maxY = Math.max(selectionStart.y, worldY);
+      
+      // Select all vertices within box
+      const selectedVertexSet = new Set();
+      const selectedMoleculesArray = [];
+      
+      vertices.forEach(v => {
+        if (v.x >= minX && v.x <= maxX && v.y >= minY && v.y <= maxY) {
+          const vertexKey = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
+          selectedVertexSet.add(vertexKey);
+          
+          // Find molecule for this vertex
+          const molecule = findMolecule(v);
+          if (!selectedMoleculesArray.some(m => m.vertices.some(mv => 
+            Math.abs(mv.x - molecule.vertices[0].x) < 0.01 && Math.abs(mv.y - molecule.vertices[0].y) < 0.01
+          ))) {
+            selectedMoleculesArray.push(molecule);
+            molecule.vertices.forEach(mv => {
+              const mvKey = `${mv.x.toFixed(2)},${mv.y.toFixed(2)}`;
+              selectedVertexSet.add(mvKey);
+            });
+          }
+        }
+      });
+      
+      // Select bonds
+      const selectedBondSet = new Set();
+      segments.forEach((seg, idx) => {
+        const seg1Key = `${seg.x1.toFixed(2)},${seg.y1.toFixed(2)}`;
+        const seg2Key = `${seg.x2.toFixed(2)},${seg.y2.toFixed(2)}`;
+        if (selectedVertexSet.has(seg1Key) && selectedVertexSet.has(seg2Key)) {
+          selectedBondSet.add(idx);
+        }
+      });
+      
+      // Select arrows within box
+      const selectedArrowSet = new Set();
+      arrows.forEach((arrow, idx) => {
+        if (arrow.type === 'curved') {
+          if (arrow.x1 >= minX && arrow.x1 <= maxX && arrow.y1 >= minY && arrow.y1 <= maxY) {
+            selectedArrowSet.add(idx);
+          }
+        } else {
+          if (arrow.x >= minX && arrow.x <= maxX && arrow.y >= minY && arrow.y <= maxY) {
+            selectedArrowSet.add(idx);
+          }
+        }
+      });
+      
+      setSelectedVertices(selectedVertexSet);
+      setSelectedSegments(selectedBondSet);
+      setSelectedArrows(selectedArrowSet);
+      setSelectedMolecules(selectedMoleculesArray);
+      setIsSelecting(false);
+      
+      // Prevent click handler from firing immediately after selection
+      setJustCompletedSelection(true);
+      setTimeout(() => setJustCompletedSelection(false), 100);
+    }
+    
+    // Complete dragging
+    if (isDraggingSelection) {
+      setIsDraggingSelection(false);
+      updateRingDetection(); // Update rings after moving
+    }
+  }, [mode, isSelecting, isDraggingSelection, selectionStart, offset, vertices, segments, arrows, findMolecule, updateRingDetection, draggingArrow]);
 
   // Add keyboard listener
   React.useEffect(() => {
@@ -2102,14 +3188,35 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
     // Draw bond suggestions
     if (bondSuggestions.length > 0 && !isCreatingBond) {
       bondSuggestions.forEach((suggestion, index) => {
-        // Use gray color for suggestions, blue if hovered
-        ctx.strokeStyle = hoveredSuggestionIndex === index ? '#007bff' : '#888888';
-        ctx.lineWidth = 3; // Same thickness as regular bonds
+        // Use subtle gray for suggestions, blue if hovered
+        ctx.strokeStyle = hoveredSuggestionIndex === index ? 'rgba(0, 123, 255, 0.6)' : 'rgba(136, 136, 136, 0.5)';
+        ctx.lineWidth = 1.5; // Thinner, more subtle
         ctx.lineCap = 'round';
-        // Solid gray lines, same as bond preview
+        // Subtle gray lines
         ctx.beginPath();
         ctx.moveTo(suggestion.x1 + offset.x, suggestion.y1 + offset.y);
         ctx.lineTo(suggestion.x2 + offset.x, suggestion.y2 + offset.y);
+        ctx.stroke();
+      });
+    }
+
+    // Draw bond preview angle suggestions during creation
+    if (isCreatingBond && bondStartPoint && !shouldDisableAngleSnapping(bondStartPoint)) {
+      // Get available angles for this vertex
+      const availableAngles = getAvailableBondAngles(bondStartPoint);
+      
+      // Draw light gray suggestion lines at each available angle
+      ctx.strokeStyle = 'rgba(136, 136, 136, 0.5)';
+      ctx.lineWidth = 1.5;
+      ctx.lineCap = 'round';
+      
+      availableAngles.forEach(angle => {
+        const endX = bondStartPoint.x + Math.cos(angle) * hexRadius;
+        const endY = bondStartPoint.y + Math.sin(angle) * hexRadius;
+        
+        ctx.beginPath();
+        ctx.moveTo(bondStartPoint.x + offset.x, bondStartPoint.y + offset.y);
+        ctx.lineTo(endX + offset.x, endY + offset.y);
         ctx.stroke();
       });
     }
@@ -2127,12 +3234,12 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         bondDirection: 1
       };
       
-      // Create gray preview colors
-      const previewColors = { ...colors, bonds: '#888888' };
+      // Create darker gray preview colors
+      const previewColors = { ...colors, bonds: 'rgba(102, 102, 102, 0.75)' };
       
       // Render preview with appropriate style
       if (previewBond.bondType) {
-        // Render stereochemistry preview in gray
+        // Render stereochemistry preview in darker gray
         renderStereochemistryBond(ctx, previewBond, offset, previewColors);
       } else if (previewBond.bondOrder === 3) {
         // Triple bond preview - three gray lines
@@ -2140,8 +3247,8 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         const perpAngle = bondAngle + Math.PI / 2;
         const lineSpacing = 8.5; // Further spacing
         
-        ctx.strokeStyle = '#888888';
-        ctx.lineWidth = 3;
+        ctx.strokeStyle = 'rgba(102, 102, 102, 0.75)';
+        ctx.lineWidth = 2.5;
         ctx.lineCap = 'round';
         
         // Center line
@@ -2165,8 +3272,8 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         ctx.stroke();
       } else {
         // Regular bond preview
-      ctx.strokeStyle = '#888888'; // Gray preview color
-        ctx.lineWidth = 3;
+      ctx.strokeStyle = 'rgba(102, 102, 102, 0.75)'; // Darker gray preview
+        ctx.lineWidth = 2.5;
       ctx.lineCap = 'round';
       ctx.beginPath();
       ctx.moveTo(bondStartPoint.x + offset.x, bondStartPoint.y + offset.y);
@@ -2199,9 +3306,9 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       
       // Use green color if snapping, gray if not
       const isSnapping = snapInfo !== null;
-      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888'; // Green when snapping
-      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)'; // Green when snapping
+      ctx.fillStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)';
+      ctx.lineWidth = 1.5;
       ctx.lineCap = 'round';
       
       // Draw preview benzene hexagon
@@ -2230,14 +3337,14 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       if (isSnapping) {
         if (snapInfo.type === 'vertex') {
           // Highlight the snap target vertex
-          ctx.fillStyle = 'rgba(0, 204, 0, 0.3)';
+          ctx.fillStyle = 'rgba(0, 204, 0, 0.2)';
           ctx.beginPath();
           ctx.arc(snapInfo.target.x + offset.x, snapInfo.target.y + offset.y, 8, 0, 2 * Math.PI);
           ctx.fill();
         } else if (snapInfo.type === 'bond') {
           // Highlight the snap target bond
-          ctx.strokeStyle = '#00CC00';
-          ctx.lineWidth = 5;
+          ctx.strokeStyle = 'rgba(0, 204, 0, 0.5)';
+          ctx.lineWidth = 3;
           ctx.beginPath();
           ctx.moveTo(snapInfo.target.x1 + offset.x, snapInfo.target.y1 + offset.y);
           ctx.lineTo(snapInfo.target.x2 + offset.x, snapInfo.target.y2 + offset.y);
@@ -2257,9 +3364,9 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       const rotationOffset = snapInfo?.rotation || 0;
       const isSnapping = snapInfo !== null;
       
-      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888';
-      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)';
+      ctx.fillStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)';
+      ctx.lineWidth = 1.5;
       ctx.lineCap = 'round';
       
       for (let i = 0; i < 6; i++) {
@@ -2282,13 +3389,13 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       
       // Draw snap indicator
       if (isSnapping && snapInfo.type === 'vertex') {
-        ctx.fillStyle = 'rgba(0, 204, 0, 0.3)';
+        ctx.fillStyle = 'rgba(0, 204, 0, 0.2)';
         ctx.beginPath();
         ctx.arc(snapInfo.target.x + offset.x, snapInfo.target.y + offset.y, 8, 0, 2 * Math.PI);
         ctx.fill();
       } else if (isSnapping && snapInfo.type === 'bond') {
-        ctx.strokeStyle = '#00CC00';
-        ctx.lineWidth = 5;
+        ctx.strokeStyle = 'rgba(0, 204, 0, 0.5)';
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(snapInfo.target.x1 + offset.x, snapInfo.target.y1 + offset.y);
         ctx.lineTo(snapInfo.target.x2 + offset.x, snapInfo.target.y2 + offset.y);
@@ -2308,9 +3415,9 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       const rotationOffset = snapInfo?.rotation || 0;
       const isSnapping = snapInfo !== null;
       
-      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888';
-      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)';
+      ctx.fillStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)';
+      ctx.lineWidth = 1.5;
       ctx.lineCap = 'round';
       
       for (let i = 0; i < 5; i++) {
@@ -2358,9 +3465,9 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       const rotationOffset = snapInfo?.rotation || 0;
       const isSnapping = snapInfo !== null;
       
-      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888';
-      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)';
+      ctx.fillStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)';
+      ctx.lineWidth = 1.5;
       ctx.lineCap = 'round';
       
       for (let i = 0; i < 4; i++) {
@@ -2408,9 +3515,9 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       const rotationOffset = snapInfo?.rotation || 0;
       const isSnapping = snapInfo !== null;
       
-      ctx.strokeStyle = isSnapping ? '#00CC00' : '#888888';
-      ctx.fillStyle = isSnapping ? '#00CC00' : '#888888';
-      ctx.lineWidth = 2.5;
+      ctx.strokeStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)';
+      ctx.fillStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.5)';
+      ctx.lineWidth = 1.5;
       ctx.lineCap = 'round';
       
       for (let i = 0; i < 3; i++) {
@@ -2483,15 +3590,782 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       }
     }
 
+    // Draw paste preview
+    if (isPastePreviewMode && clipboard) {
+      // Calculate center of clipboard items
+      let totalX = 0, totalY = 0, count = 0;
+      clipboard.molecules.forEach(mol => {
+        mol.vertices.forEach(v => {
+          totalX += v.x;
+          totalY += v.y;
+          count++;
+        });
+      });
+      clipboard.arrows.forEach(arrow => {
+        if (arrow.type === 'curved') {
+          totalX += arrow.x1;
+          totalY += arrow.y1;
+          count++;
+        } else {
+          totalX += arrow.x;
+          totalY += arrow.y;
+          count++;
+        }
+      });
+      
+      if (count > 0) {
+        const centerX = totalX / count;
+        const centerY = totalY / count;
+        const offsetX = pastePreviewPosition.x - centerX;
+        const offsetY = pastePreviewPosition.y - centerY;
+        
+        // Draw molecules with blue semi-transparent overlay
+        clipboard.molecules.forEach(mol => {
+          // Draw bonds with proper bond orders and types
+          mol.bonds.forEach(bond => {
+            const x1 = bond.x1 + offsetX + offset.x;
+            const y1 = bond.y1 + offsetY + offset.y;
+            const x2 = bond.x2 + offsetX + offset.x;
+            const y2 = bond.y2 + offsetY + offset.y;
+            
+            ctx.strokeStyle = 'rgba(0, 123, 255, 0.6)';
+            ctx.lineWidth = 3;
+            ctx.lineCap = 'round';
+            
+            // Handle different bond types
+            if (bond.bondOrder === 2) {
+              // Double bond
+              const bondAngle = Math.atan2(y2 - y1, x2 - x1);
+              const perpAngle = bondAngle + Math.PI / 2;
+              const spacing = 4;
+              
+              const offset1X = Math.cos(perpAngle) * spacing;
+              const offset1Y = Math.sin(perpAngle) * spacing;
+              
+              // First line
+              ctx.beginPath();
+              ctx.moveTo(x1 + offset1X, y1 + offset1Y);
+              ctx.lineTo(x2 + offset1X, y2 + offset1Y);
+              ctx.stroke();
+              
+              // Second line
+              ctx.beginPath();
+              ctx.moveTo(x1 - offset1X, y1 - offset1Y);
+              ctx.lineTo(x2 - offset1X, y2 - offset1Y);
+              ctx.stroke();
+            } else if (bond.bondOrder === 3) {
+              // Triple bond
+              const bondAngle = Math.atan2(y2 - y1, x2 - x1);
+              const perpAngle = bondAngle + Math.PI / 2;
+              const spacing = 5;
+              
+              const offsetX = Math.cos(perpAngle) * spacing;
+              const offsetY = Math.sin(perpAngle) * spacing;
+              
+              // Center line
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+              
+              // Top line
+              ctx.beginPath();
+              ctx.moveTo(x1 + offsetX, y1 + offsetY);
+              ctx.lineTo(x2 + offsetX, y2 + offsetY);
+              ctx.stroke();
+              
+              // Bottom line
+              ctx.beginPath();
+              ctx.moveTo(x1 - offsetX, y1 - offsetY);
+              ctx.lineTo(x2 - offsetX, y2 - offsetY);
+              ctx.stroke();
+            } else if (bond.bondType === 'wedge' || bond.bondType === 'dash' || bond.bondType === 'ambiguous') {
+              // Stereochemistry bonds - simplified preview
+              ctx.lineWidth = bond.bondType === 'wedge' ? 6 : 3;
+              if (bond.bondType === 'dash') {
+                ctx.setLineDash([5, 3]);
+              }
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+              ctx.setLineDash([]);
+              ctx.lineWidth = 3;
+            } else {
+              // Single bond
+              ctx.beginPath();
+              ctx.moveTo(x1, y1);
+              ctx.lineTo(x2, y2);
+              ctx.stroke();
+            }
+          });
+          
+          // Draw vertices
+          ctx.fillStyle = 'rgba(0, 123, 255, 0.4)';
+          mol.vertices.forEach(v => {
+            const vx = v.x + offsetX + offset.x;
+            const vy = v.y + offsetY + offset.y;
+            ctx.beginPath();
+            ctx.arc(vx, vy, 8, 0, 2 * Math.PI);
+            ctx.fill();
+          });
+          
+          // Draw atom labels, charges, and lone pairs
+          Object.keys(mol.atoms).forEach(oldKey => {
+            const [xStr, yStr] = oldKey.split(',');
+            const atomX = parseFloat(xStr) + offsetX;
+            const atomY = parseFloat(yStr) + offsetY;
+            const atomData = mol.atoms[oldKey];
+            
+            if (atomData.symbol && atomData.symbol !== 'C') {
+              ctx.fillStyle = 'rgba(0, 123, 255, 0.7)';
+              ctx.font = '16px Arial';
+              ctx.textAlign = 'center';
+              ctx.textBaseline = 'middle';
+              ctx.fillText(atomData.symbol, atomX + offset.x, atomY + offset.y);
+            }
+            
+            // Draw charges
+            if (atomData.charge) {
+              ctx.fillStyle = 'rgba(0, 123, 255, 0.7)';
+              ctx.font = '12px Arial';
+              const chargeText = atomData.charge > 0 ? `+${atomData.charge}` : `${atomData.charge}`;
+              ctx.fillText(chargeText, atomX + offset.x + 12, atomY + offset.y - 8);
+            }
+            
+            // Draw lone pairs
+            if (atomData.lonePairs > 0) {
+              ctx.fillStyle = 'rgba(0, 123, 255, 0.6)';
+              for (let i = 0; i < atomData.lonePairs; i++) {
+                const angle = (i * 2 * Math.PI) / 8;
+                const lpX = atomX + offset.x + Math.cos(angle) * 15;
+                const lpY = atomY + offset.y + Math.sin(angle) * 15;
+                ctx.beginPath();
+                ctx.arc(lpX, lpY, 2, 0, 2 * Math.PI);
+                ctx.fill();
+              }
+            }
+          });
+        });
+        
+        // Draw arrows
+        ctx.strokeStyle = 'rgba(0, 123, 255, 0.5)';
+        ctx.lineWidth = 3;
+        ctx.lineCap = 'round';
+        
+        clipboard.arrows.forEach(arrow => {
+          if (arrow.type === 'curved') {
+            const x1 = arrow.x1 + offsetX + offset.x;
+            const y1 = arrow.y1 + offsetY + offset.y;
+            const x2 = arrow.x2 + offsetX + offset.x;
+            const y2 = arrow.y2 + offsetY + offset.y;
+            
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+          } else {
+            const arrowX = arrow.x + offsetX + offset.x;
+            const arrowY = arrow.y + offsetY + offset.y;
+            const endX = arrowX + arrow.length * Math.cos(arrow.angle);
+            const endY = arrowY + arrow.length * Math.sin(arrow.angle);
+            
+            ctx.beginPath();
+            ctx.moveTo(arrowX, arrowY);
+            ctx.lineTo(endX, endY);
+            ctx.stroke();
+          }
+        });
+      }
+    }
+
+    // Draw selection indicators in mouse mode
+    if (mode === 'mouse') {
+      // Draw control points on all arrows to show they're editable
+      arrows.forEach((arrow, idx) => {
+        // Different styling based on state
+        const isSelected = selectedArrows.has(idx);
+        const isHovered = hoveredArrow === idx;
+        const isDragging = draggingArrow === idx;
+        
+        // Skip if dragging (will be drawn separately)
+        if (isDragging) return;
+        
+        // Determine circle size and color - BIGGER and MORE VISIBLE
+        let circleSize = 10; // Base size increased from 5 to 10
+        let fillColor = 'rgba(70, 130, 180, 0.7)'; // Steel blue, more visible
+        let strokeColor = 'rgba(255, 255, 255, 0.95)';
+        let strokeWidth = 2.5;
+        
+        if (isSelected) {
+          circleSize = 13;
+          fillColor = 'rgba(0, 123, 255, 0.95)';
+          strokeColor = '#ffffff';
+          strokeWidth = 3;
+        } else if (isHovered) {
+          circleSize = 12;
+          fillColor = 'rgba(0, 123, 255, 0.85)';
+          strokeColor = '#ffffff';
+          strokeWidth = 3;
+        }
+        
+        if (arrow.type === 'curved') {
+          // Draw start point with shadow for depth
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+          ctx.shadowBlur = 4;
+          ctx.shadowOffsetX = 1;
+          ctx.shadowOffsetY = 1;
+          
+          ctx.fillStyle = fillColor;
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = strokeWidth;
+          ctx.beginPath();
+          ctx.arc(arrow.x1 + offset.x, arrow.y1 + offset.y, circleSize, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Add inner highlight
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.beginPath();
+          ctx.arc(arrow.x1 + offset.x - 2, arrow.y1 + offset.y - 2, circleSize / 3, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Add small drag indicator on start point (when selected/hovered)
+          if (isSelected || isHovered) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 1.5;
+            const indicatorSize = 3;
+            ctx.beginPath();
+            ctx.moveTo(arrow.x1 + offset.x - indicatorSize, arrow.y1 + offset.y);
+            ctx.lineTo(arrow.x1 + offset.x + indicatorSize, arrow.y1 + offset.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(arrow.x1 + offset.x, arrow.y1 + offset.y - indicatorSize);
+            ctx.lineTo(arrow.x1 + offset.x, arrow.y1 + offset.y + indicatorSize);
+            ctx.stroke();
+          }
+          
+          // Draw end point with shadow
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+          ctx.shadowBlur = 4;
+          ctx.shadowOffsetX = 1;
+          ctx.shadowOffsetY = 1;
+          
+          ctx.fillStyle = fillColor;
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = strokeWidth;
+          ctx.beginPath();
+          ctx.arc(arrow.x2 + offset.x, arrow.y2 + offset.y, circleSize, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Add inner highlight
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.beginPath();
+          ctx.arc(arrow.x2 + offset.x - 2, arrow.y2 + offset.y - 2, circleSize / 3, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Add small drag indicator on end point (when selected/hovered)
+          if (isSelected || isHovered) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 1.5;
+            const indicatorSize = 3;
+            ctx.beginPath();
+            ctx.moveTo(arrow.x2 + offset.x - indicatorSize, arrow.y2 + offset.y);
+            ctx.lineTo(arrow.x2 + offset.x + indicatorSize, arrow.y2 + offset.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(arrow.x2 + offset.x, arrow.y2 + offset.y - indicatorSize);
+            ctx.lineTo(arrow.x2 + offset.x, arrow.y2 + offset.y + indicatorSize);
+            ctx.stroke();
+          }
+          
+          // Draw middle control point (for curve adjustment) - ALWAYS VISIBLE AND LARGER
+          const midX = (arrow.x1 + arrow.x2) / 2;
+          const midY = (arrow.y1 + arrow.y2) / 2;
+          const dx = arrow.x2 - arrow.x1;
+          const dy = arrow.y2 - arrow.y1;
+          const distance = Math.sqrt(dx * dx + dy * dy);
+          
+          // Perpendicular direction
+          const perpX = -dy / distance;
+          const perpY = dx / distance;
+          
+          // Use stored controlOffset or calculate default
+          let controlOffset;
+          if (arrow.controlOffset !== undefined) {
+            controlOffset = arrow.controlOffset;
+          } else {
+            // Calculate default based on curve type
+            let curveFactor = 0.5;
+            if (arrow.curveType === 'curve0') curveFactor = 0.25;
+            else if (arrow.curveType === 'curve1') curveFactor = 0.5;
+            else if (arrow.curveType === 'curve2') curveFactor = 0.95;
+            
+            const curveSign = arrow.direction === 'cw' ? 1 : -1;
+            controlOffset = distance * curveFactor * curveSign;
+          }
+          
+          const controlX = midX + perpX * controlOffset;
+          const controlY = midY + perpY * controlOffset;
+          
+          // Draw control point with orange/yellow color - LARGER with shadow
+          const controlSize = (isSelected || isHovered) ? circleSize + 2 : circleSize;
+          
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+          ctx.shadowBlur = 5;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+          
+          ctx.fillStyle = (isSelected || isHovered) ? 'rgba(255, 165, 0, 0.95)' : 'rgba(255, 193, 7, 0.9)';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = strokeWidth;
+          ctx.beginPath();
+          ctx.arc(controlX + offset.x, controlY + offset.y, controlSize, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Reset shadow
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          
+          // Add inner circle for depth effect
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.beginPath();
+          ctx.arc(controlX + offset.x - 2, controlY + offset.y - 2, controlSize / 2.5, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Draw dashed guide lines - ALWAYS visible for curved arrows
+          ctx.strokeStyle = (isSelected || isHovered) ? 'rgba(150, 150, 150, 0.6)' : 'rgba(150, 150, 150, 0.35)';
+          ctx.lineWidth = (isSelected || isHovered) ? 2 : 1.5;
+          ctx.setLineDash([6, 4]);
+          
+          ctx.beginPath();
+          ctx.moveTo(arrow.x1 + offset.x, arrow.y1 + offset.y);
+          ctx.lineTo(controlX + offset.x, controlY + offset.y);
+          ctx.lineTo(arrow.x2 + offset.x, arrow.y2 + offset.y);
+          ctx.stroke();
+          
+          ctx.setLineDash([]);
+          
+          // Add small directional indicators on control points
+          if (isSelected || isHovered) {
+            // Small crosshair on middle control to show it's moveable
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+            ctx.lineWidth = 2;
+            
+            ctx.beginPath();
+            ctx.moveTo(controlX + offset.x - 4, controlY + offset.y);
+            ctx.lineTo(controlX + offset.x + 4, controlY + offset.y);
+            ctx.stroke();
+            
+            ctx.beginPath();
+            ctx.moveTo(controlX + offset.x, controlY + offset.y - 4);
+            ctx.lineTo(controlX + offset.x, controlY + offset.y + 4);
+            ctx.stroke();
+          }
+        } else {
+          // Straight arrow control points with shadows
+          const endX = arrow.x + arrow.length * Math.cos(arrow.angle);
+          const endY = arrow.y + arrow.length * Math.sin(arrow.angle);
+          
+          // Start point with shadow
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+          ctx.shadowBlur = 4;
+          ctx.shadowOffsetX = 1;
+          ctx.shadowOffsetY = 1;
+          
+          ctx.fillStyle = fillColor;
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = strokeWidth;
+          
+          ctx.beginPath();
+          ctx.arc(arrow.x + offset.x, arrow.y + offset.y, circleSize, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Inner highlight
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.beginPath();
+          ctx.arc(arrow.x + offset.x - 2, arrow.y + offset.y - 2, circleSize / 3, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Add drag indicator (when selected/hovered)
+          if (isSelected || isHovered) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 1.5;
+            const indicatorSize = 3;
+            ctx.beginPath();
+            ctx.moveTo(arrow.x + offset.x - indicatorSize, arrow.y + offset.y);
+            ctx.lineTo(arrow.x + offset.x + indicatorSize, arrow.y + offset.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(arrow.x + offset.x, arrow.y + offset.y - indicatorSize);
+            ctx.lineTo(arrow.x + offset.x, arrow.y + offset.y + indicatorSize);
+            ctx.stroke();
+          }
+          
+          // End point with shadow
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+          ctx.shadowBlur = 4;
+          ctx.shadowOffsetX = 1;
+          ctx.shadowOffsetY = 1;
+          
+          ctx.fillStyle = fillColor;
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = strokeWidth;
+          
+          ctx.beginPath();
+          ctx.arc(endX + offset.x, endY + offset.y, circleSize, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Inner highlight
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+          ctx.beginPath();
+          ctx.arc(endX + offset.x - 2, endY + offset.y - 2, circleSize / 3, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Add drag indicator (when selected/hovered)
+          if (isSelected || isHovered) {
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+            ctx.lineWidth = 1.5;
+            const indicatorSize = 3;
+            ctx.beginPath();
+            ctx.moveTo(endX + offset.x - indicatorSize, endY + offset.y);
+            ctx.lineTo(endX + offset.x + indicatorSize, endY + offset.y);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(endX + offset.x, endY + offset.y - indicatorSize);
+            ctx.lineTo(endX + offset.x, endY + offset.y + indicatorSize);
+            ctx.stroke();
+          }
+        }
+      });
+      
+      // Reset shadow settings
+      ctx.shadowColor = 'transparent';
+      ctx.shadowBlur = 0;
+      
+      // Draw hovered molecule indicator
+      if (hoveredMolecule && !isDraggingSelection && !draggingArrow) {
+        ctx.strokeStyle = 'rgba(0, 123, 255, 0.3)';
+        ctx.lineWidth = 8;
+        ctx.lineCap = 'round';
+        
+        hoveredMolecule.bonds.forEach(bond => {
+          ctx.beginPath();
+          ctx.moveTo(bond.x1 + offset.x, bond.y1 + offset.y);
+          ctx.lineTo(bond.x2 + offset.x, bond.y2 + offset.y);
+          ctx.stroke();
+        });
+        
+        hoveredMolecule.vertices.forEach(v => {
+          ctx.fillStyle = 'rgba(0, 123, 255, 0.2)';
+          ctx.beginPath();
+          ctx.arc(v.x + offset.x, v.y + offset.y, 12, 0, 2 * Math.PI);
+          ctx.fill();
+        });
+      }
+      
+      // Draw selected molecules (blue highlight)
+      if (selectedMolecules.length > 0 && !draggingArrow) {
+        ctx.strokeStyle = 'rgba(0, 123, 255, 0.6)';
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        
+        selectedMolecules.forEach(molecule => {
+          molecule.bonds.forEach(bond => {
+            ctx.beginPath();
+            ctx.moveTo(bond.x1 + offset.x, bond.y1 + offset.y);
+            ctx.lineTo(bond.x2 + offset.x, bond.y2 + offset.y);
+            ctx.stroke();
+          });
+          
+          molecule.vertices.forEach(v => {
+            ctx.fillStyle = 'rgba(0, 123, 255, 0.4)';
+            ctx.beginPath();
+            ctx.arc(v.x + offset.x, v.y + offset.y, 10, 0, 2 * Math.PI);
+            ctx.fill();
+          });
+        });
+      }
+      
+      // Draw thick overlay on selected arrows (but control points are drawn above)
+      if (!draggingArrow) {
+        selectedArrows.forEach(arrowIdx => {
+          const arrow = arrows[arrowIdx];
+          if (arrow) {
+            ctx.strokeStyle = 'rgba(0, 123, 255, 0.5)';
+            ctx.lineWidth = 8;
+            ctx.lineCap = 'round';
+            
+            if (arrow.type === 'curved') {
+              // Draw thicker curve overlay
+              ctx.beginPath();
+              ctx.moveTo(arrow.x1 + offset.x, arrow.y1 + offset.y);
+              ctx.lineTo(arrow.x2 + offset.x, arrow.y2 + offset.y);
+              ctx.stroke();
+            } else {
+              const endX = arrow.x + arrow.length * Math.cos(arrow.angle);
+              const endY = arrow.y + arrow.length * Math.sin(arrow.angle);
+              ctx.beginPath();
+              ctx.moveTo(arrow.x + offset.x, arrow.y + offset.y);
+              ctx.lineTo(endX + offset.x, endY + offset.y);
+              ctx.stroke();
+            }
+          }
+        });
+      }
+      
+      // Draw control points for arrow being dragged (with emphasis on active point)
+      if (draggingArrow !== null && draggingArrow < arrows.length) {
+        const arrow = arrows[draggingArrow];
+        
+        if (arrow.type === 'curved') {
+          const x1 = arrow.x1 + offset.x;
+          const y1 = arrow.y1 + offset.y;
+          const x2 = arrow.x2 + offset.x;
+          const y2 = arrow.y2 + offset.y;
+          
+          // Calculate middle control point
+          const midX = (arrow.x1 + arrow.x2) / 2;
+          const midY = (arrow.y1 + arrow.y2) / 2;
+          const arrowAngle = Math.atan2(arrow.y2 - arrow.y1, arrow.x2 - arrow.x1);
+          const perpAngle = arrowAngle + Math.PI / 2;
+          const controlOffset = arrow.controlOffset || (arrow.direction === 'ccw' ? -40 : 40);
+          const controlX = midX + Math.cos(perpAngle) * controlOffset + offset.x;
+          const controlY = midY + Math.sin(perpAngle) * controlOffset + offset.y;
+          
+          // Draw all control points with shadows
+          // Start point
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+          ctx.shadowBlur = 6;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+          
+          ctx.fillStyle = draggingArrowEnd === 'start' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 123, 255, 0.9)';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(x1, y1, draggingArrowEnd === 'start' ? 14 : 11, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Inner highlight
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.beginPath();
+          ctx.arc(x1 - 2, y1 - 2, (draggingArrowEnd === 'start' ? 14 : 11) / 3, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // End point
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+          ctx.shadowBlur = 6;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+          
+          ctx.fillStyle = draggingArrowEnd === 'end' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 123, 255, 0.9)';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(x2, y2, draggingArrowEnd === 'end' ? 14 : 11, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Inner highlight
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.beginPath();
+          ctx.arc(x2 - 2, y2 - 2, (draggingArrowEnd === 'end' ? 14 : 11) / 3, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Middle control point (curve adjustment)
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+          ctx.shadowBlur = 6;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+          
+          ctx.fillStyle = draggingArrowEnd === 'control' ? 'rgba(255, 193, 7, 1)' : 'rgba(255, 165, 0, 0.9)';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(controlX, controlY, draggingArrowEnd === 'control' ? 14 : 11, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Inner highlight
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.beginPath();
+          ctx.arc(controlX - 2, controlY - 2, (draggingArrowEnd === 'control' ? 14 : 11) / 3, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Draw guide lines
+          ctx.strokeStyle = 'rgba(150, 150, 150, 0.6)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 4]);
+          ctx.beginPath();
+          ctx.moveTo(x1, y1);
+          ctx.lineTo(controlX, controlY);
+          ctx.lineTo(x2, y2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          
+          // Add crosshair indicators on all control points
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.lineWidth = 2;
+          const crossSize = 4;
+          
+          // Start point crosshair
+          ctx.beginPath();
+          ctx.moveTo(x1 - crossSize, y1);
+          ctx.lineTo(x1 + crossSize, y1);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x1, y1 - crossSize);
+          ctx.lineTo(x1, y1 + crossSize);
+          ctx.stroke();
+          
+          // End point crosshair
+          ctx.beginPath();
+          ctx.moveTo(x2 - crossSize, y2);
+          ctx.lineTo(x2 + crossSize, y2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x2, y2 - crossSize);
+          ctx.lineTo(x2, y2 + crossSize);
+          ctx.stroke();
+          
+          // Middle control crosshair
+          ctx.beginPath();
+          ctx.moveTo(controlX - crossSize, controlY);
+          ctx.lineTo(controlX + crossSize, controlY);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(controlX, controlY - crossSize);
+          ctx.lineTo(controlX, controlY + crossSize);
+          ctx.stroke();
+        } else {
+          const x = arrow.x + offset.x;
+          const y = arrow.y + offset.y;
+          const endX = x + arrow.length * Math.cos(arrow.angle);
+          const endY = y + arrow.length * Math.sin(arrow.angle);
+          
+          // Draw start point with shadow
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+          ctx.shadowBlur = 6;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+          
+          ctx.fillStyle = draggingArrowEnd === 'start' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 123, 255, 0.9)';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(x, y, draggingArrowEnd === 'start' ? 14 : 11, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Inner highlight
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.beginPath();
+          ctx.arc(x - 2, y - 2, (draggingArrowEnd === 'start' ? 14 : 11) / 3, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Draw end point with shadow
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+          ctx.shadowBlur = 6;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+          
+          ctx.fillStyle = draggingArrowEnd === 'end' ? 'rgba(255, 193, 7, 1)' : 'rgba(0, 123, 255, 0.9)';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(endX, endY, draggingArrowEnd === 'end' ? 14 : 11, 0, 2 * Math.PI);
+          ctx.fill();
+          ctx.stroke();
+          
+          // Inner highlight
+          ctx.shadowColor = 'transparent';
+          ctx.shadowBlur = 0;
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.beginPath();
+          ctx.arc(endX - 2, endY - 2, (draggingArrowEnd === 'end' ? 14 : 11) / 3, 0, 2 * Math.PI);
+          ctx.fill();
+          
+          // Add crosshairs to both points
+          ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+          ctx.lineWidth = 2;
+          const crossSize = 5;
+          
+          // Start crosshair
+          ctx.beginPath();
+          ctx.moveTo(x - crossSize, y);
+          ctx.lineTo(x + crossSize, y);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(x, y - crossSize);
+          ctx.lineTo(x, y + crossSize);
+          ctx.stroke();
+          
+          // End crosshair
+          ctx.beginPath();
+          ctx.moveTo(endX - crossSize, endY);
+          ctx.lineTo(endX + crossSize, endY);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(endX, endY - crossSize);
+          ctx.lineTo(endX, endY + crossSize);
+          ctx.stroke();
+        }
+        
+        // Reset shadow settings
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+      }
+      
+      // Draw selection box
+      if (isSelecting) {
+        const minX = Math.min(selectionStart.x, selectionEnd.x) + offset.x;
+        const maxX = Math.max(selectionStart.x, selectionEnd.x) + offset.x;
+        const minY = Math.min(selectionStart.y, selectionEnd.y) + offset.y;
+        const maxY = Math.max(selectionStart.y, selectionEnd.y) + offset.y;
+        
+        ctx.strokeStyle = 'rgba(0, 123, 255, 0.5)';
+        ctx.fillStyle = 'rgba(0, 123, 255, 0.1)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        
+        ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+        ctx.strokeRect(minX, minY, maxX - minX, maxY - minY);
+        
+        ctx.setLineDash([]);
+      }
+    }
+
     // Draw hovered vertex highlight (always visible, even during bond creation)
     // This is drawn last so it appears on top of everything else
-    if (hoveredVertex) {
+    if (hoveredVertex && mode !== 'mouse') {
       ctx.fillStyle = 'rgba(0, 123, 255, 0.3)'; // Blue highlight color with transparency
       ctx.beginPath();
       ctx.arc(hoveredVertex.x + offset.x, hoveredVertex.y + offset.y, 10, 0, 2 * Math.PI);
       ctx.fill();
     }
-  }, [colors, segments, vertices, vertexAtoms, offset, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint]);
+  }, [colors, segments, vertices, vertexAtoms, offset, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint, getAvailableBondAngles, shouldDisableAngleSnapping, hexRadius, vertexBondStates, selectedMolecules, selectedArrows, hoveredMolecule, hoveredArrow, isSelecting, selectionStart, selectionEnd, isDraggingSelection, selectedVertices, isPastePreviewMode, clipboard, pastePreviewPosition, draggingArrow, draggingArrowEnd]);
 
   // Redraw canvas when relevant data changes
   React.useEffect(() => {
@@ -3721,13 +5595,13 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
               padding: '4px',
             }}
             onMouseEnter={(e) => {
-              if (selectedPreset !== 'cyclohexane') {
+              if (mode !== 'cyclohexane') {
                 e.target.style.backgroundColor = colors.buttonHover;
                 e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
-              if (selectedPreset !== 'cyclohexane') {
+              if (mode !== 'cyclohexane') {
                 e.target.style.backgroundColor = colors.button;
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
@@ -3770,13 +5644,13 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
               padding: '4px',
             }}
             onMouseEnter={(e) => {
-              if (selectedPreset !== 'cyclopentane') {
+              if (mode !== 'cyclopentane') {
                 e.target.style.backgroundColor = colors.buttonHover;
                 e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
-              if (selectedPreset !== 'cyclopentane') {
+              if (mode !== 'cyclopentane') {
                 e.target.style.backgroundColor = colors.button;
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
@@ -3817,13 +5691,13 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
               padding: '4px',
             }}
             onMouseEnter={(e) => {
-              if (selectedPreset !== 'cyclobutane') {
+              if (mode !== 'cyclobutane') {
                 e.target.style.backgroundColor = colors.buttonHover;
                 e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
-              if (selectedPreset !== 'cyclobutane') {
+              if (mode !== 'cyclobutane') {
                 e.target.style.backgroundColor = colors.button;
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
@@ -3863,13 +5737,13 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
               padding: '4px',
             }}
             onMouseEnter={(e) => {
-              if (selectedPreset !== 'cyclopropane') {
+              if (mode !== 'cyclopropane') {
                 e.target.style.backgroundColor = colors.buttonHover;
                 e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
               }
             }}
             onMouseLeave={(e) => {
-              if (selectedPreset !== 'cyclopropane') {
+              if (mode !== 'cyclopropane') {
                 e.target.style.backgroundColor = colors.button;
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
@@ -3957,10 +5831,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 'max(6px, min(calc(min(280px, 25vw) * 0.025), 1.5vh))' }}>
           {/* Erase All Button (Left) */}
           <button
-            onClick={() => { 
-              // handleEraseAll(); // Removed functionality 
-              // clearSelection(); // Removed functionality 
-            }}
+            onClick={handleEraseAll}
             className="toolbar-button"
             style={{
               flex: 1,
@@ -4003,7 +5874,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
           
           {/* Undo Button (Right) */}
           <button
-            onClick={() => {}}
+            onClick={handleUndo}
             disabled={historyIndex <= 0}
             className="toolbar-button"
             style={{
@@ -4051,6 +5922,49 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
             Undo
           </button>
         </div>
+        
+        {/* Copy Button - only shows when something is selected */}
+        {(selectedMolecules.length > 0 || selectedArrows.size > 0) && !isPastePreviewMode && (
+          <button
+            onClick={copySelectionToClipboard}
+            className="toolbar-button"
+            style={{
+              width: '100%',
+              padding: 'calc(min(280px, 25vw) * 0.019) 0',
+              backgroundColor: '#28a745',
+              color: '#fff',
+              border: `1px solid ${colors.border}`,
+              borderRadius: 'calc(min(280px, 25vw) * 0.025)',
+              cursor: 'pointer',
+              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+              fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.044), 2vh))',
+              fontWeight: 700,
+              marginTop: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+              marginBottom: 'max(6px, calc(min(280px, 25vw) * 0.025))',
+              outline: 'none',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 'max(6px, calc(min(280px, 25vw) * 0.025))'
+            }}
+            onMouseEnter={(e) => {
+              e.target.style.backgroundColor = '#218838';
+              e.target.style.boxShadow = '0 4px 12px rgba(40,167,69,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
+            }}
+            onMouseLeave={(e) => {
+              e.target.style.backgroundColor = '#28a745';
+              e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
+            }}
+            title="Copy Selection (Cmd/Ctrl+C)"
+          >
+            {/* Copy Icon SVG */}
+            <svg width="max(18px, calc(min(280px, 25vw) * 0.075))" height="max(18px, calc(min(280px, 25vw) * 0.075))" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
+              <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+              <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+            </svg>
+            Copy
+          </button>
+        )}
         </>
       </div>
       
@@ -4067,9 +5981,9 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         <canvas
           ref={canvasRef}
           onClick={handleCanvasClick}
-          onMouseDown={() => {}}
+          onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
-          onMouseUp={() => {}}
+          onMouseUp={handleCanvasMouseUp}
           onMouseLeave={handleCanvasMouseLeave}
           style={{
             position: 'absolute',
@@ -4078,10 +5992,13 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
             width: '100vw',
             height: '100vh',
             pointerEvents: 'auto',
-            cursor: isPasteMode ? 'copy' : 
+            cursor: (isPasteMode || isPastePreviewMode) ? 'copy' : 
+                   (draggingArrow !== null ? 'move' :
                    (mode === 'draw' && isCreatingBond ? 'crosshair' : 
                    (mode === 'draw' ? 'crosshair' : 
-                   (mode === 'text' || mode === 'mouse' ? 'text' : 'default'))),
+                   (mode === 'text' ? 'text' : 
+                   (mode === 'mouse' && (hoveredArrow !== null || hoveredMolecule !== null) ? 'pointer' : 
+                   (mode === 'mouse' ? 'default' : 'default')))))),
             display: 'block',
           }}
         />
@@ -4160,6 +6077,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
                   // Handle text input completion
+                  saveToHistory(); // Save before modifying atom text
                   handleTextInputComplete(
                     atomInputValue,
                     menuVertexKey,
@@ -4249,7 +6167,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
           <button
             onClick={(e) => {
               e.stopPropagation();
-              // copySelection(); // Removed functionality
+              copySelectionToClipboard();
             }}
             style={{
               position: 'absolute',
@@ -4304,8 +6222,10 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
           }}
         >
           <div>
-            {selectedPreset ? (
-              `Preset: ${selectedPreset.charAt(0).toUpperCase() + selectedPreset.slice(1)}`
+            {isPastePreviewMode ? (
+              'Paste Mode: Active'
+            ) : RING_PRESET_MODES.includes(mode) ? (
+              `Preset: ${mode.charAt(0).toUpperCase() + mode.slice(1)}`
             ) : (
               showSnapPreview ? (
                 snapAlignment && snapAlignment.type === 'bond' ? 'Bond Snap: ON' : 'Grid Snap: ON'
@@ -4313,11 +6233,13 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
             )}
           </div>
           <div style={{ fontSize: '12px', opacity: '0.9' }}>
-            {(mode === 'cyclopentane' || mode === 'cyclobutane' || mode === 'cyclopropane' || selectedPreset === 'chair') ? 
+            {isPastePreviewMode ? (
+              'Click to place • ESC to cancel'
+            ) : (mode === 'cyclopentane' || mode === 'cyclobutane' || mode === 'cyclopropane') ? 
              (snapAlignment && snapAlignment.type === 'bond' ? 'Snapping to bond' : 'Move near bond to snap') : 
-             selectedPreset ? 'Click to place multiple' : 'Press G to toggle'}
+             RING_PRESET_MODES.includes(mode) ? 'Click to place multiple' : 'Press G to toggle'}
           </div>
-          {snapAlignment && showSnapPreview && !selectedPreset && (
+          {snapAlignment && showSnapPreview && !RING_PRESET_MODES.includes(mode) && (
             <div style={{ 
               fontSize: '12px', 
               backgroundColor: 'rgba(255,255,255,0.2)', 
@@ -4425,7 +6347,11 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
         <>
           {/* Overlay for dismissing popup by clicking outside */}
           <div
-            onClick={() => setShowExportPopup(false)}
+            onClick={() => {
+              setShowExportPopup(false);
+              setExportImageUrl(null);
+              setExportMetadata(null);
+            }}
             style={{
         position: 'fixed',
               inset: 0,
@@ -4541,19 +6467,16 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
               </button>
               
               <button
-                onClick={async () => {
+                onClick={async (e) => {
+                  const btn = e.currentTarget;
                   try {
-                    // Convert data URL to blob
                     const response = await fetch(exportImageUrl);
                     const blob = await response.blob();
                     
-                    // Copy to clipboard
                     await navigator.clipboard.write([
                       new ClipboardItem({ 'image/png': blob })
                     ]);
                     
-                    // Show success feedback
-                    const btn = event.target;
                     const originalText = btn.innerHTML;
                     btn.innerHTML = '✅ Copied!';
                     btn.style.backgroundColor = '#28a745';
@@ -4613,7 +6536,11 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
             </div>
         
         <button
-              onClick={() => setShowExportPopup(false)}
+              onClick={() => {
+                setShowExportPopup(false);
+                setExportImageUrl(null);
+                setExportMetadata(null);
+              }}
               style={{
                 backgroundColor: '#e9ecef',
                 color: '#333',
@@ -4639,21 +6566,11 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
       <div style={{
         position: 'fixed',
         bottom: (() => {
-          // Use active molecule detection instead of checking all molecules
-          const activeMolecule = getActiveMolecule();
-          const hasValidMolecule = activeMolecule && activeMolecule.vertexKeys.length > 0;
-          
-          if (!hasValidMolecule) {
-            // No active molecule - position at bottom with small margin
-            return '20px';
-          } else if (isPropertiesPanelExpanded) {
-            // Expanded panel - position just above the expanded panel
-            // Panel is at bottom: 20px, expanded height varies 190-290px, so position at 20 + 230px + 8px gap = 258px
-            return '178px';
-          } else {
-            // Collapsed pill - position above the small pill (approx 40px tall) + margin
-            return '70px';
-          }
+          const hasDrawing =
+            vertices.length > 0 ||
+            segments.some((s) => s.bondOrder > 0) ||
+            arrows.length > 0;
+          return hasDrawing ? '70px' : '20px';
         })(),
         right: '20px',
         display: 'flex',
@@ -4680,10 +6597,12 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
                   setExportImageUrl(result);
                   setExportMetadata(null);
                 } else {
-                  // New format with metadata
                   setExportImageUrl(result.imageUrl);
-                  setExportMetadata(result);
-
+                  setExportMetadata({
+                    width: result.width,
+                    height: result.height,
+                    scaleFactor: result.scaleFactor,
+                  });
                 }
                 setShowExportPopup(true);
               } else {
