@@ -28,12 +28,14 @@ import {
   exportCanvasCroppedSnapshot,
 } from './utils/cleanExportCanvas.js';
 
-const RING_PRESET_MODES = ['benzene', 'cyclohexane', 'cyclopentane', 'cyclobutane', 'cyclopropane'];
+const RING_PRESET_MODES = ['benzene', 'cyclohexane', 'cyclopentane', 'cyclobutane', 'cyclopropane', 'chair', 'newman'];
+const CHAIR_MIDDLE_VERTEX_INDEXES = new Set([2, 5]);
 
 const HexGridWithToolbar = () => {
     const canvasRef = useRef(null);
     const isExportingRef = useRef(false);
     const curveControlDragRef = useRef(null);
+    const newmanIdRef = useRef(1);
     
     // State variables needed for visual appearance
     const [isDarkMode, setIsDarkMode] = useState(false);
@@ -41,6 +43,7 @@ const HexGridWithToolbar = () => {
     const [showAboutPopup, setShowAboutPopup] = useState(false);
     const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
     const [mode, setMode] = useState('draw');
+    const [isRotateArrowHovered, setIsRotateArrowHovered] = useState(false);
     const [atomInputValue, setAtomInputValue] = useState('');
     const [showAtomInput, setShowAtomInput] = useState(false);
     const [atomInputPosition, setAtomInputPosition] = useState({ x: 0, y: 0 });
@@ -56,6 +59,7 @@ const HexGridWithToolbar = () => {
     const [vertices, setVertices] = useState([]);
     const [vertexAtoms, setVertexAtoms] = useState({});
     const [arrows, setArrows] = useState([]);
+    const [newmanInstances, setNewmanInstances] = useState([]);
     
     // UI interaction state
     const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -145,6 +149,7 @@ const HexGridWithToolbar = () => {
       setSegments([]);
       setVertexAtoms({});
       setArrows([]);
+      setNewmanInstances([]);
       setBondSuggestions([]);
       setDetectedRings([]);
       setVertexBondStates({});
@@ -171,6 +176,7 @@ const HexGridWithToolbar = () => {
         segments: JSON.parse(JSON.stringify(segments)),
         vertexAtoms: JSON.parse(JSON.stringify(vertexAtoms)),
         arrows: JSON.parse(JSON.stringify(arrows)),
+        newmanInstances: JSON.parse(JSON.stringify(newmanInstances)),
         detectedRings: JSON.parse(JSON.stringify(detectedRings)),
         vertexBondStates: JSON.parse(JSON.stringify(vertexBondStates))
       };
@@ -192,7 +198,7 @@ const HexGridWithToolbar = () => {
         const newIndex = prev + 1;
         return newIndex > 50 ? 50 : newIndex;
       });
-    }, [vertices, segments, vertexAtoms, arrows, detectedRings, vertexBondStates, historyIndex]);
+    }, [vertices, segments, vertexAtoms, arrows, newmanInstances, detectedRings, vertexBondStates, historyIndex]);
 
     // Undo function - restore previous state
     const handleUndo = useCallback(() => {
@@ -205,6 +211,7 @@ const HexGridWithToolbar = () => {
           setSegments(JSON.parse(JSON.stringify(prevState.segments)));
           setVertexAtoms(JSON.parse(JSON.stringify(prevState.vertexAtoms)));
           setArrows(JSON.parse(JSON.stringify(prevState.arrows)));
+          setNewmanInstances(JSON.parse(JSON.stringify(prevState.newmanInstances || [])));
           setDetectedRings(JSON.parse(JSON.stringify(prevState.detectedRings)));
           setVertexBondStates(JSON.parse(JSON.stringify(prevState.vertexBondStates)));
           setHistoryIndex(prevIndex);
@@ -337,6 +344,10 @@ const HexGridWithToolbar = () => {
 
     // Get valid angles for this vertex, or use general snap angles if no vertex specified
     const validAngles = startVertex ? getAvailableBondAngles(startVertex) : snapAngles;
+    const startVertexKey = startVertex ? getVertexKey(startVertex) : null;
+    const hasConstrainedAngles = startVertexKey
+      ? !!(vertexBondStates[startVertexKey]?.constrainedAngles && vertexBondStates[startVertexKey].constrainedAngles.length > 0)
+      : false;
 
     for (const snapAngle of validAngles) {
       // Calculate the difference, considering the circular nature of angles
@@ -345,7 +356,7 @@ const HexGridWithToolbar = () => {
         diff = 2 * Math.PI - diff;
       }
 
-      if (diff < minDifference && diff <= snapAngleTolerance) {
+      if (diff < minDifference && (hasConstrainedAngles || diff <= snapAngleTolerance)) {
         minDifference = diff;
         closestAngle = snapAngle;
       }
@@ -375,6 +386,10 @@ const HexGridWithToolbar = () => {
   // Helper function to check if angle snapping should be disabled
   const shouldDisableAngleSnapping = (startVertex) => {
     if (!startVertex) return false;
+    const vertexKey = getVertexKey(startVertex);
+    if (vertexBondStates[vertexKey]?.constrainedAngles?.length) {
+      return false;
+    }
     return countVertexBonds(startVertex) >= 3; // Disable snapping for 4th bond
   };
   
@@ -413,6 +428,140 @@ const HexGridWithToolbar = () => {
   // Helper function to get vertex key
   const getVertexKey = (vertex) => {
     return `${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`;
+  };
+
+  const revealNewmanRotateControlForVertex = useCallback((vertex) => {
+    if (!vertex?.newmanId) return;
+    if (vertex.newmanRole !== 'frontOuter' && vertex.newmanRole !== 'backOuter') return;
+    const now = Date.now();
+    setNewmanInstances(prev =>
+      prev.map(instance =>
+        instance.id === vertex.newmanId
+          ? { ...instance, showRotateControl: true, lastTouchedAt: now }
+          : instance
+      )
+    );
+  }, []);
+
+  const revealNewmanRotateControlForBond = useCallback((bond) => {
+    if (!bond) return;
+    let targetNewmanId = bond.newmanId || null;
+    if (!targetNewmanId) {
+      // Fallback: infer from endpoint vertices for bonds created/edited after placement.
+      const endpointMatches = vertices.filter(v =>
+        (Math.abs(v.x - bond.x1) < 0.01 && Math.abs(v.y - bond.y1) < 0.01) ||
+        (Math.abs(v.x - bond.x2) < 0.01 && Math.abs(v.y - bond.y2) < 0.01)
+      );
+      const newmanVertex = endpointMatches.find(v => !!v.newmanId);
+      targetNewmanId = newmanVertex?.newmanId || null;
+    }
+    if (!targetNewmanId) return;
+    const now = Date.now();
+    setNewmanInstances(prev =>
+      prev.map(instance =>
+        instance.id === targetNewmanId
+          ? { ...instance, showRotateControl: true, lastTouchedAt: now }
+          : instance
+      )
+    );
+  }, [vertices]);
+
+  const hideNewmanRotateControls = useCallback(() => {
+    setNewmanInstances(prev =>
+      prev.map(instance =>
+        instance.showRotateControl ? { ...instance, showRotateControl: false } : instance
+      )
+    );
+  }, []);
+
+  // Helper for chair conformation preset geometry
+  const getChairVertices = (centerX, centerY, bondLength, rotation = 0, flip = false) => {
+    const basePoints = [
+      { x: -1.35, y: 0.78 },
+      { x: -0.93, y: -0.47 },
+      { x: 0.20, y: -0.07 },
+      { x: 1.41, y: -0.45 },
+      { x: 0.99, y: 0.80 },
+      { x: -0.14, y: 0.40 }
+    ];
+    const averageEdgeLength = 1.26;
+    const scale = bondLength / averageEdgeLength;
+    const cosR = Math.cos(rotation);
+    const sinR = Math.sin(rotation);
+
+    return basePoints.map(point => {
+      const fx = flip ? -point.x : point.x;
+      const scaledX = fx * scale;
+      const scaledY = point.y * scale;
+      return {
+        x: centerX + (scaledX * cosR - scaledY * sinR),
+        y: centerY + (scaledX * sinR + scaledY * cosR),
+        isOffGrid: true
+      };
+    });
+  };
+
+  const getChairSubstituentAngles = (chairVertices, centerX, centerY, flip = false) => {
+    const equatorialOffset = 15 * (Math.PI / 180);
+    const middleEquatorialAngle = 120 * (Math.PI / 180);
+    return chairVertices.map((vertex, i) => {
+      const radialX = vertex.x - centerX;
+      const axialPolarity = (i % 2 === 0 ? 1 : -1) * (flip ? -1 : 1);
+      const horizontalDir = radialX >= 0 ? 1 : -1;
+
+      const axialAngle = axialPolarity < 0 ? (-Math.PI / 2) : (Math.PI / 2);
+      const equatorialGoesDown = axialPolarity < 0; // Up axial => down equatorial, and vice versa.
+
+      let equatorialAngle;
+      if (CHAIR_MIDDLE_VERTEX_INDEXES.has(i)) {
+        // Middle chair carbons use a steeper equatorial direction to keep substituent preview clear.
+        equatorialAngle = i === 2
+          ? -(Math.PI - middleEquatorialAngle)
+          : middleEquatorialAngle;
+      } else if (horizontalDir > 0) {
+        equatorialAngle = equatorialGoesDown ? equatorialOffset : -equatorialOffset;
+      } else {
+        equatorialAngle = Math.PI + (equatorialGoesDown ? -equatorialOffset : equatorialOffset);
+      }
+
+      return {
+        axialAngle: normalizeAngle(axialAngle),
+        equatorialAngle: normalizeAngle(equatorialAngle)
+      };
+    });
+  };
+
+  const getNewmanProjectionGeometry = (
+    centerX,
+    centerY,
+    radius,
+    backRotationDeg = 60,
+    rotation = 0
+  ) => {
+    const frontAnglesBase = [-Math.PI / 2, Math.PI / 6, (5 * Math.PI) / 6];
+    const phaseShift = (backRotationDeg * Math.PI) / 180;
+    const frontOutsideBondLength = radius * 1.6;
+    const backOutsideBondLength = radius * 0.9;
+
+    const frontAngles = frontAnglesBase.map(angle => normalizeAngle(angle + rotation));
+    const backAngles = frontAnglesBase.map(angle => normalizeAngle(angle + phaseShift + rotation));
+
+    const frontEndpoints = frontAngles.map(angle => ({
+      x: centerX + Math.cos(angle) * frontOutsideBondLength,
+      y: centerY + Math.sin(angle) * frontOutsideBondLength
+    }));
+
+    const backStarts = backAngles.map(angle => ({
+      x: centerX + Math.cos(angle) * radius,
+      y: centerY + Math.sin(angle) * radius
+    }));
+
+    const backEndpoints = backAngles.map(angle => ({
+      x: centerX + Math.cos(angle) * (radius + backOutsideBondLength),
+      y: centerY + Math.sin(angle) * (radius + backOutsideBondLength)
+    }));
+
+    return { frontEndpoints, backStarts, backEndpoints };
   };
 
   // Helper function to normalize angle to nearest 60-degree increment (rotated by 30°)
@@ -465,6 +614,10 @@ const HexGridWithToolbar = () => {
   const getValidAnglesForVertex = (vertex) => {
     const vertexKey = getVertexKey(vertex);
     const bondState = vertexBondStates[vertexKey];
+
+    if (bondState?.constrainedAngles && bondState.constrainedAngles.length > 0) {
+      return bondState.constrainedAngles;
+    }
     
     if (!bondState || bondState.bondAngles.length === 0) {
       // First bond - can be any 60-degree increment (all rotated by 30°)
@@ -482,11 +635,19 @@ const HexGridWithToolbar = () => {
   // Helper function to update vertex bond state
   const updateVertexBondState = useCallback((vertex, bondAngle) => {
     const vertexKey = getVertexKey(vertex);
-    const normalizedAngle = normalizeToSixtyDegrees(bondAngle);
     
     setVertexBondStates(prevStates => {
       const currentState = prevStates[vertexKey] || { bondAngles: [], orientation: null };
       const newBondAngles = [...currentState.bondAngles];
+      const normalizedAngle = currentState.constrainedAngles && currentState.constrainedAngles.length > 0
+        ? currentState.constrainedAngles.reduce((closest, candidate) => {
+            let currentDiff = Math.abs(normalizeAngle(bondAngle) - candidate);
+            if (currentDiff > Math.PI) currentDiff = (2 * Math.PI) - currentDiff;
+            let closestDiff = Math.abs(normalizeAngle(bondAngle) - closest);
+            if (closestDiff > Math.PI) closestDiff = (2 * Math.PI) - closestDiff;
+            return currentDiff < closestDiff ? candidate : closest;
+          }, currentState.constrainedAngles[0])
+        : normalizeToSixtyDegrees(bondAngle);
       
       // Add the new angle if it's not already present
       if (!newBondAngles.some(angle => Math.abs(angle - normalizedAngle) < 0.01)) {
@@ -503,7 +664,9 @@ const HexGridWithToolbar = () => {
         ...prevStates,
         [vertexKey]: {
           bondAngles: newBondAngles,
-          orientation: orientation
+          orientation: orientation,
+          constrainedAngles: currentState.constrainedAngles || null,
+          noMerge: !!currentState.noMerge
         }
       };
     });
@@ -514,6 +677,11 @@ const HexGridWithToolbar = () => {
     const vertexKey = getVertexKey(vertex);
     const bondState = vertexBondStates[vertexKey];
     const validAngles = getValidAnglesForVertex(vertex);
+
+    // Chair-constrained vertices should always expose both axial/equatorial directions.
+    if (bondState?.constrainedAngles?.length) {
+      return validAngles;
+    }
     
     if (!bondState) {
       return validAngles; // All angles available for new vertex
@@ -1130,6 +1298,8 @@ const HexGridWithToolbar = () => {
     const endVertex = { x: lastBond.x2, y: lastBond.y2 };
     const startVertexBondCount = countVertexBonds(startVertex);
     const endVertexBondCount = countVertexBonds(endVertex);
+    const startVertexIsConstrained = !!vertexBondStates[getVertexKey(startVertex)]?.constrainedAngles?.length;
+    const endVertexIsConstrained = !!vertexBondStates[getVertexKey(endVertex)]?.constrainedAngles?.length;
     
     // Check if either vertex has a triple bond (requires linear geometry)
     const endHasTriple = hasTripleBond(endVertex);
@@ -1137,113 +1307,141 @@ const HexGridWithToolbar = () => {
     
     // Generate suggestions from the END vertex (x2, y2) - only if it has fewer than 3 bonds
     // Skip if this end connects to a triple bond (use linear geometry from other end)
-    if (endVertexBondCount < 3 && !endHasTriple.hasTriple) {
-        // Normal 120° suggestions
+    if ((endVertexIsConstrained ? endVertexBondCount < 4 : endVertexBondCount < 3) && !endHasTriple.hasTriple) {
       const availableEndAngles = getAvailableBondAngles(endVertex);
-      
-      // Generate suggestions at 120-degree separation from the bond (±60° from bond angle)
-      const endSuggestion1Angle = bondAngle + (Math.PI / 3); // +60 degrees from bond angle
-      const endSuggestion2Angle = bondAngle - (Math.PI / 3); // -60 degrees from bond angle
-      
-      // Check if these angles are available for this vertex
-      const endSuggestion1Normalized = normalizeToSixtyDegrees(endSuggestion1Angle);
-      const endSuggestion2Normalized = normalizeToSixtyDegrees(endSuggestion2Angle);
-      
-      if (availableEndAngles.some(angle => Math.abs(angle - endSuggestion1Normalized) < 0.01)) {
-        const endSuggestion1End = {
-          x: lastBond.x2 + Math.cos(endSuggestion1Angle) * hexRadius,
-          y: lastBond.y2 + Math.sin(endSuggestion1Angle) * hexRadius
-        };
-        
-        if (!wouldOverlapExistingBond(endVertex, endSuggestion1End)) {
+
+      if (endVertexIsConstrained) {
+        // Chair vertices: only ever show the explicit constrained directions.
+        availableEndAngles.forEach((angle, index) => {
           suggestions.push({
-            id: 'end-suggestion1',
+            id: `end-constrained-${index}`,
             x1: lastBond.x2,
             y1: lastBond.y2,
-            x2: endSuggestion1End.x,
-            y2: endSuggestion1End.y,
-            angle: endSuggestion1Angle,
+            x2: lastBond.x2 + Math.cos(angle) * hexRadius,
+            y2: lastBond.y2 + Math.sin(angle) * hexRadius,
+            angle,
             fromVertex: { x: lastBond.x2, y: lastBond.y2 }
           });
+        });
+      } else {
+        // Generate suggestions at 120-degree separation from the bond (±60° from bond angle)
+        const endSuggestion1Angle = bondAngle + (Math.PI / 3); // +60 degrees from bond angle
+        const endSuggestion2Angle = bondAngle - (Math.PI / 3); // -60 degrees from bond angle
+
+        // Check if these angles are available for this vertex
+        const endSuggestion1Normalized = normalizeToSixtyDegrees(endSuggestion1Angle);
+        const endSuggestion2Normalized = normalizeToSixtyDegrees(endSuggestion2Angle);
+
+        if (availableEndAngles.some(angle => Math.abs(angle - endSuggestion1Normalized) < 0.01)) {
+          const endSuggestion1End = {
+            x: lastBond.x2 + Math.cos(endSuggestion1Angle) * hexRadius,
+            y: lastBond.y2 + Math.sin(endSuggestion1Angle) * hexRadius
+          };
+
+          if (!wouldOverlapExistingBond(endVertex, endSuggestion1End)) {
+            suggestions.push({
+              id: 'end-suggestion1',
+              x1: lastBond.x2,
+              y1: lastBond.y2,
+              x2: endSuggestion1End.x,
+              y2: endSuggestion1End.y,
+              angle: endSuggestion1Angle,
+              fromVertex: { x: lastBond.x2, y: lastBond.y2 }
+            });
+          }
         }
-      }
-      
-      if (availableEndAngles.some(angle => Math.abs(angle - endSuggestion2Normalized) < 0.01)) {
-        const endSuggestion2End = {
-          x: lastBond.x2 + Math.cos(endSuggestion2Angle) * hexRadius,
-          y: lastBond.y2 + Math.sin(endSuggestion2Angle) * hexRadius
-        };
-        
-        if (!wouldOverlapExistingBond(endVertex, endSuggestion2End)) {
-          suggestions.push({
-            id: 'end-suggestion2',
-            x1: lastBond.x2,
-            y1: lastBond.y2,
-            x2: endSuggestion2End.x,
-            y2: endSuggestion2End.y,
-            angle: endSuggestion2Angle,
-            fromVertex: { x: lastBond.x2, y: lastBond.y2 }
-          });
+
+        if (availableEndAngles.some(angle => Math.abs(angle - endSuggestion2Normalized) < 0.01)) {
+          const endSuggestion2End = {
+            x: lastBond.x2 + Math.cos(endSuggestion2Angle) * hexRadius,
+            y: lastBond.y2 + Math.sin(endSuggestion2Angle) * hexRadius
+          };
+
+          if (!wouldOverlapExistingBond(endVertex, endSuggestion2End)) {
+            suggestions.push({
+              id: 'end-suggestion2',
+              x1: lastBond.x2,
+              y1: lastBond.y2,
+              x2: endSuggestion2End.x,
+              y2: endSuggestion2End.y,
+              angle: endSuggestion2Angle,
+              fromVertex: { x: lastBond.x2, y: lastBond.y2 }
+            });
+          }
         }
       }
     }
     
     // Generate suggestions from the START vertex (x1, y1) - only if it has fewer than 3 bonds
     // Skip if this end connects to a triple bond (use linear geometry from other end)
-    if (startVertexBondCount < 3 && !startHasTriple.hasTriple) {
-        // Normal 120° suggestions
+    if ((startVertexIsConstrained ? startVertexBondCount < 4 : startVertexBondCount < 3) && !startHasTriple.hasTriple) {
       const availableStartAngles = getAvailableBondAngles(startVertex);
-      
-      // The bond angle from start vertex perspective is opposite
-      const startBondAngle = bondAngle + Math.PI; // Reverse direction
-      const startSuggestion1Angle = startBondAngle + (Math.PI / 3); // +60 degrees from reversed bond angle
-      const startSuggestion2Angle = startBondAngle - (Math.PI / 3); // -60 degrees from reversed bond angle
-      
-      // Check if these angles are available for this vertex
-      const startSuggestion1Normalized = normalizeToSixtyDegrees(startSuggestion1Angle);
-      const startSuggestion2Normalized = normalizeToSixtyDegrees(startSuggestion2Angle);
-      
-      if (availableStartAngles.some(angle => Math.abs(angle - startSuggestion1Normalized) < 0.01)) {
-        const startSuggestion1End = {
-          x: lastBond.x1 + Math.cos(startSuggestion1Angle) * hexRadius,
-          y: lastBond.y1 + Math.sin(startSuggestion1Angle) * hexRadius
-        };
-        
-        if (!wouldOverlapExistingBond(startVertex, startSuggestion1End)) {
+
+      if (startVertexIsConstrained) {
+        // Chair vertices: only ever show the explicit constrained directions.
+        availableStartAngles.forEach((angle, index) => {
           suggestions.push({
-            id: 'start-suggestion1',
+            id: `start-constrained-${index}`,
             x1: lastBond.x1,
             y1: lastBond.y1,
-            x2: startSuggestion1End.x,
-            y2: startSuggestion1End.y,
-            angle: startSuggestion1Angle,
+            x2: lastBond.x1 + Math.cos(angle) * hexRadius,
+            y2: lastBond.y1 + Math.sin(angle) * hexRadius,
+            angle,
             fromVertex: { x: lastBond.x1, y: lastBond.y1 }
           });
+        });
+      } else {
+        // The bond angle from start vertex perspective is opposite
+        const startBondAngle = bondAngle + Math.PI; // Reverse direction
+        const startSuggestion1Angle = startBondAngle + (Math.PI / 3); // +60 degrees from reversed bond angle
+        const startSuggestion2Angle = startBondAngle - (Math.PI / 3); // -60 degrees from reversed bond angle
+
+        // Check if these angles are available for this vertex
+        const startSuggestion1Normalized = normalizeToSixtyDegrees(startSuggestion1Angle);
+        const startSuggestion2Normalized = normalizeToSixtyDegrees(startSuggestion2Angle);
+
+        if (availableStartAngles.some(angle => Math.abs(angle - startSuggestion1Normalized) < 0.01)) {
+          const startSuggestion1End = {
+            x: lastBond.x1 + Math.cos(startSuggestion1Angle) * hexRadius,
+            y: lastBond.y1 + Math.sin(startSuggestion1Angle) * hexRadius
+          };
+
+          if (!wouldOverlapExistingBond(startVertex, startSuggestion1End)) {
+            suggestions.push({
+              id: 'start-suggestion1',
+              x1: lastBond.x1,
+              y1: lastBond.y1,
+              x2: startSuggestion1End.x,
+              y2: startSuggestion1End.y,
+              angle: startSuggestion1Angle,
+              fromVertex: { x: lastBond.x1, y: lastBond.y1 }
+            });
+          }
         }
-      }
-      
-      if (availableStartAngles.some(angle => Math.abs(angle - startSuggestion2Normalized) < 0.01)) {
-        const startSuggestion2End = {
-          x: lastBond.x1 + Math.cos(startSuggestion2Angle) * hexRadius,
-          y: lastBond.y1 + Math.sin(startSuggestion2Angle) * hexRadius
-        };
-        
-        if (!wouldOverlapExistingBond(startVertex, startSuggestion2End)) {
-          suggestions.push({
-            id: 'start-suggestion2',
-            x1: lastBond.x1,
-            y1: lastBond.y1,
-            x2: startSuggestion2End.x,
-            y2: startSuggestion2End.y,
-            angle: startSuggestion2Angle,
-            fromVertex: { x: lastBond.x1, y: lastBond.y1 }
-          });
+
+        if (availableStartAngles.some(angle => Math.abs(angle - startSuggestion2Normalized) < 0.01)) {
+          const startSuggestion2End = {
+            x: lastBond.x1 + Math.cos(startSuggestion2Angle) * hexRadius,
+            y: lastBond.y1 + Math.sin(startSuggestion2Angle) * hexRadius
+          };
+
+          if (!wouldOverlapExistingBond(startVertex, startSuggestion2End)) {
+            suggestions.push({
+              id: 'start-suggestion2',
+              x1: lastBond.x1,
+              y1: lastBond.y1,
+              x2: startSuggestion2End.x,
+              y2: startSuggestion2End.y,
+              angle: startSuggestion2Angle,
+              fromVertex: { x: lastBond.x1, y: lastBond.y1 }
+            });
+          }
         }
       }
     }
     
     return suggestions;
-  }, [hexRadius, segments, countVertexBonds, getAvailableBondAngles, normalizeToSixtyDegrees]);
+  }, [hexRadius, segments, countVertexBonds, getAvailableBondAngles, normalizeToSixtyDegrees, vertexBondStates]);
 
   // Helper function to check if mouse is over a bond suggestion
   const findHoveredSuggestion = (x, y) => {
@@ -1291,6 +1489,12 @@ const HexGridWithToolbar = () => {
       for (let j = i + 1; j < vertices.length; j++) {
         const vertex1 = vertices[i];
         const vertex2 = vertices[j];
+        if (vertex1.noMerge || vertex2.noMerge) continue;
+        const vertex1State = vertexBondStates[getVertexKey(vertex1)];
+        const vertex2State = vertexBondStates[getVertexKey(vertex2)];
+        const vertex1Protected = !!(vertex1State?.constrainedAngles?.length || vertex1State?.noMerge);
+        const vertex2Protected = !!(vertex2State?.constrainedAngles?.length || vertex2State?.noMerge);
+        if (vertex1Protected || vertex2Protected) continue;
         
         const distance = Math.sqrt(
           Math.pow(vertex1.x - vertex2.x, 2) + 
@@ -1310,7 +1514,7 @@ const HexGridWithToolbar = () => {
     }
     
     return mergeOperations;
-  }, [vertices, mergeThreshold]);
+  }, [vertices, mergeThreshold, vertexBondStates]);
 
   // Helper function to perform vertex merging
   const performVertexMerge = useCallback((mergeOperation) => {
@@ -1421,6 +1625,7 @@ const HexGridWithToolbar = () => {
       // Check if clicking on existing vertex first
       const clickedVertex = findNearestVertex(clickPosition.x, clickPosition.y);
       if (clickedVertex) {
+        revealNewmanRotateControlForVertex(clickedVertex);
         // Open text input for existing vertex
         const success = handleEnterKeyOnVertex(
           clickedVertex,
@@ -1449,6 +1654,12 @@ const HexGridWithToolbar = () => {
         }
       );
       return;
+    }
+
+    // Hide Newman rotate controls on general non-Newman interactions.
+    // Newman-specific handlers will explicitly re-show when relevant.
+    if (mode !== 'newman') {
+      hideNewmanRotateControls();
     }
 
     // Handle mouse/selection mode clicks
@@ -2088,6 +2299,168 @@ const HexGridWithToolbar = () => {
       return;
     }
 
+    // Handle chair conformation mode clicks (cyclohexane chair projection)
+    if (mode === 'chair') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+
+      const snapInfo = calculateRingSnap({ x: worldX, y: worldY }, vertices, segments, hexRadius, 6);
+      const centerX = snapInfo ? snapInfo.center.x : worldX;
+      const centerY = snapInfo ? snapInfo.center.y : worldY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      const isFlippedChair = false;
+      const chairVertices = getChairVertices(centerX, centerY, hexRadius, rotationOffset, isFlippedChair);
+      const chairBonds = [];
+      const chairSubstituentAngles = getChairSubstituentAngles(chairVertices, centerX, centerY, isFlippedChair);
+
+      for (let i = 0; i < chairVertices.length; i++) {
+        const nextIndex = (i + 1) % chairVertices.length;
+        chairBonds.push({
+          x1: chairVertices[i].x,
+          y1: chairVertices[i].y,
+          x2: chairVertices[nextIndex].x,
+          y2: chairVertices[nextIndex].y,
+          bondOrder: 1,
+          bondType: null,
+          bondDirection: 1,
+          direction: calculateBondDirection(
+            chairVertices[i].x,
+            chairVertices[i].y,
+            chairVertices[nextIndex].x,
+            chairVertices[nextIndex].y
+          ),
+          flipSmallerLine: false
+        });
+      }
+
+      saveToHistory();
+      setVertices(prev => [...prev, ...chairVertices]);
+      setSegments(prev => [...prev, ...chairBonds]);
+      setVertexBondStates(prev => {
+        const updated = { ...prev };
+        chairVertices.forEach((vertex, index) => {
+          const key = getVertexKey(vertex);
+          const constrainedAngles = [
+            chairSubstituentAngles[index].axialAngle,
+            chairSubstituentAngles[index].equatorialAngle
+          ];
+          updated[key] = {
+            bondAngles: [],
+            orientation: null,
+            constrainedAngles
+          };
+        });
+        return updated;
+      });
+      setMode('draw');
+      setTimeout(() => updateRingDetection(), 0);
+      return;
+    }
+
+    // Handle Newman projection mode clicks
+    if (mode === 'newman') {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+
+      const rect = canvas.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const worldX = x - offset.x;
+      const worldY = y - offset.y;
+      const newmanRadius = hexRadius * 0.68;
+      const newmanId = `newman-${newmanIdRef.current++}`;
+      const geometry = getNewmanProjectionGeometry(
+        worldX,
+        worldY,
+        newmanRadius,
+        60,
+        0
+      );
+
+      const centerVertex = { x: worldX, y: worldY, isOffGrid: true, noMerge: true, newmanId, newmanRole: 'frontCenter' };
+      const frontVertices = geometry.frontEndpoints.map((point, index) => ({ ...point, isOffGrid: true, noMerge: true, newmanId, newmanRole: 'frontOuter', newmanIndex: index }));
+      const backVertices = geometry.backEndpoints.map((point, index) => ({ ...point, isOffGrid: true, noMerge: true, newmanId, newmanRole: 'backOuter', newmanIndex: index }));
+      const newmanVertices = [
+        centerVertex,
+        ...frontVertices,
+        ...backVertices
+      ];
+
+      const newmanBonds = [];
+
+      frontVertices.forEach(front => {
+        newmanBonds.push({
+          x1: centerVertex.x,
+          y1: centerVertex.y,
+          x2: front.x,
+          y2: front.y,
+          bondOrder: 1,
+          bondType: null,
+          bondDirection: 1,
+          direction: calculateBondDirection(centerVertex.x, centerVertex.y, front.x, front.y),
+          flipSmallerLine: false,
+          newmanId,
+          newmanRole: 'front'
+        });
+      });
+
+      for (let i = 0; i < geometry.backStarts.length; i++) {
+        const start = geometry.backStarts[i];
+        const end = geometry.backEndpoints[i];
+        newmanBonds.push({
+          x1: start.x,
+          y1: start.y,
+          x2: end.x,
+          y2: end.y,
+          bondOrder: 1,
+          bondType: null,
+          bondDirection: 1,
+          direction: calculateBondDirection(start.x, start.y, end.x, end.y),
+          flipSmallerLine: false,
+          newmanId,
+          newmanRole: 'back',
+          newmanIndex: i
+        });
+      }
+
+      saveToHistory();
+      setVertices(prev => [...prev, ...newmanVertices]);
+      setSegments(prev => [...prev, ...newmanBonds]);
+      setNewmanInstances(prev => [
+        ...prev,
+        {
+          id: newmanId,
+          x: worldX,
+          y: worldY,
+          radius: newmanRadius,
+          backRotationDeg: 60,
+          nextStepDeg: 75,
+          showRotateControl: true,
+          lastTouchedAt: Date.now()
+        }
+      ]);
+      setVertexBondStates(prev => {
+        const updated = { ...prev };
+        newmanVertices.forEach(vertex => {
+          const key = getVertexKey(vertex);
+          updated[key] = {
+            ...(updated[key] || { bondAngles: [], orientation: null, constrainedAngles: null }),
+            noMerge: true
+          };
+        });
+        return updated;
+      });
+      setMode('draw');
+      setTimeout(() => updateRingDetection(), 0);
+      return;
+    }
+
     // Handle draw mode, stereochemistry mode, and triple bond mode clicks
     if (mode !== 'draw' && mode !== 'wedge' && mode !== 'dash' && mode !== 'ambiguous' && mode !== 'triple') return;
     
@@ -2106,6 +2479,7 @@ const HexGridWithToolbar = () => {
     const clickedVertex = findNearestVertex(x, y);
     
     if (clickedVertex && !isCreatingBond) {
+      revealNewmanRotateControlForVertex(clickedVertex);
       // Clear existing suggestions when starting a new bond from a vertex
       setBondSuggestions([]);
       
@@ -2149,9 +2523,23 @@ const HexGridWithToolbar = () => {
         // Update vertex bond states for both ends of the bond
         const bondAngle = calculateBondDirection(newBond.x1, newBond.y1, newBond.x2, newBond.y2);
         const reverseBondAngle = bondAngle + Math.PI; // Angle from end vertex perspective
+        const fromVertexKey = getVertexKey(suggestion.fromVertex);
+        const fromVertexIsChair = !!vertexBondStates[fromVertexKey]?.constrainedAngles?.length;
         
         updateVertexBondState(suggestion.fromVertex, bondAngle);
         updateVertexBondState(newVertex, reverseBondAngle);
+        revealNewmanRotateControlForVertex(suggestion.fromVertex);
+        revealNewmanRotateControlForBond(newBond);
+        if (fromVertexIsChair) {
+          const newVertexKey = getVertexKey(newVertex);
+          setVertexBondStates(prevStates => ({
+            ...prevStates,
+            [newVertexKey]: {
+              ...(prevStates[newVertexKey] || { bondAngles: [], orientation: null, constrainedAngles: null }),
+              noMerge: true
+            }
+          }));
+        }
         
         // Generate new suggestions from this bond
         setTimeout(() => {
@@ -2159,7 +2547,9 @@ const HexGridWithToolbar = () => {
           // Update ring detection after new bond
           updateRingDetection();
           // Check for vertex merging after state updates
-          setTimeout(() => checkAndPerformVertexMerging(), 10);
+          if (!fromVertexIsChair) {
+            setTimeout(() => checkAndPerformVertexMerging(), 10);
+          }
         }, 0);
         return newSegments;
       });
@@ -2177,6 +2567,7 @@ const HexGridWithToolbar = () => {
     const clickedBondIndex = findHoveredBond(x, y);
     if (clickedBondIndex !== null && !isCreatingBond) {
       const clickedBond = segments[clickedBondIndex];
+      revealNewmanRotateControlForBond(clickedBond);
       
       // Handle draw mode: convert to double bond
       if (mode === 'draw' && clickedBond.bondOrder === 1 && !clickedBond.bondType) {
@@ -2284,6 +2675,19 @@ const HexGridWithToolbar = () => {
       const completionClickedVertex = findNearestVertex(x, y);
       
       if (completionClickedVertex && completionClickedVertex !== bondStartPoint) {
+        const startKey = getVertexKey(bondStartPoint);
+        const clickedKey = getVertexKey(completionClickedVertex);
+        const startIsChairVertex = !!vertexBondStates[startKey]?.constrainedAngles?.length;
+        const clickedIsChairVertex = !!vertexBondStates[clickedKey]?.constrainedAngles?.length;
+
+        // For chair vertices, clicking another chair vertex should switch selection,
+        // not create a new bond between chair framework vertices.
+        if (startIsChairVertex && clickedIsChairVertex) {
+          setBondStartPoint(completionClickedVertex);
+          setBondPreviewEnd(null);
+          return;
+        }
+
         // End at existing vertex
         endVertex = completionClickedVertex;
       } else {
@@ -2335,6 +2739,7 @@ const HexGridWithToolbar = () => {
       const overlappingBond = findOverlappingBond(bondStartPoint, endVertex);
       
       if (overlappingBond && overlappingBond.bondOrder === 1) {
+        revealNewmanRotateControlForBond(overlappingBond);
         // Convert the existing bond to a double bond instead of creating a new one
         saveToHistory(); // Save before converting overlapping bond to double bond
         setSegments(prev => {
@@ -2388,9 +2793,34 @@ const HexGridWithToolbar = () => {
         // Update vertex bond states for both ends of the bond
         const bondAngle = calculateBondDirection(newBond.x1, newBond.y1, newBond.x2, newBond.y2);
         const reverseBondAngle = bondAngle + Math.PI; // Angle from end vertex perspective
+        const startVertexKey = getVertexKey(bondStartPoint);
+        const endVertexKey = getVertexKey(endVertex);
+        const startVertexIsChair = !!vertexBondStates[startVertexKey]?.constrainedAngles?.length;
+        const endVertexIsChair = !!vertexBondStates[endVertexKey]?.constrainedAngles?.length;
+        const chairSubstituentInvolved = startVertexIsChair || endVertexIsChair;
         
         updateVertexBondState(bondStartPoint, bondAngle);
         updateVertexBondState(endVertex, reverseBondAngle);
+        revealNewmanRotateControlForVertex(bondStartPoint);
+        revealNewmanRotateControlForVertex(endVertex);
+        revealNewmanRotateControlForBond(newBond);
+        if (startVertexIsChair && !endVertexIsChair) {
+          setVertexBondStates(prevStates => ({
+            ...prevStates,
+            [endVertexKey]: {
+              ...(prevStates[endVertexKey] || { bondAngles: [], orientation: null, constrainedAngles: null }),
+              noMerge: true
+            }
+          }));
+        } else if (endVertexIsChair && !startVertexIsChair) {
+          setVertexBondStates(prevStates => ({
+            ...prevStates,
+            [startVertexKey]: {
+              ...(prevStates[startVertexKey] || { bondAngles: [], orientation: null, constrainedAngles: null }),
+              noMerge: true
+            }
+          }));
+        }
         
         // Generate bond suggestions from the newly created bond
         setTimeout(() => {
@@ -2398,7 +2828,9 @@ const HexGridWithToolbar = () => {
           // Update ring detection after new bond
           updateRingDetection();
           // Check for vertex merging after state updates
-          setTimeout(() => checkAndPerformVertexMerging(), 10);
+          if (!chairSubstituentInvolved) {
+            setTimeout(() => checkAndPerformVertexMerging(), 10);
+          }
         }, 0);
         return newSegments;
       });
@@ -2408,7 +2840,7 @@ const HexGridWithToolbar = () => {
       setBondStartPoint(null);
       setBondPreviewEnd(null);
     }
-  }, [mode, isCreatingBond, bondStartPoint, vertices, segments, offset, hexRadius, bondSuggestions, findHoveredSuggestion, generateBondSuggestions, checkAndPerformVertexMerging, shouldDisableAngleSnapping, findClosestSnapAngle, updateVertexBondState, calculateBondDirection, molecularBoundaryRadius, justCompletedSelection, clipboard, isPastePreviewMode, updateRingDetection, saveToHistory, vertexAtoms, arrows, findMolecule, findHoveredArrow]);
+  }, [mode, isCreatingBond, bondStartPoint, vertices, segments, offset, hexRadius, bondSuggestions, findHoveredSuggestion, generateBondSuggestions, checkAndPerformVertexMerging, shouldDisableAngleSnapping, findClosestSnapAngle, updateVertexBondState, calculateBondDirection, molecularBoundaryRadius, justCompletedSelection, clipboard, isPastePreviewMode, updateRingDetection, saveToHistory, vertexAtoms, arrows, findMolecule, findHoveredArrow, vertexBondStates, revealNewmanRotateControlForVertex, revealNewmanRotateControlForBond, hideNewmanRotateControls]);
 
   const handleCanvasMouseMove = useCallback((event) => {
     const canvas = canvasRef.current;
@@ -3069,13 +3501,34 @@ const HexGridWithToolbar = () => {
   React.useEffect(() => {
     // Check if vertexAtoms changed (text, charges, lone pairs modified)
     if (prevVertexAtomsRef.current !== vertexAtoms && Object.keys(prevVertexAtomsRef.current).length > 0) {
+      // If a Newman substituent label changed, re-show the rotate control for that instance.
+      const changedKeys = new Set([
+        ...Object.keys(prevVertexAtomsRef.current),
+        ...Object.keys(vertexAtoms)
+      ]);
+      changedKeys.forEach((key) => {
+        const before = prevVertexAtomsRef.current[key];
+        const after = vertexAtoms[key];
+        if (JSON.stringify(before) !== JSON.stringify(after)) {
+          const [xStr, yStr] = key.split(',');
+          const x = parseFloat(xStr);
+          const y = parseFloat(yStr);
+          const vertex = vertices.find(
+            (v) => Math.abs(v.x - x) < 0.01 && Math.abs(v.y - y) < 0.01
+          );
+          if (vertex) {
+            revealNewmanRotateControlForVertex(vertex);
+          }
+        }
+      });
+
       // Don't clear if we're in the middle of creating a bond
       if (!isCreatingBond) {
         setBondSuggestions([]);
       }
     }
     prevVertexAtomsRef.current = vertexAtoms;
-  }, [vertexAtoms, isCreatingBond]);
+  }, [vertexAtoms, isCreatingBond, vertices, revealNewmanRotateControlForVertex]);
 
   // Canvas drawing function
   const drawCanvas = useCallback(() => {
@@ -3093,6 +3546,15 @@ const HexGridWithToolbar = () => {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = colors.canvasBackground;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Draw Newman projection circles as non-interactive visual guides.
+    newmanInstances.forEach(circle => {
+      ctx.strokeStyle = colors.bonds;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(circle.x + offset.x, circle.y + offset.y, circle.radius, 0, 2 * Math.PI);
+      ctx.stroke();
+    });
 
     // Draw existing bonds - handle stereochemistry, single, and double bonds
     ctx.lineCap = 'round'; // Rounded line ends
@@ -3253,7 +3715,7 @@ const HexGridWithToolbar = () => {
     }
 
     // Draw atom text labels
-    renderAllAtomText(ctx, vertices, vertexAtoms, offset, colors, isDarkMode);
+    renderAllAtomText(ctx, vertices, vertexAtoms, offset, colors, isDarkMode, newmanInstances);
     
     // Draw lone pairs and charges
     renderAllLonePairsAndCharges(ctx, vertices, segments, vertexAtoms, offset, colors);
@@ -3519,6 +3981,126 @@ const HexGridWithToolbar = () => {
         ctx.beginPath();
         ctx.moveTo(snapInfo.target.x1 + offset.x, snapInfo.target.y1 + offset.y);
         ctx.lineTo(snapInfo.target.x2 + offset.x, snapInfo.target.y2 + offset.y);
+        ctx.stroke();
+      }
+    }
+
+    // Draw chair conformation preview with axial/equatorial guide lines
+    if (!isExportingRef.current && mode === 'chair' && currentMousePosition) {
+      const worldMouseX = currentMousePosition.x - offset.x;
+      const worldMouseY = currentMousePosition.y - offset.y;
+      const snapInfo = calculateRingSnap({ x: worldMouseX, y: worldMouseY }, vertices, segments, hexRadius, 6);
+      const previewCenterX = snapInfo ? snapInfo.center.x : worldMouseX;
+      const previewCenterY = snapInfo ? snapInfo.center.y : worldMouseY;
+      const rotationOffset = snapInfo?.rotation || 0;
+      const isSnapping = snapInfo !== null;
+      const isFlippedChair = false;
+      const previewVertices = getChairVertices(previewCenterX, previewCenterY, hexRadius, rotationOffset, isFlippedChair);
+
+      ctx.strokeStyle = isSnapping ? 'rgba(0, 204, 0, 0.75)' : 'rgba(136, 136, 136, 0.58)';
+      ctx.fillStyle = isSnapping ? 'rgba(0, 204, 0, 0.7)' : 'rgba(136, 136, 136, 0.6)';
+      ctx.lineWidth = 1.8;
+      ctx.lineCap = 'round';
+
+      for (let i = 0; i < previewVertices.length; i++) {
+        const nextIndex = (i + 1) % previewVertices.length;
+        const v1 = previewVertices[i];
+        const v2 = previewVertices[nextIndex];
+        ctx.beginPath();
+        ctx.moveTo(v1.x + offset.x, v1.y + offset.y);
+        ctx.lineTo(v2.x + offset.x, v2.y + offset.y);
+        ctx.stroke();
+      }
+
+      for (const vertex of previewVertices) {
+        ctx.beginPath();
+        ctx.arc(vertex.x + offset.x, vertex.y + offset.y, 2.2, 0, 2 * Math.PI);
+        ctx.fill();
+      }
+
+      // Show directional guide lines for axial/equatorial substituents.
+      const substituentAngles = getChairSubstituentAngles(
+        previewVertices,
+        previewCenterX,
+        previewCenterY,
+        isFlippedChair
+      );
+      const guideStroke = isSnapping ? 'rgba(0, 204, 0, 0.45)' : 'rgba(90, 90, 90, 0.4)';
+      ctx.strokeStyle = guideStroke;
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([4, 3]);
+      for (let i = 0; i < previewVertices.length; i++) {
+        const vertex = previewVertices[i];
+        const { axialAngle, equatorialAngle } = substituentAngles[i];
+
+        const axialEndX = vertex.x + Math.cos(axialAngle) * hexRadius * 0.52;
+        const axialEndY = vertex.y + Math.sin(axialAngle) * hexRadius * 0.52;
+        const equatorialLengthFactor = CHAIR_MIDDLE_VERTEX_INDEXES.has(i) ? 0.40 : 0.48;
+        const equatorialEndX = vertex.x + Math.cos(equatorialAngle) * hexRadius * equatorialLengthFactor;
+        const equatorialEndY = vertex.y + Math.sin(equatorialAngle) * hexRadius * equatorialLengthFactor;
+
+        ctx.beginPath();
+        ctx.moveTo(vertex.x + offset.x, vertex.y + offset.y);
+        ctx.lineTo(axialEndX + offset.x, axialEndY + offset.y);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(vertex.x + offset.x, vertex.y + offset.y);
+        ctx.lineTo(equatorialEndX + offset.x, equatorialEndY + offset.y);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+
+      if (isSnapping && snapInfo.type === 'vertex') {
+        ctx.fillStyle = 'rgba(0, 204, 0, 0.2)';
+        ctx.beginPath();
+        ctx.arc(snapInfo.target.x + offset.x, snapInfo.target.y + offset.y, 8, 0, 2 * Math.PI);
+        ctx.fill();
+      } else if (isSnapping && snapInfo.type === 'bond') {
+        ctx.strokeStyle = 'rgba(0, 204, 0, 0.5)';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(snapInfo.target.x1 + offset.x, snapInfo.target.y1 + offset.y);
+        ctx.lineTo(snapInfo.target.x2 + offset.x, snapInfo.target.y2 + offset.y);
+        ctx.stroke();
+      }
+    }
+
+    // Draw Newman projection preview
+    if (!isExportingRef.current && mode === 'newman' && currentMousePosition) {
+      const worldMouseX = currentMousePosition.x - offset.x;
+      const worldMouseY = currentMousePosition.y - offset.y;
+      const previewRadius = hexRadius * 0.68;
+      const geometry = getNewmanProjectionGeometry(
+        worldMouseX,
+        worldMouseY,
+        previewRadius,
+        60,
+        0
+      );
+
+      ctx.strokeStyle = 'rgba(136, 136, 136, 0.7)';
+      ctx.lineWidth = 1.8;
+      ctx.lineCap = 'round';
+
+      // Back carbon circle
+      ctx.beginPath();
+      ctx.arc(worldMouseX + offset.x, worldMouseY + offset.y, previewRadius, 0, 2 * Math.PI);
+      ctx.stroke();
+
+      // Front bonds (from center)
+      geometry.frontEndpoints.forEach(point => {
+        ctx.beginPath();
+        ctx.moveTo(worldMouseX + offset.x, worldMouseY + offset.y);
+        ctx.lineTo(point.x + offset.x, point.y + offset.y);
+        ctx.stroke();
+      });
+
+      // Back bonds (from circle edge outward)
+      for (let i = 0; i < geometry.backStarts.length; i++) {
+        ctx.beginPath();
+        ctx.moveTo(geometry.backStarts[i].x + offset.x, geometry.backStarts[i].y + offset.y);
+        ctx.lineTo(geometry.backEndpoints[i].x + offset.x, geometry.backEndpoints[i].y + offset.y);
         ctx.stroke();
       }
     }
@@ -3973,7 +4555,7 @@ const HexGridWithToolbar = () => {
       ctx.arc(hoveredVertex.x + offset.x, hoveredVertex.y + offset.y, 10, 0, 2 * Math.PI);
       ctx.fill();
     }
-  }, [colors, segments, vertices, vertexAtoms, offset, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint, getAvailableBondAngles, shouldDisableAngleSnapping, hexRadius, vertexBondStates, selectedMolecules, selectedArrows, hoveredMolecule, hoveredArrow, isSelecting, selectionStart, selectionEnd, isDraggingSelection, selectedVertices, isPastePreviewMode, clipboard, pastePreviewPosition, draggingArrow, draggingArrowEnd]);
+  }, [colors, segments, vertices, vertexAtoms, offset, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint, getAvailableBondAngles, shouldDisableAngleSnapping, hexRadius, vertexBondStates, selectedMolecules, selectedArrows, hoveredMolecule, hoveredArrow, isSelecting, selectionStart, selectionEnd, isDraggingSelection, selectedVertices, isPastePreviewMode, clipboard, pastePreviewPosition, draggingArrow, draggingArrowEnd, newmanInstances]);
 
   /** PNG of the live canvas, cropped to drawn content. Redraws without any interactive overlays. */
   const renderCleanCanvas = useCallback(
@@ -4005,6 +4587,14 @@ const HexGridWithToolbar = () => {
   React.useEffect(() => {
     drawCanvas();
   }, [drawCanvas]);
+
+  const latestNewmanInstance = newmanInstances.reduce(
+    (latest, instance) => (!latest || instance.lastTouchedAt > latest.lastTouchedAt ? instance : latest),
+    null
+  );
+  const canvasRect = canvasRef.current?.getBoundingClientRect();
+  const canvasScreenLeft = canvasRect?.left || 0;
+  const canvasScreenTop = canvasRect?.top || 0;
 
   return (
     <div style={{
@@ -5396,66 +5986,109 @@ const HexGridWithToolbar = () => {
             </svg>
           </button>
           
-          {/* Chair Conformation preset button - DISABLED */}
+          {/* Chair conformation preset button */}
           <button
-            onClick={() => {}} // Disabled - does nothing
+            onClick={() => setModeAndClearSelection('chair')}
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
-              backgroundColor: '#e9ecef', // Always disabled appearance
+              backgroundColor: mode === 'chair' ? colors.buttonActive : colors.button,
               border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              cursor: 'not-allowed', // Show disabled cursor
-              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+              cursor: 'pointer',
+              boxShadow: mode === 'chair' ?
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
             }}
-            onMouseEnter={() => {}} // No hover effect - disabled
-            onMouseLeave={() => {}} // No hover effect - disabled
-            title="Chair Conformation (Disabled)"
+            onMouseEnter={(e) => {
+              if (mode !== 'chair') {
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (mode !== 'chair') {
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
+              }
+            }}
+            title="Chair Conformation"
           >
-            {/* Chair conformation SVG preview */}
-            <svg width="32" height="32" viewBox="0 0 16 16" fill="none" style={{ pointerEvents: 'none' }}>
-              {/* Proper chair with 3 sets of parallel lines */}
-              <g stroke="#666" strokeWidth="1.4" fill="none" strokeLinecap="round"> {/* Always gray - disabled */}
-                {/* Chair shape: bottom flat, then up-slants, top flat, then down-slants */}
-                <path d="M3 11 L9 11 L12 7 L10 4 L4 4 L1 7 Z"/>
+            <svg width="32" height="32" viewBox="0 0 40 40" fill="none" style={{ pointerEvents: 'none' }}>
+              {/* Match placed chair orientation/shape */}
+              <g stroke={mode === 'chair' ? '#fff' : colors.textSecondary} strokeWidth="2.8" strokeLinecap="round">
+                <path d="M5.4 27.8 L11.2 14.6 L20.2 17.0 L33.0 13.8 L27.2 27.0 L18.2 22.8 Z" />
               </g>
+              <g stroke={mode === 'chair' ? '#fff' : colors.textSecondary} strokeWidth="1.3" strokeLinecap="round" strokeOpacity="0.72">
+                <line x1="5.4" y1="27.8" x2="5.4" y2="33.2" />
+                <line x1="11.2" y1="14.6" x2="11.2" y2="8.8" />
+                <line x1="20.2" y1="17.0" x2="20.2" y2="11.2" />
+                <line x1="33.0" y1="13.8" x2="33.0" y2="8.0" />
+                <line x1="27.2" y1="27.0" x2="27.2" y2="32.8" />
+                <line x1="18.2" y1="22.8" x2="18.2" y2="28.5" />
+                </g>
             </svg>
           </button>
-          
+
+          {/* Newman projection preset button */}
           <button
+            onClick={() => setModeAndClearSelection('newman')}
             className="toolbar-button"
             style={{
               aspectRatio: '1/1',
+              backgroundColor: mode === 'newman' ? colors.buttonActive : colors.button,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: '#e9ecef',
-              border: `1px solid ${colors.border}`,
-              borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+              boxShadow: mode === 'newman' ?
+                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
-              padding: 0,
-              color: '#666',
-              fontSize: 'max(10px, min(14px, calc(min(280px, 25vw) * 0.05)))',
-              fontWeight: '600',
+              padding: '4px',
             }}
             onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#dee2e6';
-              e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
+              if (mode !== 'newman') {
+                e.target.style.backgroundColor = colors.buttonHover;
+                e.target.style.boxShadow = `0 3px 6px ${colors.shadow}`;
+              }
             }}
             onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#e9ecef';
-              e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
+              if (mode !== 'newman') {
+                e.target.style.backgroundColor = colors.button;
+                e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
+              }
             }}
-            title="Coming Soon"
+            title="Newman Projection"
           >
-            8
+            <svg width="32" height="32" viewBox="0 0 40 40" fill="none" style={{ pointerEvents: 'none' }}>
+              <circle
+                cx="20"
+                cy="20"
+                r="10"
+                stroke={mode === 'newman' ? '#fff' : colors.textSecondary}
+                strokeWidth="2.4"
+              />
+              <g stroke={mode === 'newman' ? '#fff' : colors.textSecondary} strokeWidth="2.4" strokeLinecap="round">
+                {/* Front carbon bonds: ~1.35x circle radius from center */}
+                <line x1="20" y1="20" x2="20" y2="6.5" />
+                <line x1="20" y1="20" x2="31.7" y2="26.8" />
+                <line x1="20" y1="20" x2="8.3" y2="26.8" />
+              </g>
+              <g stroke={mode === 'newman' ? '#fff' : colors.textSecondary} strokeWidth="2.2" strokeLinecap="round">
+                {/* Back carbon bonds: start at circle edge, extend outward */}
+                <line x1="28.7" y1="15.0" x2="35.9" y2="10.8" />
+                <line x1="20.0" y1="30.0" x2="20.0" y2="38.0" />
+                <line x1="11.3" y1="15.0" x2="4.1" y2="10.8" />
+              </g>
+            </svg>
           </button>
         </div>
         
@@ -5827,7 +6460,9 @@ const HexGridWithToolbar = () => {
             {isPastePreviewMode ? (
               'Paste Mode: Active'
             ) : RING_PRESET_MODES.includes(mode) ? (
-              `Preset: ${mode.charAt(0).toUpperCase() + mode.slice(1)}`
+              mode === 'newman'
+                ? `Preset: Newman (${latestNewmanInstance ? `${latestNewmanInstance.backRotationDeg}deg` : '60deg'})`
+                : `Preset: ${mode.charAt(0).toUpperCase() + mode.slice(1)}`
             ) : (
               showSnapPreview ? (
                 snapAlignment && snapAlignment.type === 'bond' ? 'Bond Snap: ON' : 'Grid Snap: ON'
@@ -5837,6 +6472,8 @@ const HexGridWithToolbar = () => {
           <div style={{ fontSize: '12px', opacity: '0.9' }}>
             {isPastePreviewMode ? (
               'Click to place • ESC to cancel'
+            ) : mode === 'newman' ? (
+              'Click to place • Use rotate button'
             ) : (mode === 'cyclopentane' || mode === 'cyclobutane' || mode === 'cyclopropane') ? 
              (snapAlignment && snapAlignment.type === 'bond' ? 'Snapping to bond' : 'Move near bond to snap') : 
              RING_PRESET_MODES.includes(mode) ? 'Click to place multiple' : 'Press G to toggle'}
@@ -5853,6 +6490,154 @@ const HexGridWithToolbar = () => {
             </div>
           )}
         </div>
+      )}
+
+      {/* Newman rotation button near latest projection */}
+      {latestNewmanInstance?.showRotateControl && (
+        <button
+          onClick={() => {
+            if (!latestNewmanInstance) return;
+            const increment = latestNewmanInstance.nextStepDeg === 45 ? 45 : 75;
+            const nextRotation = (latestNewmanInstance.backRotationDeg + increment) % 360;
+            const nextStepDeg = increment === 75 ? 45 : 75;
+            const oldGeometry = getNewmanProjectionGeometry(
+              latestNewmanInstance.x,
+              latestNewmanInstance.y,
+              latestNewmanInstance.radius,
+              latestNewmanInstance.backRotationDeg,
+              0
+            );
+
+            const updatedGeometry = getNewmanProjectionGeometry(
+              latestNewmanInstance.x,
+              latestNewmanInstance.y,
+              latestNewmanInstance.radius,
+              nextRotation,
+              0
+            );
+
+            setNewmanInstances(prev =>
+              prev.map(instance =>
+                instance.id === latestNewmanInstance.id
+                  ? {
+                      ...instance,
+                      backRotationDeg: nextRotation,
+                      nextStepDeg,
+                      lastTouchedAt: Date.now()
+                    }
+                  : instance
+              )
+            );
+
+            setVertices(prev =>
+              prev.map(vertex => {
+                if (vertex.newmanId !== latestNewmanInstance.id || vertex.newmanRole !== 'backOuter') {
+                  return vertex;
+                }
+                const i = vertex.newmanIndex || 0;
+                return {
+                  ...vertex,
+                  x: updatedGeometry.backEndpoints[i].x,
+                  y: updatedGeometry.backEndpoints[i].y
+                };
+              })
+            );
+
+            // Keep atom labels/metadata bound to rotated Newman back endpoints.
+            setVertexAtoms(prev => {
+              const updated = { ...prev };
+              for (let i = 0; i < oldGeometry.backEndpoints.length; i++) {
+                const oldPoint = oldGeometry.backEndpoints[i];
+                const newPoint = updatedGeometry.backEndpoints[i];
+                const oldKey = `${oldPoint.x.toFixed(2)},${oldPoint.y.toFixed(2)}`;
+                const newKey = `${newPoint.x.toFixed(2)},${newPoint.y.toFixed(2)}`;
+                if (oldKey === newKey) continue;
+                if (updated[oldKey] !== undefined && updated[newKey] === undefined) {
+                  updated[newKey] = updated[oldKey];
+                }
+                delete updated[oldKey];
+              }
+              return updated;
+            });
+
+            setVertexBondStates(prev => {
+              const updated = { ...prev };
+              for (let i = 0; i < oldGeometry.backEndpoints.length; i++) {
+                const oldPoint = oldGeometry.backEndpoints[i];
+                const newPoint = updatedGeometry.backEndpoints[i];
+                const oldKey = `${oldPoint.x.toFixed(2)},${oldPoint.y.toFixed(2)}`;
+                const newKey = `${newPoint.x.toFixed(2)},${newPoint.y.toFixed(2)}`;
+                if (oldKey === newKey) continue;
+                if (updated[oldKey] !== undefined && updated[newKey] === undefined) {
+                  updated[newKey] = updated[oldKey];
+                }
+                delete updated[oldKey];
+              }
+              return updated;
+            });
+
+            setSegments(prev =>
+              prev.map(segment => {
+                if (segment.newmanId !== latestNewmanInstance.id || segment.newmanRole !== 'back') {
+                  return segment;
+                }
+                const i = segment.newmanIndex || 0;
+                const x1 = updatedGeometry.backStarts[i].x;
+                const y1 = updatedGeometry.backStarts[i].y;
+                const x2 = updatedGeometry.backEndpoints[i].x;
+                const y2 = updatedGeometry.backEndpoints[i].y;
+                return {
+                  ...segment,
+                  x1,
+                  y1,
+                  x2,
+                  y2,
+                  direction: calculateBondDirection(x1, y1, x2, y2)
+                };
+              })
+            );
+          }}
+          onMouseEnter={() => setIsRotateArrowHovered(true)}
+          onMouseLeave={() => setIsRotateArrowHovered(false)}
+          className="toolbar-button"
+          style={{
+            position: 'fixed',
+            top: `${canvasScreenTop + latestNewmanInstance.y + offset.y - (latestNewmanInstance.radius * 0.18) + 5}px`,
+            left: `${canvasScreenLeft + latestNewmanInstance.x + offset.x + latestNewmanInstance.radius + 8}px`,
+            transform: 'translate(-50%, -50%)',
+            zIndex: 14,
+            backgroundColor: 'transparent',
+            color: '#16a34a',
+            border: 'none',
+            borderRadius: 0,
+            width: '46px',
+            height: '46px',
+            padding: 0,
+            cursor: 'pointer',
+            boxShadow: 'none',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            lineHeight: 1
+          }}
+          title={`Rotate Newman (${latestNewmanInstance.backRotationDeg}deg)`}
+        >
+          <svg width="38" height="38" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
+            <path
+              d="M9.9 5.5a9.2 9.2 0 0 1 6.4 14.2"
+              stroke={isRotateArrowHovered ? '#22c55e' : '#16a34a'}
+              strokeWidth="3.4"
+              strokeLinecap="round"
+            />
+            <path
+              d="M16.2 22 12 22 14 17.7"
+              stroke={isRotateArrowHovered ? '#22c55e' : '#16a34a'}
+              strokeWidth="3.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </button>
       )}
       
       {/* About Popup */}

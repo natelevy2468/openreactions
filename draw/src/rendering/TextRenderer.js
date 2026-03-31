@@ -29,7 +29,15 @@ function measureRun(ctx, fontSizePx, text) {
  * @param {Object} colors - Color scheme
  * @param {boolean} isDarkMode - Whether dark mode is active
  */
-export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode = false) => {
+export const renderAtomText = (
+  ctx,
+  vertex,
+  atomData,
+  offset,
+  colors,
+  isDarkMode = false,
+  newmanInstanceMap = null
+) => {
   if (!atomData || !atomData.symbol) return;
 
   const screenX = vertex.x + offset.x;
@@ -105,9 +113,36 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
     maxBot = MAIN_FONT_PX * 0.28;
   }
 
-  const mainBaselineY = screenY - (minTop + maxBot) / 2;
+  let mainBaselineY = screenY - (minTop + maxBot) / 2;
+  let leftX = screenX - totalWidth / 2;
 
-  const leftX = screenX - totalWidth / 2;
+  // Newman outer labels should flow away from the circle center so text does not cover the ring.
+  if (
+    newmanInstanceMap &&
+    vertex?.newmanId &&
+    (vertex?.newmanRole === 'frontOuter' || vertex?.newmanRole === 'backOuter')
+  ) {
+    const instance = newmanInstanceMap.get(vertex.newmanId);
+    if (instance) {
+      const dx = vertex.x - instance.x;
+      const dy = vertex.y - instance.y;
+      const horizontalDominant = Math.abs(dx) >= Math.abs(dy);
+      const clearance = 8;
+
+      if (horizontalDominant) {
+        if (dx >= 0) {
+          leftX = screenX + clearance; // Right side extends right.
+        } else {
+          leftX = screenX - totalWidth - clearance; // Left side extends left.
+        }
+        if (dy > 0) mainBaselineY += 4;
+        if (dy < 0) mainBaselineY -= 4;
+      } else {
+        leftX = screenX - totalWidth / 2;
+        mainBaselineY = screenY + (dy >= 0 ? 18 : -10); // Top/bottom labels move away vertically.
+      }
+    }
+  }
   const boxTop = mainBaselineY + minTop - LABEL_PAD;
   const boxH = maxBot - minTop + LABEL_PAD * 2;
   const boxW = totalWidth + LABEL_PAD * 2;
@@ -157,12 +192,24 @@ export const renderAtomText = (ctx, vertex, atomData, offset, colors, isDarkMode
  * @param {Object} colors - Color scheme
  * @param {boolean} isDarkMode - Whether dark mode is active
  */
-export const renderAllAtomText = (ctx, vertices, vertexAtoms, offset, colors, isDarkMode = false) => {
+export const renderAllAtomText = (
+  ctx,
+  vertices,
+  vertexAtoms,
+  offset,
+  colors,
+  isDarkMode = false,
+  newmanInstances = []
+) => {
   // Create vertex lookup map for O(1) access instead of O(n) find operations
   const vertexMap = new Map();
+  const newmanInstanceMap = new Map();
   vertices.forEach(v => {
     const key = `${v.x.toFixed(2)},${v.y.toFixed(2)}`;
     vertexMap.set(key, v);
+  });
+  newmanInstances.forEach(instance => {
+    newmanInstanceMap.set(instance.id, instance);
   });
   
   // Render each atom text
@@ -170,7 +217,7 @@ export const renderAllAtomText = (ctx, vertices, vertexAtoms, offset, colors, is
     const vertex = vertexMap.get(vertexKey);
     
     if (vertex) {
-      renderAtomText(ctx, vertex, atomData, offset, colors, isDarkMode);
+      renderAtomText(ctx, vertex, atomData, offset, colors, isDarkMode, newmanInstanceMap);
     }
   });
 };
