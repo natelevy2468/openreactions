@@ -198,7 +198,7 @@ export const getRingTypeName = (size) => {
  * @param {Array} vertices - All vertices
  * @returns {Object} Enhanced ring with additional metadata
  */
-export const enhanceRingMetadata = (ring, bonds, vertices) => {
+export const enhanceRingMetadata = (ring, bonds, _vertices) => {
   const enhanced = { ...ring };
   
   // Calculate ring center using centroid of vertices
@@ -287,87 +287,6 @@ export const calculateBondInteriorDirection = (bond, ringCenter) => {
     ringCenter.y - bondMidY,
     ringCenter.x - bondMidX
   );
-};
-
-/**
- * Detects three-membered rings (triangles)
- * @param {Array} bonds - All bonds
- * @param {Array} vertices - All vertices
- * @returns {Array} Array of detected triangular rings
- */
-export const detectThreeMemberedRings = (bonds, vertices) => {
-  const rings = [];
-  const tolerance = 0.01;
-  
-  // Build adjacency list
-  const adjacency = buildAdjacencyList(bonds, vertices, tolerance);
-  
-  // Find triangular cycles
-  for (let i = 0; i < vertices.length; i++) {
-    const vertex1 = vertices[i];
-    const neighbors1 = adjacency[i] || [];
-    
-    for (const neighbor1 of neighbors1) {
-      const vertex2 = vertices[neighbor1.vertexIndex];
-      const neighbors2 = adjacency[neighbor1.vertexIndex] || [];
-      
-      for (const neighbor2 of neighbors2) {
-        if (neighbor2.vertexIndex === i) {
-          // Found a triangle: vertex1 -> vertex2 -> vertex1
-          const vertex3Index = neighbor2.vertexIndex;
-          
-          // Check if we haven't already found this triangle
-          const triangleKey = [i, neighbor1.vertexIndex, vertex3Index].sort().join('-');
-          
-          if (!rings.some(ring => ring.key === triangleKey)) {
-            rings.push({
-              size: 3,
-              vertices: [vertex1, vertex2, vertices[vertex3Index]],
-              bonds: [neighbor1.bond, neighbor2.bond, findBondBetweenVertices(vertex1, vertices[vertex3Index], bonds)],
-              key: triangleKey,
-              type: 'triangle'
-            });
-          }
-        }
-      }
-    }
-  }
-  
-  return rings;
-};
-
-/**
- * Detects four-membered rings (squares)
- * @param {Array} bonds - All bonds
- * @param {Array} vertices - All vertices
- * @returns {Array} Array of detected square rings
- */
-export const detectFourMemberedRings = (bonds, vertices) => {
-  // Similar implementation to three-membered, but for 4-vertex cycles
-  // Implementation would follow the same pattern but check for 4-vertex paths
-  return []; // Placeholder - would implement full 4-ring detection
-};
-
-/**
- * Detects five-membered rings (pentagons)
- * @param {Array} bonds - All bonds
- * @param {Array} vertices - All vertices
- * @returns {Array} Array of detected pentagonal rings
- */
-export const detectFiveMemberedRings = (bonds, vertices) => {
-  // Implementation for 5-vertex cycles
-  return []; // Placeholder
-};
-
-/**
- * Detects six-membered rings (hexagons)
- * @param {Array} bonds - All bonds
- * @param {Array} vertices - All vertices
- * @returns {Array} Array of detected hexagonal rings
- */
-export const detectSixMemberedRings = (bonds, vertices) => {
-  // Implementation for 6-vertex cycles
-  return []; // Placeholder
 };
 
 /**
@@ -506,7 +425,7 @@ export const calculateRingPerimeter = (ring) => {
  * @param {Array} allBonds - All bonds
  * @returns {boolean} Whether ring appears aromatic
  */
-export const determineAromaticity = (ring, allBonds) => {
+export const determineAromaticity = (ring, _allBonds) => {
   if (!ring.bonds || ring.size !== 6) return false; // Only 6-membered rings can be aromatic in this simple check
   
   // Count double bonds in the ring

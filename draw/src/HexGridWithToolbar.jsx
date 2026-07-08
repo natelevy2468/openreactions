@@ -2,17 +2,16 @@ import React, { useRef, useState, useCallback } from 'react';
 import logoFinal4 from '/logoFinal4.png';
 import gearIcon from '/gear.png';
 import { formatAtomText } from './utils/TextUtils.jsx';
-import { renderDoubleBond, analyzeBondContext, findNeighboringBonds } from './rendering/DoubleBondRenderer.js';
 import { detectAllRingsEnhanced } from './rendering/RingDetectionUtils.js';
-import { 
+import { renderDoubleBondByCase } from './rendering/DoubleBondRenderer.js';
+import {
   handleTextButtonClick, 
   handleEnterKeyOnVertex, 
   handleQuickElementKey,
   handleTextInputComplete 
 } from './handlers/TextHandler.js';
-import { renderAllAtomText } from './rendering/TextRenderer.js';
+import { renderAllAtomText, getAtomLabelHalfExtents } from './rendering/TextRenderer.js';
 import { renderAllLonePairsAndCharges } from './rendering/LonePairRenderer.js';
-import { getLonePairPositionOrder } from './utils/LonePairPositioning.js';
 import { renderAllStereochemistryBonds, renderStereochemistryBond } from './rendering/StereochemistryRenderer.js';
 import {
   renderAllArrows,
@@ -27,9 +26,37 @@ import {
   computeCanvasContentBounds,
   exportCanvasCroppedSnapshot,
 } from './utils/cleanExportCanvas.js';
+import {
+  calculateBondDirection,
+  normalizeAngle,
+  normalizeToSixtyDegrees,
+  CHAIR_MIDDLE_VERTEX_INDEXES,
+  getChairVertices,
+  getChairSubstituentAngles,
+  getNewmanProjectionGeometry,
+} from './utils/geometry.js';
+import { reassignAndDedupeBonds, mergeAtomLabels } from './utils/vertexMerge.js';
+import { computeImplicitH } from './utils/valence.js';
+import { getColorScheme } from './theme/colors.js';
+import {
+  findNearestVertex as findNearestVertexPure,
+  findHoveredBondIndex,
+  detectArrowPart as detectArrowPartPure,
+  findHoveredArrowIndex,
+} from './utils/hitTest.js';
+import { buildMoleculeGraph } from './chemistry/moleculeGraph.js';
+import { graphToSmiles } from './chemistry/exportStructure.js';
+import { smilesToGraph } from './chemistry/importStructure.js';
+import {
+  ArrowCCWSemicircleTopLeft,
+  ArrowCWSemicircleTopCenter,
+  ArrowCWQuarterTopRight,
+  ArrowCCWSemicircleBottomLeft,
+  ArrowCWSemicircleBottomCenter,
+  ArrowCWQuarterBottomRight,
+} from './components/CurvedArrowIcons.jsx';
 
 const RING_PRESET_MODES = ['benzene', 'cyclohexane', 'cyclopentane', 'cyclobutane', 'cyclopropane', 'chair', 'newman'];
-const CHAIR_MIDDLE_VERTEX_INDEXES = new Set([2, 5]);
 
 const HexGridWithToolbar = () => {
     const canvasRef = useRef(null);
@@ -63,21 +90,12 @@ const HexGridWithToolbar = () => {
     
     // UI interaction state
     const [offset, setOffset] = useState({ x: 0, y: 0 });
-    const [isDragging, setIsDragging] = useState(false);
-    const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-    const [showMenu, setShowMenu] = useState(false);
-    const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
     const [menuVertexKey, setMenuVertexKey] = useState(null);
-    const [hoverVertex, setHoverVertex] = useState(null);
-    const [hoverSegmentIndex, setHoverSegmentIndex] = useState(null);
-    const [hoverCurvedArrow, setHoverCurvedArrow] = useState({ index: -1, part: null });
-    const [arrowPreview, setArrowPreview] = useState(null);
-    
+
     // Selection state
     const [isSelecting, setIsSelecting] = useState(false);
     const [selectionStart, setSelectionStart] = useState({ x: 0, y: 0 });
     const [selectionEnd, setSelectionEnd] = useState({ x: 0, y: 0 });
-    const [selectionBounds, setSelectionBounds] = useState(null);
     const [selectedMolecules, setSelectedMolecules] = useState([]); // Array of molecule vertex sets
     const [isDraggingSelection, setIsDraggingSelection] = useState(false);
     const [dragSelectionStart, setDragSelectionStart] = useState({ x: 0, y: 0 });
@@ -86,15 +104,13 @@ const HexGridWithToolbar = () => {
     const [draggingArrow, setDraggingArrow] = useState(null); // Arrow being dragged
     const [draggingArrowEnd, setDraggingArrowEnd] = useState(null); // Which end: 'start', 'end', or 'middle'
     const [justCompletedSelection, setJustCompletedSelection] = useState(false); // Prevent click after selection
-    const [arrowControlOffsets, setArrowControlOffsets] = useState({}); // Store control offset for curved arrows
-    
+
     // Copy/paste state
     const [clipboard, setClipboard] = useState(null);
     const [pastePreviewPosition, setPastePreviewPosition] = useState({ x: 0, y: 0 });
     const [isPastePreviewMode, setIsPastePreviewMode] = useState(false);
     
     // Grid and snapping state
-    const [gridVertexIndex, setGridVertexIndex] = useState(new Map());
     const [snapAlignment, setSnapAlignment] = useState(null);
     const [showSnapPreview, setShowSnapPreview] = useState(true);
     
@@ -132,7 +148,35 @@ const HexGridWithToolbar = () => {
     const [showExportPopup, setShowExportPopup] = useState(false);
     const [exportImageUrl, setExportImageUrl] = useState(null);
     const [exportMetadata, setExportMetadata] = useState(null);
-    
+
+    // SMILES export result shown in the Settings dropdown
+    // { smiles: string, warnings: string[], copied: boolean }
+    const [smilesResult, setSmilesResult] = useState(null);
+
+    // Build a SMILES string from the current drawing, show it, and copy it to
+    // the clipboard. The chemistry lives in the framework-agnostic modules
+    // under src/chemistry so this handler stays thin.
+    const handleCopySmiles = useCallback(async () => {
+      const graph = buildMoleculeGraph({ vertices, segments, vertexAtoms });
+      const { smiles, warnings } = await graphToSmiles(graph);
+      let copied = false;
+      if (smiles) {
+        try {
+          await navigator.clipboard.writeText(smiles);
+          copied = true;
+        } catch {
+          copied = false; // clipboard blocked (e.g. insecure context); still show the string
+        }
+      }
+      setSmilesResult({ smiles, warnings, copied });
+    }, [vertices, segments, vertexAtoms]);
+
+    // SMILES import: text box + result message. The handler itself
+    // (handleImportSmiles) is defined lower down, after the geometry/history
+    // helpers it depends on are declared.
+    const [smilesInput, setSmilesInput] = useState('');
+    const [smilesImportMessage, setSmilesImportMessage] = useState(null); // { text, isError }
+
     // Mode switching function
     const setModeAndClearSelection = (newMode) => {
       setMode(newMode);
@@ -271,47 +315,8 @@ const HexGridWithToolbar = () => {
     ]);
   
   // Color scheme function - returns appropriate colors based on dark mode
-  const getColors = useCallback(() => {
-    if (isDarkMode) {
-      return {
-        background: '#1a1a1a',
-        surface: '#2d2d2d',
-        surfaceHover: '#3a3a3a',
-        border: '#404040',
-        text: '#ffffff',
-        textSecondary: '#b3b3b3',
-        textTertiary: '#808080',
-        button: '#404040',
-        buttonHover: '#4a4a4a',
-        buttonActive: 'rgb(54,98,227)', // Keep accent color the same
-        shadow: 'rgba(0,0,0,0.5)',
-        canvasBackground: '#1a1a1a',
-        gridLines: '#333333',
-        bonds: '#ffffff',
-        atoms: '#ffffff'
-      };
-    } else {
-      return {
-        background: '#ffffff',
-        surface: '#ffffff',
-        surfaceHover: '#f5f5f5',
-        border: '#e3e7eb',
-        text: '#1a1a1a',
-        textSecondary: '#666666',
-        textTertiary: '#999999',
-        button: '#e9ecef',
-        buttonHover: '#dee2e6',
-        buttonActive: 'rgb(54,98,227)',
-        shadow: 'rgba(0,0,0,0.1)',
-        canvasBackground: '#ffffff',
-        gridLines: '#ddd',
-        bonds: '#000000',
-        atoms: '#000000'
-      };
-    }
-  }, [isDarkMode]);
-  
-  const colors = getColors();
+  // Color palette lives in ./theme/colors.js; select by the current theme.
+  const colors = getColorScheme(isDarkMode);
 
   // Drawing constants
   const hexRadius = 60; // Standard bond length (doubled from 30 to 60)
@@ -324,17 +329,8 @@ const HexGridWithToolbar = () => {
   // Common bond angles (in radians): 60°, 120°, 180°, 240°, 300°, 0° (rotated by +30° from previous)
   const snapAngles = [Math.PI/3, 2*Math.PI/3, Math.PI, 4*Math.PI/3, 5*Math.PI/3, 0];
 
-  // Helper functions for bond creation
-  const calculateBondDirection = (x1, y1, x2, y2) => {
-    return Math.atan2(y2 - y1, x2 - x1);
-  };
-
-  // Helper function to normalize angle to 0-2π range
-  const normalizeAngle = (angle) => {
-    while (angle < 0) angle += 2 * Math.PI;
-    while (angle >= 2 * Math.PI) angle -= 2 * Math.PI;
-    return angle;
-  };
+  // Pure bond-angle helpers (calculateBondDirection, normalizeAngle,
+  // normalizeToSixtyDegrees) now live in ./utils/geometry.js.
 
   // Helper function to find the closest snap angle for a specific vertex
   const findClosestSnapAngle = (targetAngle, startVertex = null) => {
@@ -475,116 +471,9 @@ const HexGridWithToolbar = () => {
   }, []);
 
   // Helper for chair conformation preset geometry
-  const getChairVertices = (centerX, centerY, bondLength, rotation = 0, flip = false) => {
-    const basePoints = [
-      { x: -1.35, y: 0.78 },
-      { x: -0.93, y: -0.47 },
-      { x: 0.20, y: -0.07 },
-      { x: 1.41, y: -0.45 },
-      { x: 0.99, y: 0.80 },
-      { x: -0.14, y: 0.40 }
-    ];
-    const averageEdgeLength = 1.26;
-    const scale = bondLength / averageEdgeLength;
-    const cosR = Math.cos(rotation);
-    const sinR = Math.sin(rotation);
-
-    return basePoints.map(point => {
-      const fx = flip ? -point.x : point.x;
-      const scaledX = fx * scale;
-      const scaledY = point.y * scale;
-      return {
-        x: centerX + (scaledX * cosR - scaledY * sinR),
-        y: centerY + (scaledX * sinR + scaledY * cosR),
-        isOffGrid: true
-      };
-    });
-  };
-
-  const getChairSubstituentAngles = (chairVertices, centerX, centerY, flip = false) => {
-    const equatorialOffset = 15 * (Math.PI / 180);
-    const middleEquatorialAngle = 120 * (Math.PI / 180);
-    return chairVertices.map((vertex, i) => {
-      const radialX = vertex.x - centerX;
-      const axialPolarity = (i % 2 === 0 ? 1 : -1) * (flip ? -1 : 1);
-      const horizontalDir = radialX >= 0 ? 1 : -1;
-
-      const axialAngle = axialPolarity < 0 ? (-Math.PI / 2) : (Math.PI / 2);
-      const equatorialGoesDown = axialPolarity < 0; // Up axial => down equatorial, and vice versa.
-
-      let equatorialAngle;
-      if (CHAIR_MIDDLE_VERTEX_INDEXES.has(i)) {
-        // Middle chair carbons use a steeper equatorial direction to keep substituent preview clear.
-        equatorialAngle = i === 2
-          ? -(Math.PI - middleEquatorialAngle)
-          : middleEquatorialAngle;
-      } else if (horizontalDir > 0) {
-        equatorialAngle = equatorialGoesDown ? equatorialOffset : -equatorialOffset;
-      } else {
-        equatorialAngle = Math.PI + (equatorialGoesDown ? -equatorialOffset : equatorialOffset);
-      }
-
-      return {
-        axialAngle: normalizeAngle(axialAngle),
-        equatorialAngle: normalizeAngle(equatorialAngle)
-      };
-    });
-  };
-
-  const getNewmanProjectionGeometry = (
-    centerX,
-    centerY,
-    radius,
-    backRotationDeg = 60,
-    rotation = 0
-  ) => {
-    const frontAnglesBase = [-Math.PI / 2, Math.PI / 6, (5 * Math.PI) / 6];
-    const phaseShift = (backRotationDeg * Math.PI) / 180;
-    const frontOutsideBondLength = radius * 1.6;
-    const backOutsideBondLength = radius * 0.9;
-
-    const frontAngles = frontAnglesBase.map(angle => normalizeAngle(angle + rotation));
-    const backAngles = frontAnglesBase.map(angle => normalizeAngle(angle + phaseShift + rotation));
-
-    const frontEndpoints = frontAngles.map(angle => ({
-      x: centerX + Math.cos(angle) * frontOutsideBondLength,
-      y: centerY + Math.sin(angle) * frontOutsideBondLength
-    }));
-
-    const backStarts = backAngles.map(angle => ({
-      x: centerX + Math.cos(angle) * radius,
-      y: centerY + Math.sin(angle) * radius
-    }));
-
-    const backEndpoints = backAngles.map(angle => ({
-      x: centerX + Math.cos(angle) * (radius + backOutsideBondLength),
-      y: centerY + Math.sin(angle) * (radius + backOutsideBondLength)
-    }));
-
-    return { frontEndpoints, backStarts, backEndpoints };
-  };
-
-  // Helper function to normalize angle to nearest 60-degree increment (rotated by 30°)
-  const normalizeToSixtyDegrees = (angle) => {
-    const normalizedAngle = normalizeAngle(angle);
-    // 60-degree increments rotated by 30°: 30°, 90°, 150°, 210°, 270°, 330°
-    const sixtyDegreeIncrements = [Math.PI/6, Math.PI/2, 5*Math.PI/6, 7*Math.PI/6, 3*Math.PI/2, 11*Math.PI/6];
-    
-    let closestAngle = sixtyDegreeIncrements[0];
-    let minDiff = Math.abs(normalizedAngle - closestAngle);
-    
-    for (const increment of sixtyDegreeIncrements) {
-      let diff = Math.abs(normalizedAngle - increment);
-      if (diff > Math.PI) diff = 2 * Math.PI - diff;
-      
-      if (diff < minDiff) {
-        minDiff = diff;
-        closestAngle = increment;
-      }
-    }
-    
-    return closestAngle;
-  };
+  // Chair/Newman projection geometry (getChairVertices, getChairSubstituentAngles,
+  // getNewmanProjectionGeometry) and CHAIR_MIDDLE_VERTEX_INDEXES now live in
+  // ./utils/geometry.js.
 
   // Helper function to determine vertex orientation (30° or 90° based, rotated by 30°)
   const determineVertexOrientation = (existingAngles) => {
@@ -797,230 +686,73 @@ const HexGridWithToolbar = () => {
     setDetectedRings(rings);
   }, [segments, vertices]);
 
-  // Helper function to check if a bond is in any detected ring
-  const isBondInRing = (bond) => {
-    for (const ring of detectedRings) {
-      if (ring.bonds) {
-        const bondExists = ring.bonds.some(ringBond => {
-          const tolerance = 0.01;
-          return (
-            Math.abs(ringBond.x1 - bond.x1) < tolerance &&
-            Math.abs(ringBond.y1 - bond.y1) < tolerance &&
-            Math.abs(ringBond.x2 - bond.x2) < tolerance &&
-            Math.abs(ringBond.y2 - bond.y2) < tolerance
-          ) || (
-            Math.abs(ringBond.x1 - bond.x2) < tolerance &&
-            Math.abs(ringBond.y1 - bond.y2) < tolerance &&
-            Math.abs(ringBond.x2 - bond.x1) < tolerance &&
-            Math.abs(ringBond.y2 - bond.y1) < tolerance
-          );
-        });
-        
-        if (bondExists) return ring;
-      }
+  // Parse a SMILES string and add the resulting structure to the canvas,
+  // centered in the current view. Carbons stay implicit (no vertexAtoms entry);
+  // heteroatoms and charged atoms get an atom label. Defined here (not with the
+  // other SMILES state near the top) so its geometry/history dependencies exist.
+  const handleImportSmiles = useCallback(async () => {
+    const { atoms, bonds, warnings } = await smilesToGraph(smilesInput, { bondLength: hexRadius });
+    if (atoms.length === 0) {
+      setSmilesImportMessage({ text: warnings[0] || 'Could not import that SMILES.', isError: true });
+      return;
     }
-    return null;
-  };
 
-  // Helper function to get interior direction for a ring bond
-  const getRingInteriorDirection = (bond, ring) => {
-    if (!ring || !ring.center) return null;
-    
-    const bondMidX = (bond.x1 + bond.x2) / 2;
-    const bondMidY = (bond.y1 + bond.y2) / 2;
-    
-    return Math.atan2(
-      ring.center.y - bondMidY,
-      ring.center.x - bondMidX
-    );
-  };
+    // Place the fragment at the center of the visible canvas (world coords).
+    const canvas = canvasRef.current;
+    const rect = canvas ? canvas.getBoundingClientRect() : { width: 800, height: 600 };
+    const worldCenterX = rect.width / 2 - offset.x;
+    const worldCenterY = rect.height / 2 - offset.y;
 
-  // Helper function to determine double bond rendering case
-  const getDoubleBondRenderingCase = (bond) => {
-    const startVertex = { x: bond.x1, y: bond.y1 };
-    const endVertex = { x: bond.x2, y: bond.y2 };
-    
-    const startVertexBondCount = countVertexBonds(startVertex);
-    const endVertexBondCount = countVertexBonds(endVertex);
-    
-    // Case 1: Both vertices have additional bonds (single + offset line)
-    if (startVertexBondCount > 1 && endVertexBondCount > 1) {
-      return 'single-plus-offset';
-    }
-    
-    // Case 2: At least one vertex has no additional bonds (equal parallel lines)
-    return 'equal-parallel';
-  };
+    const newVertices = atoms.map((a) => ({
+      x: +(worldCenterX + a.x).toFixed(2),
+      y: +(worldCenterY + a.y).toFixed(2),
+      isOffGrid: false,
+    }));
 
-  // Helper function to render a double bond based on its case and ring status
-  const renderDoubleBondByCase = (ctx, bond, offset, colors) => {
-    // Check if bond is in a ring
-    const ringInfo = isBondInRing(bond);
-    
-    if (ringInfo) {
-      // Ring double bond - always render with interior offset
-      const interiorDirection = getRingInteriorDirection(bond, ringInfo);
-      const offsetDistance = 11; // Further from main line for better visibility
-      
-      const offsetX = Math.cos(interiorDirection) * offsetDistance;
-      const offsetY = Math.sin(interiorDirection) * offsetDistance;
-      
-      // Draw main bond line
-      ctx.strokeStyle = colors.bonds;
-      ctx.lineWidth = 3;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(bond.x1 + offset.x, bond.y1 + offset.y);
-      ctx.lineTo(bond.x2 + offset.x, bond.y2 + offset.y);
-      ctx.stroke();
-      
-      // Draw interior offset line (slightly longer and further away)
-      const bondLength = Math.sqrt(Math.pow(bond.x2 - bond.x1, 2) + Math.pow(bond.y2 - bond.y1, 2));
-      const shorterLength = bondLength * 0.77; // Slightly longer (increased from 0.6 to 0.7)
-      const centerX = (bond.x1 + bond.x2) / 2;
-      const centerY = (bond.y1 + bond.y2) / 2;
-      
-      const bondUnitX = (bond.x2 - bond.x1) / bondLength;
-      const bondUnitY = (bond.y2 - bond.y1) / bondLength;
-      
-      const shorterStartX = centerX - (bondUnitX * shorterLength / 2);
-      const shorterStartY = centerY - (bondUnitY * shorterLength / 2);
-      const shorterEndX = centerX + (bondUnitX * shorterLength / 2);
-      const shorterEndY = centerY + (bondUnitY * shorterLength / 2);
-      
-      // Draw interior offset line
-      ctx.beginPath();
-      ctx.moveTo(shorterStartX + offsetX + offset.x, shorterStartY + offsetY + offset.y);
-      ctx.lineTo(shorterEndX + offsetX + offset.x, shorterEndY + offsetY + offset.y);
-      ctx.stroke();
-      
-    } else {
-      // Non-ring double bond - use existing case logic
-      const renderingCase = getDoubleBondRenderingCase(bond);
-      
-      if (renderingCase === 'equal-parallel') {
-        // Case 2: Two parallel lines of equal length - slightly closer
-        const bondAngle = Math.atan2(bond.y2 - bond.y1, bond.x2 - bond.x1);
-        const perpAngle = bondAngle + Math.PI / 2;
-        const offsetDistance = 5; // Reduced from 6 to 5 pixels (slightly closer)
-        
-        const offsetX = Math.cos(perpAngle) * offsetDistance;
-        const offsetY = Math.sin(perpAngle) * offsetDistance;
-        
-        // Draw two equal parallel lines
-        ctx.strokeStyle = colors.bonds;
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        
-        // First line
-        ctx.beginPath();
-        ctx.moveTo(bond.x1 + offsetX + offset.x, bond.y1 + offsetY + offset.y);
-        ctx.lineTo(bond.x2 + offsetX + offset.x, bond.y2 + offsetY + offset.y);
-        ctx.stroke();
-        
-        // Second line
-        ctx.beginPath();
-        ctx.moveTo(bond.x1 - offsetX + offset.x, bond.y1 - offsetY + offset.y);
-        ctx.lineTo(bond.x2 - offsetX + offset.x, bond.y2 - offsetY + offset.y);
-        ctx.stroke();
-        
-      } else {
-        // Case 1: Single bond + shorter offset line (matching ring style)
-        const bondAngle = Math.atan2(bond.y2 - bond.y1, bond.x2 - bond.x1);
-        const perpAngle = bondAngle + Math.PI / 2; // Default offset direction
-        const offsetDistance = 11; // Match ring double bond style
-        
-        const offsetX = Math.cos(perpAngle) * offsetDistance;
-        const offsetY = Math.sin(perpAngle) * offsetDistance;
-        
-        // Draw main bond line (same as single bond)
-        ctx.strokeStyle = colors.bonds;
-        ctx.lineWidth = 3;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(bond.x1 + offset.x, bond.y1 + offset.y);
-        ctx.lineTo(bond.x2 + offset.x, bond.y2 + offset.y);
-        ctx.stroke();
-        
-        // Calculate shorter line endpoints (matching ring style - 77% length, centered)
-        const bondLength = Math.sqrt(Math.pow(bond.x2 - bond.x1, 2) + Math.pow(bond.y2 - bond.y1, 2));
-        const shorterLength = bondLength * 0.77; // Match ring double bond style
-        const centerX = (bond.x1 + bond.x2) / 2;
-        const centerY = (bond.y1 + bond.y2) / 2;
-        
-        const bondUnitX = (bond.x2 - bond.x1) / bondLength;
-        const bondUnitY = (bond.y2 - bond.y1) / bondLength;
-        
-        const shorterStartX = centerX - (bondUnitX * shorterLength / 2);
-        const shorterStartY = centerY - (bondUnitY * shorterLength / 2);
-        const shorterEndX = centerX + (bondUnitX * shorterLength / 2);
-        const shorterEndY = centerY + (bondUnitY * shorterLength / 2);
-        
-        // Draw shorter offset line - same thickness as main line
-        ctx.lineWidth = 3; // Same thickness as main line
-        ctx.beginPath();
-        ctx.moveTo(shorterStartX + offsetX + offset.x, shorterStartY + offsetY + offset.y);
-        ctx.lineTo(shorterEndX + offsetX + offset.x, shorterEndY + offsetY + offset.y);
-        ctx.stroke();
-      }
-    }
-  };
-
-  const findNearestVertex = (x, y) => {
-    let nearestVertex = null;
-    let minDistance = vertexThreshold;
-    
-    vertices.forEach(vertex => {
-      const distance = Math.sqrt(Math.pow(vertex.x - (x - offset.x), 2) + Math.pow(vertex.y - (y - offset.y), 2));
-      if (distance < minDistance) {
-        minDistance = distance;
-        nearestVertex = vertex;
+    const newVertexAtoms = {};
+    atoms.forEach((a, i) => {
+      if (a.element !== 'C' || a.charge !== 0) {
+        const key = `${newVertices[i].x.toFixed(2)},${newVertices[i].y.toFixed(2)}`;
+        newVertexAtoms[key] = { symbol: a.element, charge: a.charge || 0, implicitH: 0, lonePairs: 0 };
       }
     });
-    
-    return nearestVertex;
-  };
 
-  // Helper function to find if mouse is over a bond
-  const findHoveredBond = (x, y) => {
-    const worldX = x - offset.x;
-    const worldY = y - offset.y;
-    
-    for (let i = 0; i < segments.length; i++) {
-      const segment = segments[i];
-      if (segment.bondOrder <= 0) continue; // Skip grid lines
-      
-      // Calculate distance from point to line segment
-      const A = worldX - segment.x1;
-      const B = worldY - segment.y1;
-      const C = segment.x2 - segment.x1;
-      const D = segment.y2 - segment.y1;
-      
-      const dot = A * C + B * D;
-      const lenSq = C * C + D * D;
-      
-      if (lenSq === 0) continue; // Zero-length segment
-      
-      let param = dot / lenSq;
-      
-      // Clamp to segment bounds
-      if (param < 0) param = 0;
-      else if (param > 1) param = 1;
-      
-      const xx = segment.x1 + param * C;
-      const yy = segment.y1 + param * D;
-      
-      const dx = worldX - xx;
-      const dy = worldY - yy;
-      const distance = Math.sqrt(dx * dx + dy * dy);
-      
-      if (distance <= lineThreshold) {
-        return i;
-      }
-    }
-    
-    return null;
-  };
+    const newSegments = bonds.map((b) => {
+      const A = newVertices[b.from];
+      const B = newVertices[b.to];
+      return {
+        x1: A.x, y1: A.y, x2: B.x, y2: B.y,
+        bondOrder: b.order,
+        bondType: null,
+        bondDirection: 1,
+        direction: calculateBondDirection(A.x, A.y, B.x, B.y),
+        flipSmallerLine: false,
+      };
+    });
+
+    saveToHistory();
+    setVertices((prev) => [...prev, ...newVertices]);
+    setSegments((prev) => [...prev, ...newSegments]);
+    setVertexAtoms((prev) => ({ ...prev, ...newVertexAtoms }));
+    setTimeout(() => updateRingDetection(), 0);
+
+    setSmilesInput('');
+    setSmilesImportMessage({
+      text: `Added ${atoms.length} atom${atoms.length === 1 ? '' : 's'} to the canvas.`,
+      isError: false,
+    });
+  }, [smilesInput, hexRadius, offset, saveToHistory, updateRingDetection]);
+
+  // Double-bond rendering (findBondRing / renderDoubleBondByCase) now lives in
+  // ./rendering/DoubleBondRenderer.js.
+
+  // Thin wrappers over the pure hit-testers in ./utils/hitTest.js; convert the
+  // incoming screen coords to world coords using the current pan offset.
+  const findNearestVertex = (x, y) =>
+    findNearestVertexPure(vertices, x - offset.x, y - offset.y, vertexThreshold);
+
+  const findHoveredBond = (x, y) =>
+    findHoveredBondIndex(segments, x - offset.x, y - offset.y, lineThreshold);
 
   // Helper function to find connected molecule (all vertices connected by bonds)
   const findMolecule = useCallback((startVertex) => {
@@ -1068,132 +800,14 @@ const HexGridWithToolbar = () => {
     return { vertices: Array.from(moleculeVertices), bonds: moleculeBonds };
   }, [vertices, segments]);
 
-  // Helper function to check if a point is inside a molecule's bounding box
-  const isPointInMolecule = useCallback((worldX, worldY, molecule) => {
-    const threshold = 20; // Pixels
-    return molecule.vertices.some(v => {
-      const dist = Math.sqrt(Math.pow(v.x - worldX, 2) + Math.pow(v.y - worldY, 2));
-      return dist <= threshold;
-    });
-  }, []);
+  // Thin wrappers over the pure arrow hit-testers in ./utils/hitTest.js.
+  const detectArrowPart = useCallback(
+    (x, y, arrowIndex) => detectArrowPartPure(arrows, arrowIndex, x - offset.x, y - offset.y),
+    [arrows, offset]
+  );
 
-  // Helper function to detect which part of arrow is clicked (start, end, or middle)
-  const detectArrowPart = useCallback((x, y, arrowIndex) => {
-    if (arrowIndex === null || arrowIndex < 0 || arrowIndex >= arrows.length) return null;
-    
-    const arrow = arrows[arrowIndex];
-    const worldX = x - offset.x;
-    const worldY = y - offset.y;
-    const endpointThreshold = 25; // Large threshold for easy clicking on endpoints
-    
-    if (arrow.type === 'curved') {
-      const handle = getCurvedArrowMidHandleWorld(arrow);
-      if (handle) {
-        const controlDist = Math.hypot(worldX - handle.x, worldY - handle.y);
-        if (controlDist <= endpointThreshold) {
-          return 'control';
-        }
-      }
-
-      // Then check endpoints
-      const startDist = Math.sqrt(Math.pow(worldX - arrow.x1, 2) + Math.pow(worldY - arrow.y1, 2));
-      const endDist = Math.sqrt(Math.pow(worldX - arrow.x2, 2) + Math.pow(worldY - arrow.y2, 2));
-      
-      if (startDist <= endpointThreshold) {
-        return 'start';
-      }
-      if (endDist <= endpointThreshold) {
-        return 'end';
-      }
-      
-      return 'body';
-    } else {
-      // Straight arrow - check start and end
-      const endX = arrow.x + arrow.length * Math.cos(arrow.angle);
-      const endY = arrow.y + arrow.length * Math.sin(arrow.angle);
-      
-      const startDist = Math.sqrt(Math.pow(worldX - arrow.x, 2) + Math.pow(worldY - arrow.y, 2));
-      const endDist = Math.sqrt(Math.pow(worldX - endX, 2) + Math.pow(worldY - endY, 2));
-      
-      if (startDist <= endpointThreshold) return 'start';
-      if (endDist <= endpointThreshold) return 'end';
-      return 'middle';
-    }
-  }, [arrows, offset]);
-
-  // Helper function to find if mouse is over an arrow
-  const findHoveredArrow = (x, y) => {
-    const worldX = x - offset.x;
-    const worldY = y - offset.y;
-    const clickThreshold = 30; // Large threshold for easy clicking on arrows
-    
-    for (let i = 0; i < arrows.length; i++) {
-      const arrow = arrows[i];
-      
-      // Handle curved arrows
-      if (arrow.type === 'curved' || (arrow.type && arrow.type.startsWith('curve'))) {
-        // For curved arrows, check if point is near the curve path
-        // Check if near start or end point FIRST (most important)
-        const startDist = Math.sqrt(Math.pow(worldX - arrow.x1, 2) + Math.pow(worldY - arrow.y1, 2));
-        const endDist = Math.sqrt(Math.pow(worldX - arrow.x2, 2) + Math.pow(worldY - arrow.y2, 2));
-        
-        if (startDist <= clickThreshold || endDist <= clickThreshold) {
-          return i;
-        }
-        
-        const midX = (arrow.x1 + arrow.x2) / 2;
-        const midY = (arrow.y1 + arrow.y2) / 2;
-
-        const handle = getCurvedArrowMidHandleWorld(arrow);
-        if (handle) {
-          const controlDist = Math.hypot(worldX - handle.x, worldY - handle.y);
-          if (controlDist <= clickThreshold) {
-            return i;
-          }
-        }
-        
-        // Also check along the curve path (use midpoint as approximation)
-        const midDist = Math.sqrt(Math.pow(worldX - midX, 2) + Math.pow(worldY - midY, 2));
-        if (midDist <= clickThreshold * 1.5) {
-          return i;
-        }
-      } else {
-        // For straight arrows (forward and equilibrium)
-        const arrowEndX = arrow.x + arrow.length * Math.cos(arrow.angle);
-        const arrowEndY = arrow.y + arrow.length * Math.sin(arrow.angle);
-        
-        // Calculate distance from point to line segment
-        const A = worldX - arrow.x;
-        const B = worldY - arrow.y;
-        const C = arrowEndX - arrow.x;
-        const D = arrowEndY - arrow.y;
-        
-        const dot = A * C + B * D;
-        const lenSq = C * C + D * D;
-        
-        if (lenSq === 0) continue; // Zero-length arrow
-        
-        let param = dot / lenSq;
-        
-        // Clamp to segment bounds
-        if (param < 0) param = 0;
-        else if (param > 1) param = 1;
-        
-        const xx = arrow.x + param * C;
-        const yy = arrow.y + param * D;
-        
-        const dx = worldX - xx;
-        const dy = worldY - yy;
-        const distance = Math.sqrt(dx * dx + dy * dy);
-        
-        if (distance <= clickThreshold) {
-          return i;
-        }
-      }
-    }
-    
-    return null;
-  };
+  const findHoveredArrow = (x, y) =>
+    findHoveredArrowIndex(arrows, x - offset.x, y - offset.y);
 
   // Helper function to check if a suggested bond would overlap with existing bonds
   const wouldOverlapExistingBond = (suggestionStart, suggestionEnd) => {
@@ -1516,87 +1130,44 @@ const HexGridWithToolbar = () => {
     return mergeOperations;
   }, [vertices, mergeThreshold, vertexBondStates]);
 
-  // Helper function to perform vertex merging
+  // Helper function to perform vertex merging.
+  //
+  // The merge keeps vertex1 (the older/existing vertex — findVerticesToMerge
+  // always orders the pair by index, and freshly-placed vertices are appended)
+  // exactly where it is, and snaps vertex2 onto it. This is the ChemDraw/Marvin
+  // behavior: dropping a new atom onto an existing one connects to it without
+  // shifting the existing structure (the old code averaged the two positions,
+  // which nudged the whole molecule). It also reassigns bonds, drops the
+  // zero-length self-loop and any duplicate bond the merge would create, and
+  // preserves the more meaningful atom label.
   const performVertexMerge = useCallback((mergeOperation) => {
-    const { vertex1Index, vertex2Index, vertex1, vertex2 } = mergeOperation;
-    
-    // Calculate merged position (average of the two vertices)
-    const mergedVertex = {
-      x: (vertex1.x + vertex2.x) / 2,
-      y: (vertex1.y + vertex2.y) / 2,
-      isOffGrid: vertex1.isOffGrid || vertex2.isOffGrid // Keep off-grid status if either is off-grid
-    };
-    
-    // Update vertices array - remove both old vertices and add merged one
-    setVertices(prevVertices => {
-      const newVertices = [...prevVertices];
-      // Remove vertices in reverse order to maintain indices
-      if (vertex2Index > vertex1Index) {
-        newVertices.splice(vertex2Index, 1);
-        newVertices.splice(vertex1Index, 1);
-      } else {
-        newVertices.splice(vertex1Index, 1);
-        newVertices.splice(vertex2Index, 1);
-      }
-      newVertices.push(mergedVertex);
-      return newVertices;
-    });
-    
-    // Update all segments that reference the old vertices
-    setSegments(prevSegments => {
-      return prevSegments.map(segment => {
-        let updatedSegment = { ...segment };
-        
-        // Check if segment uses vertex1
-        if (Math.abs(segment.x1 - vertex1.x) < 0.01 && Math.abs(segment.y1 - vertex1.y) < 0.01) {
-          updatedSegment.x1 = mergedVertex.x;
-          updatedSegment.y1 = mergedVertex.y;
-        }
-        if (Math.abs(segment.x2 - vertex1.x) < 0.01 && Math.abs(segment.y2 - vertex1.y) < 0.01) {
-          updatedSegment.x2 = mergedVertex.x;
-          updatedSegment.y2 = mergedVertex.y;
-        }
-        
-        // Check if segment uses vertex2
-        if (Math.abs(segment.x1 - vertex2.x) < 0.01 && Math.abs(segment.y1 - vertex2.y) < 0.01) {
-          updatedSegment.x1 = mergedVertex.x;
-          updatedSegment.y1 = mergedVertex.y;
-        }
-        if (Math.abs(segment.x2 - vertex2.x) < 0.01 && Math.abs(segment.y2 - vertex2.y) < 0.01) {
-          updatedSegment.x2 = mergedVertex.x;
-          updatedSegment.y2 = mergedVertex.y;
-        }
-        
-        // Recalculate bond direction if endpoints changed
-        if (updatedSegment.x1 !== segment.x1 || updatedSegment.y1 !== segment.y1 || 
-            updatedSegment.x2 !== segment.x2 || updatedSegment.y2 !== segment.y2) {
-          updatedSegment.direction = calculateBondDirection(
-            updatedSegment.x1, updatedSegment.y1, 
-            updatedSegment.x2, updatedSegment.y2
-          );
-        }
-        
-        return updatedSegment;
-      });
-    });
-    
-    // Update vertex atoms if they exist for the merged vertices
-    setVertexAtoms(prevAtoms => {
-      const newAtoms = { ...prevAtoms };
-      const vertex1Key = `${vertex1.x.toFixed(2)},${vertex1.y.toFixed(2)}`;
-      const vertex2Key = `${vertex2.x.toFixed(2)},${vertex2.y.toFixed(2)}`;
-      const mergedKey = `${mergedVertex.x.toFixed(2)},${mergedVertex.y.toFixed(2)}`;
-      
-      // If either vertex had atom data, preserve it for the merged vertex
-      if (newAtoms[vertex1Key] || newAtoms[vertex2Key]) {
-        newAtoms[mergedKey] = newAtoms[vertex1Key] || newAtoms[vertex2Key];
-      }
-      
-      // Remove old atom data
-      delete newAtoms[vertex1Key];
-      delete newAtoms[vertex2Key];
-      
-      return newAtoms;
+    const { vertex1: keep, vertex2: remove } = mergeOperation;
+    const near = (a, b) => Math.abs(a - b) < 0.01;
+    const keepKey = getVertexKey(keep);
+    const removeKey = getVertexKey(remove);
+
+    // Remove the newer vertex; the kept vertex stays put.
+    setVertices(prevVertices =>
+      prevVertices.filter(v => !(near(v.x, remove.x) && near(v.y, remove.y)))
+    );
+
+    // Reassign the removed vertex's bonds onto the kept vertex, then clean up
+    // self-loops and duplicate bonds (pure helper, unit-tested).
+    setSegments(prevSegments =>
+      reassignAndDedupeBonds(prevSegments, keep, remove, calculateBondDirection)
+    );
+
+    // Merge atom labels, preferring a real element label.
+    setVertexAtoms(prevAtoms => mergeAtomLabels(prevAtoms, keepKey, removeKey));
+
+    // Migrate any per-vertex bond state onto the kept vertex.
+    setVertexBondStates(prevStates => {
+      if (!prevStates[removeKey] && !prevStates[keepKey]) return prevStates;
+      const next = { ...prevStates };
+      const merged = next[keepKey] || next[removeKey];
+      delete next[removeKey];
+      if (merged) next[keepKey] = merged;
+      return next;
     });
   }, [calculateBondDirection]);
 
@@ -3153,90 +2724,6 @@ const HexGridWithToolbar = () => {
       return;
     }
     
-    // Legacy Cmd/Ctrl+V direct paste (keeping for backwards compatibility)
-    if (false && (event.metaKey || event.ctrlKey) && event.key === 'v' && clipboard) {
-      event.preventDefault();
-      
-      // Calculate center of clipboard items
-      let totalX = 0, totalY = 0, count = 0;
-      clipboard.molecules.forEach(mol => {
-        mol.vertices.forEach(v => {
-          totalX += v.x;
-          totalY += v.y;
-          count++;
-        });
-      });
-      clipboard.arrows.forEach(arrow => {
-        if (arrow.type === 'curved') {
-          totalX += arrow.x1;
-          totalY += arrow.y1;
-          count++;
-        } else {
-          totalX += arrow.x;
-          totalY += arrow.y;
-          count++;
-        }
-      });
-      
-      if (count > 0) {
-        const centerX = totalX / count;
-        const centerY = totalY / count;
-        
-        // Paste at mouse position
-        const offsetX = currentMousePosition.x - offset.x - centerX + 50;
-        const offsetY = currentMousePosition.y - offset.y - centerY + 50;
-        
-        saveToHistory(); // Save before pasting
-        
-        // Paste molecules
-        clipboard.molecules.forEach(mol => {
-          const newVertices = mol.vertices.map(v => ({
-            x: v.x + offsetX,
-            y: v.y + offsetY,
-            isOffGrid: v.isOffGrid
-          }));
-          
-          const newBonds = mol.bonds.map(b => ({
-            ...b,
-            x1: b.x1 + offsetX,
-            y1: b.y1 + offsetY,
-            x2: b.x2 + offsetX,
-            y2: b.y2 + offsetY
-          }));
-          
-          setVertices(prev => [...prev, ...newVertices]);
-          setSegments(prev => [...prev, ...newBonds]);
-          
-          // Paste atoms
-          Object.keys(mol.atoms).forEach(oldKey => {
-            const [xStr, yStr] = oldKey.split(',');
-            const newKey = `${(parseFloat(xStr) + offsetX).toFixed(2)},${(parseFloat(yStr) + offsetY).toFixed(2)}`;
-            setVertexAtoms(prev => ({
-              ...prev,
-              [newKey]: mol.atoms[oldKey]
-            }));
-          });
-        });
-        
-        // Paste arrows
-        clipboard.arrows.forEach(arrow => {
-          const newArrow = {
-            ...arrow,
-            x: arrow.x ? arrow.x + offsetX : arrow.x,
-            y: arrow.y ? arrow.y + offsetY : arrow.y,
-            x1: arrow.x1 ? arrow.x1 + offsetX : arrow.x1,
-            y1: arrow.y1 ? arrow.y1 + offsetY : arrow.y1,
-            x2: arrow.x2 ? arrow.x2 + offsetX : arrow.x2,
-            y2: arrow.y2 ? arrow.y2 + offsetY : arrow.y2
-          };
-          setArrows(prev => [...prev, newArrow]);
-        });
-        
-        setTimeout(() => updateRingDetection(), 10);
-      }
-      return;
-    }
-    
     // Handle Escape key for paste preview mode
     if (event.key === 'Escape' && isPastePreviewMode) {
       setIsPastePreviewMode(false);
@@ -3561,58 +3048,160 @@ const HexGridWithToolbar = () => {
     
     // First pass: Render stereochemistry bonds
     const stereoBondIndices = renderAllStereochemistryBonds(ctx, segments, offset, colors);
-    
+
+    const vertexByKey = new Map();
+    vertices.forEach((vv) => vertexByKey.set(`${vv.x.toFixed(2)},${vv.y.toFixed(2)}`, vv));
+
+    // Per labeled vertex, accumulate the sum of bond orders (for implicit H) and
+    // the net horizontal direction toward its neighbors (for label-direction
+    // flipping).
+    const bondOrderSumByKey = new Map();
+    const neighborDxByKey = new Map();
+    segments.forEach((seg) => {
+      if (!(seg.bondOrder > 0)) return;
+      const k1 = `${seg.x1.toFixed(2)},${seg.y1.toFixed(2)}`;
+      const k2 = `${seg.x2.toFixed(2)},${seg.y2.toFixed(2)}`;
+      bondOrderSumByKey.set(k1, (bondOrderSumByKey.get(k1) || 0) + seg.bondOrder);
+      bondOrderSumByKey.set(k2, (bondOrderSumByKey.get(k2) || 0) + seg.bondOrder);
+      neighborDxByKey.set(k1, (neighborDxByKey.get(k1) || 0) + (seg.x2 - seg.x1));
+      neighborDxByKey.set(k2, (neighborDxByKey.get(k2) || 0) + (seg.x1 - seg.x2));
+    });
+
+    // Atom map augmented with computed implicit hydrogens. Used for both the
+    // label clearance boxes and the text render so widths stay consistent.
+    // A user who explicitly typed hydrogens (implicitH already set, or a label
+    // that isn't a bare element) is left untouched. When implicit H is added and
+    // the atom's neighbors sit to its right, flag the label to flip ("H₂N")
+    // so the connecting element stays nearest the bond.
+    const displayVertexAtoms = {};
+    Object.entries(vertexAtoms).forEach(([key, atom]) => {
+      if (!atom || !atom.symbol) { displayVertexAtoms[key] = atom; return; }
+      if (atom.implicitH) { displayVertexAtoms[key] = atom; return; }
+      const implicitH = computeImplicitH(atom.symbol, atom.charge || 0, bondOrderSumByKey.get(key) || 0);
+      if (implicitH > 0) {
+        const flip = (neighborDxByKey.get(key) || 0) > 0.01;
+        displayVertexAtoms[key] = { ...atom, implicitH, _flipHydrogens: flip };
+      } else {
+        displayVertexAtoms[key] = atom;
+      }
+    });
+
+    // Precompute a clearance box for every labeled atom so bonds stop cleanly at
+    // the label edge (ChemDraw/Marvin style) instead of running under the letter
+    // and relying on an opaque mask. This gives consistent gaps and prevents
+    // bonds from showing through the holes of letters like "O".
+    const labelClearanceBoxes = new Map();
+    Object.entries(displayVertexAtoms).forEach(([key, atom]) => {
+      if (!atom || !atom.symbol) return;
+      const v = vertexByKey.get(key);
+      if (!v) return;
+      const ext = getAtomLabelHalfExtents(ctx, atom);
+      if (ext) labelClearanceBoxes.set(key, { cx: v.x, cy: v.y, halfW: ext.halfW, halfH: ext.halfH });
+    });
+
+    const BOND_LABEL_MARGIN = 2; // extra gap (px) beyond the label halo box
+    // Distance from a label's center, along a unit direction, to its box edge + margin.
+    const labelClearance = (box, ux, uy) => {
+      const ax = Math.abs(ux);
+      const ay = Math.abs(uy);
+      const tX = ax > 1e-6 ? box.halfW / ax : Infinity;
+      const tY = ay > 1e-6 ? box.halfH / ay : Infinity;
+      return Math.min(tX, tY) + BOND_LABEL_MARGIN;
+    };
+    // Return bond endpoints trimmed at any labeled endpoint. `clipped` is true if
+    // either end was shortened (so callers know the geometry changed).
+    const clipBondToLabels = (segment) => {
+      const k1 = `${segment.x1.toFixed(2)},${segment.y1.toFixed(2)}`;
+      const k2 = `${segment.x2.toFixed(2)},${segment.y2.toFixed(2)}`;
+      const b1 = labelClearanceBoxes.get(k1);
+      const b2 = labelClearanceBoxes.get(k2);
+      if (!b1 && !b2) return { x1: segment.x1, y1: segment.y1, x2: segment.x2, y2: segment.y2, clipped: false };
+
+      const dx = segment.x2 - segment.x1;
+      const dy = segment.y2 - segment.y1;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len;
+      const uy = dy / len;
+
+      let x1 = segment.x1;
+      let y1 = segment.y1;
+      let x2 = segment.x2;
+      let y2 = segment.y2;
+      if (b1) {
+        const c = labelClearance(b1, ux, uy);
+        x1 = b1.cx + ux * c;
+        y1 = b1.cy + uy * c;
+      }
+      if (b2) {
+        const c = labelClearance(b2, -ux, -uy);
+        x2 = b2.cx - ux * c;
+        y2 = b2.cy - uy * c;
+      }
+      // Guard against over-shortening on very short bonds (endpoints crossing).
+      const newLen = Math.hypot(x2 - x1, y2 - y1);
+      if (newLen < len * 0.1 || (x2 - x1) * dx + (y2 - y1) * dy <= 0) {
+        return { x1: segment.x1, y1: segment.y1, x2: segment.x2, y2: segment.y2, clipped: false };
+      }
+      return { x1, y1, x2, y2, clipped: true };
+    };
+
     // Second pass: Render regular bonds (skip stereochemistry bonds)
     segments.forEach((segment, index) => {
       if (segment.bondOrder <= 0) return; // Skip grid lines
       if (stereoBondIndices.has(index)) return; // Skip stereochemistry bonds (already rendered)
-      
+
+      const clip = clipBondToLabels(segment);
+
       if (segment.bondOrder === 1) {
         // Single bond rendering
         ctx.strokeStyle = (!isExportingRef.current && hoveredBondIndex === index) ? '#007bff' : colors.bonds;
         ctx.lineWidth = 3;
         ctx.beginPath();
-        ctx.moveTo(segment.x1 + offset.x, segment.y1 + offset.y);
-        ctx.lineTo(segment.x2 + offset.x, segment.y2 + offset.y);
+        ctx.moveTo(clip.x1 + offset.x, clip.y1 + offset.y);
+        ctx.lineTo(clip.x2 + offset.x, clip.y2 + offset.y);
         ctx.stroke();
       } else if (segment.bondOrder === 2) {
-        // Double bond rendering with hover support
+        // Double bond rendering with hover support. Only pass trimmed coordinates
+        // when an endpoint is labeled (keeps ring double-bond detection intact for
+        // ordinary C=C bonds, which are never clipped).
+        const drawSeg = clip.clipped
+          ? { ...segment, x1: clip.x1, y1: clip.y1, x2: clip.x2, y2: clip.y2 }
+          : segment;
+        const doubleBondDeps = { detectedRings, countVertexBonds };
         if (!isExportingRef.current && hoveredBondIndex === index) {
-          // Render hovered double bond in blue
           const tempColors = { ...colors, bonds: '#007bff' };
-          renderDoubleBondByCase(ctx, segment, offset, tempColors);
+          renderDoubleBondByCase(ctx, drawSeg, offset, tempColors, doubleBondDeps);
         } else {
-          // Render normal double bond
-          renderDoubleBondByCase(ctx, segment, offset, colors);
+          renderDoubleBondByCase(ctx, drawSeg, offset, colors, doubleBondDeps);
         }
       } else if (segment.bondOrder === 3) {
         // Triple bond rendering - three parallel lines
-        const bondAngle = Math.atan2(segment.y2 - segment.y1, segment.x2 - segment.x1);
+        const bondAngle = Math.atan2(clip.y2 - clip.y1, clip.x2 - clip.x1);
         const perpAngle = bondAngle + Math.PI / 2;
         const lineSpacing = 8.5; // Distance between parallel lines (further apart)
-        
+
         ctx.strokeStyle = (!isExportingRef.current && hoveredBondIndex === index) ? '#007bff' : colors.bonds;
         ctx.lineWidth = 3;
         ctx.lineCap = 'round';
-        
+
         // Draw center line
         ctx.beginPath();
-        ctx.moveTo(segment.x1 + offset.x, segment.y1 + offset.y);
-        ctx.lineTo(segment.x2 + offset.x, segment.y2 + offset.y);
+        ctx.moveTo(clip.x1 + offset.x, clip.y1 + offset.y);
+        ctx.lineTo(clip.x2 + offset.x, clip.y2 + offset.y);
         ctx.stroke();
-        
+
         // Draw top line
         const topOffsetX = Math.cos(perpAngle) * lineSpacing;
         const topOffsetY = Math.sin(perpAngle) * lineSpacing;
         ctx.beginPath();
-        ctx.moveTo(segment.x1 + topOffsetX + offset.x, segment.y1 + topOffsetY + offset.y);
-        ctx.lineTo(segment.x2 + topOffsetX + offset.x, segment.y2 + topOffsetY + offset.y);
+        ctx.moveTo(clip.x1 + topOffsetX + offset.x, clip.y1 + topOffsetY + offset.y);
+        ctx.lineTo(clip.x2 + topOffsetX + offset.x, clip.y2 + topOffsetY + offset.y);
         ctx.stroke();
-        
+
         // Draw bottom line
         ctx.beginPath();
-        ctx.moveTo(segment.x1 - topOffsetX + offset.x, segment.y1 - topOffsetY + offset.y);
-        ctx.lineTo(segment.x2 - topOffsetX + offset.x, segment.y2 - topOffsetY + offset.y);
+        ctx.moveTo(clip.x1 - topOffsetX + offset.x, clip.y1 - topOffsetY + offset.y);
+        ctx.lineTo(clip.x2 - topOffsetX + offset.x, clip.y2 - topOffsetY + offset.y);
         ctx.stroke();
       }
     });
@@ -3715,7 +3304,7 @@ const HexGridWithToolbar = () => {
     }
 
     // Draw atom text labels
-    renderAllAtomText(ctx, vertices, vertexAtoms, offset, colors, isDarkMode, newmanInstances);
+    renderAllAtomText(ctx, vertices, displayVertexAtoms, offset, colors, isDarkMode, newmanInstances);
     
     // Draw lone pairs and charges
     renderAllLonePairsAndCharges(ctx, vertices, segments, vertexAtoms, offset, colors);
@@ -4588,6 +4177,23 @@ const HexGridWithToolbar = () => {
     drawCanvas();
   }, [drawCanvas]);
 
+  // Canvas panning. The whole coordinate system already supports a pan offset
+  // (screen = world + offset), it just was never wired to any input, so the
+  // canvas felt fixed and anything drawn off-screen was unreachable. Trackpad /
+  // wheel scrolling now pans the view (ChemDraw/Marvin-style "infinite" canvas).
+  // A native non-passive listener lets us preventDefault so two-finger scroll
+  // doesn't trigger the browser's back/forward swipe.
+  React.useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const onWheel = (event) => {
+      event.preventDefault();
+      setOffset((prev) => ({ x: prev.x - event.deltaX, y: prev.y - event.deltaY }));
+    };
+    canvas.addEventListener('wheel', onWheel, { passive: false });
+    return () => canvas.removeEventListener('wheel', onWheel);
+  }, []);
+
   const latestNewmanInstance = newmanInstances.reduce(
     (latest, instance) => (!latest || instance.lastTouchedAt > latest.lastTouchedAt ? instance : latest),
     null
@@ -4870,6 +4476,145 @@ const HexGridWithToolbar = () => {
                       boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
                     }} />
                   </button>
+                </div>
+
+                {/* Copy as SMILES */}
+                <div style={{ padding: '12px 0' }}>
+                  <div style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between'
+                  }}>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span style={{
+                        color: colors.text,
+                        fontSize: '14px',
+                        fontWeight: '500',
+                        marginBottom: '2px'
+                      }}>
+                        Copy as SMILES
+                      </span>
+                      <span style={{ color: colors.textSecondary, fontSize: '12px' }}>
+                        Export the structure as a SMILES string
+                      </span>
+                    </div>
+                    <button
+                      onClick={handleCopySmiles}
+                      style={{
+                        backgroundColor: colors.button,
+                        color: colors.text,
+                        border: `1px solid ${colors.border}`,
+                        borderRadius: '6px',
+                        padding: '6px 12px',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        fontFamily: 'Roboto, sans-serif',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      Copy
+                    </button>
+                  </div>
+
+                  {smilesResult && (
+                    <div style={{ marginTop: '10px' }}>
+                      <div style={{
+                        backgroundColor: colors.background,
+                        border: `1px solid ${colors.border}`,
+                        borderRadius: '6px',
+                        padding: '8px 10px',
+                        fontFamily: 'monospace',
+                        fontSize: '13px',
+                        color: colors.text,
+                        wordBreak: 'break-all',
+                        userSelect: 'all',
+                        maxHeight: '96px',
+                        overflowY: 'auto'
+                      }}>
+                        {smilesResult.smiles || '(empty — nothing drawn)'}
+                      </div>
+                      {smilesResult.copied && smilesResult.smiles && (
+                        <div style={{ color: colors.textSecondary, fontSize: '12px', marginTop: '6px' }}>
+                          ✓ Copied to clipboard
+                        </div>
+                      )}
+                      {smilesResult.warnings && smilesResult.warnings.length > 0 && (
+                        <div style={{ marginTop: '6px' }}>
+                          {smilesResult.warnings.map((w, i) => (
+                            <div key={i} style={{ color: '#c77', fontSize: '12px', marginTop: '2px' }}>
+                              ⚠ {w}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Import from SMILES */}
+                <div style={{ padding: '12px 0', borderTop: `1px solid ${colors.border}` }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', marginBottom: '8px' }}>
+                    <span style={{
+                      color: colors.text,
+                      fontSize: '14px',
+                      fontWeight: '500',
+                      marginBottom: '2px'
+                    }}>
+                      Import from SMILES
+                    </span>
+                    <span style={{ color: colors.textSecondary, fontSize: '12px' }}>
+                      Paste a SMILES string to add it to the canvas
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <input
+                      type="text"
+                      value={smilesInput}
+                      onChange={(e) => setSmilesInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleImportSmiles(); }}
+                      placeholder="e.g. c1ccccc1"
+                      spellCheck={false}
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        backgroundColor: colors.background,
+                        color: colors.text,
+                        border: `1px solid ${colors.border}`,
+                        borderRadius: '6px',
+                        padding: '6px 10px',
+                        fontSize: '13px',
+                        fontFamily: 'monospace',
+                        outline: 'none'
+                      }}
+                    />
+                    <button
+                      onClick={handleImportSmiles}
+                      style={{
+                        backgroundColor: colors.buttonActive,
+                        color: '#ffffff',
+                        border: 'none',
+                        borderRadius: '6px',
+                        padding: '6px 14px',
+                        fontSize: '13px',
+                        fontWeight: '500',
+                        cursor: 'pointer',
+                        fontFamily: 'Roboto, sans-serif',
+                        whiteSpace: 'nowrap'
+                      }}
+                    >
+                      Add
+                    </button>
+                  </div>
+                  {smilesImportMessage && (
+                    <div style={{
+                      marginTop: '8px',
+                      fontSize: '12px',
+                      color: smilesImportMessage.isError ? '#c77' : colors.textSecondary
+                    }}>
+                      {smilesImportMessage.isError ? '⚠ ' : '✓ '}{smilesImportMessage.text}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -5663,9 +5408,9 @@ const HexGridWithToolbar = () => {
               <path
                 d= " M 4 13 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0 q 4 8 8 0 q 4 -8 8 0"
                 stroke={mode === 'ambiguous' ? '#fff' : colors.textSecondary}
-                stroke-width="3"
+                strokeWidth="3"
                 fill="none"
-                linecap="round"
+                strokeLinecap="round"
                 />
             </svg>
           </button>
@@ -7045,126 +6790,5 @@ const HexGridWithToolbar = () => {
     </div>
   );
 };
-
-
-
- //UI FOR ARROWS
-// --- Arrow SVG Components ---
-const ARROW_STROKE = 3.5; // match straight arrow thickness
-const ARROW_COLOR = "#FFF";
-const ARROWHEAD_SIZE = 8; // 20% larger than typical
-
-// Helper for arrowhead: returns points for a triangle at (x, y) with direction angle (radians)
-function arrowheadPoints(x, y, angle, size = ARROWHEAD_SIZE) {
-  const base = size * 1;
-  const height = size * 1;
-  // Base points perpendicular to angle
-  const x1 = x - height * Math.cos(angle);
-  const y1 = y - height * Math.sin(angle);
-  const x2 = x1 + base * Math.cos(angle + Math.PI / 2);
-  const y2 = y1 + base * Math.sin(angle + Math.PI / 2);
-  const x3 = x1 + base * Math.cos(angle - Math.PI / 2);
-  const y3 = y1 + base * Math.sin(angle - Math.PI / 2);
-  return `${x},${y} ${x2},${y2} ${x3},${y3}`;
-}
-// 1. Counterclockwise Semicircle (Top Left)
-function ArrowCCWSemicircleTopLeft({ mode, isDarkMode = false }) {
-  // manually made
-  const angle = -3 * Math.PI / 4;
-  const color = mode === 'curve2' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
-  return (
-    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-      <path d="M14 34 A14 14 0 1 1 36 20" stroke={color} 
-      strokeWidth="3.5" 
-      fill="none" 
-      strokeLinecap="round"/>
-      <polygon points="29,20 43,20 36,28" fill={color}/>
-    </svg>
-  );
-}
-// 2. Clockwise Semicircle (Top Center)
-function ArrowCWSemicircleTopCenter({ mode, isDarkMode = false }) {
-  // manually made
-  const angle = -3 * Math.PI / 4;
-  const color = mode === 'curve1' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
-  return (
-    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-      <path d="M12 24 A12 12 0 0 1 36 24" stroke={color}
-      strokeWidth="3.5"
-      fill="none"
-      strokeLinecap="round"/>
-      <polygon points="29,24 43,20 38,29" fill={color}/>
-    </svg>
-  );
-}
-// 3. Clockwise Quarter-circle (Top Right)
-function ArrowCWQuarterTopRight({ mode, isDarkMode = false }) {
-  // manually made
-  const angle = -3 * Math.PI / 4;
-  const color = mode === 'curve0' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
-  return (
-    <svg width="48" height="48" viewBox="0 6 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-      <path d="M10 32 A22 22 0 0 1 38 32" stroke={color}
-       strokeWidth="3.5"
-        fill="none"
-       strokeLinecap="round"/>
-      <polygon points="31,35 40,25 42,35" fill={color}/>
-    </svg>
-
-  );
-}
-// 4. Counterclockwise Semicircle (Bottom Left)
-function ArrowCCWSemicircleBottomLeft({ mode, isDarkMode = false }) {
-  const color = mode === 'curve5' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
-  return (
-    <svg width="48" height="48" viewBox="0 0 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-      <g transform="scale(1,-1) translate(0,-45)">
-        <path d="M14 34 A14 14 0 1 1 36 20" 
-          stroke={color}
-          strokeWidth="3.5"
-          fill="none"
-          strokeLinecap="round"/>
-        <polygon points="29,20 43,20 36,28" fill={color}/>
-      </g>
-    </svg>
-  );
-}
-// 5. Clockwise Semicircle (Bottom Center)
-function ArrowCWSemicircleBottomCenter({ mode, isDarkMode = false }) {
-  // Arc: start at (10,34), end at (34,10), r=16, large-arc, sweep=1
-  // Arrowhead at (34,10), tangent is -45deg
-  const angle = -Math.PI/4;
-  const color = mode === 'curve4' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
-  return (
-    <svg width="48" height="48" viewBox="0 4 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-      {/* Arc remains the same */}
-      <path d="M12 24 A12 12 0 0 0 36 24"
-        stroke={color}
-        strokeWidth="3.5"
-        fill="none"
-        strokeLinecap="round"/>
-      {/* Arrowhead flipped downward */}
-      <polygon points="29,24 38,19 42,28" fill={color}/>
-    </svg>
-  );
-}
-// 6. Clockwise Quarter-circle (Bottom Right)
-function ArrowCWQuarterBottomRight({ mode, isDarkMode = false }) {
-  // Arc: start at (10,22), end at (34,34), r=12, large-arc=0, sweep=1
-  // Arrowhead at (34,34), tangent is 30deg
-  const angle = Math.atan2(12,24); // 26.56deg
-  const color = mode === 'curve3' ? '#fff' : (isDarkMode ? '#b3b3b3' : '#666');
-  return (
-    <svg width="48" height="48" viewBox="0 15 48 48" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
-      <path d="M10 38 A22 22 0 0 0 38 38"
-        stroke={color}
-        strokeWidth="3.5"
-        fill="none"
-        strokeLinecap="round"/>
-      {/* Arrowhead flipped downward */}
-      <polygon points="33,33 43,43 43,33" fill={color}/>
-    </svg>
-  );
-}
 
 export default HexGridWithToolbar;

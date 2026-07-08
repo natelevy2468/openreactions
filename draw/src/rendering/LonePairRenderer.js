@@ -28,9 +28,10 @@ export const renderLonePairs = (ctx, lonePairPositions, offset, colors) => {
     
     // Calculate perpendicular angle for offsetting dots
     const perpAngle = position.angle + Math.PI / 2;
-    
-    // Draw white outline for visibility
-    ctx.strokeStyle = '#FFFFFF';
+
+    // Outline in the canvas background color so the dot masks anything behind it
+    // (bond or letter) and stays crisp in both light and dark mode.
+    ctx.strokeStyle = colors.canvasBackground || '#FFFFFF';
     ctx.lineWidth = 2;
     ctx.fillStyle = colors.bonds || '#000000';
     
@@ -93,8 +94,9 @@ export const renderCharge = (ctx, chargePosition, offset, colors) => {
   }
   
   if (chargeText) {
-    // Draw white circle background with black border
-    ctx.fillStyle = '#FFFFFF';
+    // Circle background matches the canvas so it masks bonds behind it; border and
+    // symbol use the text color so it reads correctly in light and dark mode.
+    ctx.fillStyle = colors.canvasBackground || '#FFFFFF';
     ctx.strokeStyle = colors.text || '#000000';
     ctx.lineWidth = circleStrokeWidth;
     
@@ -116,20 +118,12 @@ export const renderCharge = (ctx, chargePosition, offset, colors) => {
 
 // Cache for lone pair and charge positions to avoid recalculating every frame
 const positioningCache = new Map();
-let lastSegmentsHash = '';
 
 /**
  * Generates a cache key for positioning calculations
  */
 const getPositioningCacheKey = (vertexKey, lonePairCount, charge, connectedBondKeys) => {
   return `${vertexKey}:${lonePairCount}:${charge}:${connectedBondKeys}`;
-};
-
-/**
- * Clears the positioning cache (called when bonds change)
- */
-export const clearLonePairCache = () => {
-  positioningCache.clear();
 };
 
 /**
@@ -206,83 +200,3 @@ export const renderAllLonePairsAndCharges = (ctx, vertices, segments, vertexAtom
   });
 };
 
-/**
- * Renders lone pairs and charges for a specific vertex (for preview/debugging)
- * @param {CanvasRenderingContext2D} ctx - Canvas context
- * @param {Object} vertex - The vertex to render for
- * @param {Array} segments - All bond segments
- * @param {Object} vertexAtoms - Atom data mapping
- * @param {number} lonePairCount - Number of lone pairs
- * @param {number} charge - Charge value
- * @param {Object} offset - Canvas offset
- * @param {Object} colors - Color scheme
- */
-export const renderVertexLonePairsAndCharges = (ctx, vertex, segments, vertexAtoms, lonePairCount, charge, offset, colors) => {
-  if (lonePairCount === 0 && charge === 0) return;
-  
-  // Calculate smart positioning
-  const positioning = calculateSmartPositioning(
-    vertex, 
-    segments, 
-    vertexAtoms, 
-    lonePairCount, 
-    charge
-  );
-  
-  // Render lone pairs
-  if (positioning.lonePairPositions.length > 0) {
-    renderLonePairs(ctx, positioning.lonePairPositions, offset, colors);
-  }
-  
-  // Render charge
-  if (positioning.chargePosition) {
-    renderCharge(ctx, positioning.chargePosition, offset, colors);
-  }
-};
-
-/**
- * Calculates bounds for lone pairs and charges (for collision detection)
- * @param {Object} vertex - The vertex
- * @param {Array} segments - All bond segments
- * @param {Object} vertexAtoms - Atom data mapping
- * @param {number} lonePairCount - Number of lone pairs
- * @param {number} charge - Charge value
- * @returns {Array} Array of bounding boxes
- */
-export const calculateLonePairAndChargeBounds = (vertex, segments, vertexAtoms, lonePairCount, charge) => {
-  const bounds = [];
-  
-  if (lonePairCount === 0 && charge === 0) return bounds;
-  
-  const positioning = calculateSmartPositioning(
-    vertex, 
-    segments, 
-    vertexAtoms, 
-    lonePairCount, 
-    charge
-  );
-  
-  // Add bounds for lone pairs
-  positioning.lonePairPositions.forEach(position => {
-    bounds.push({
-      x: position.x - 8, // Account for dot spacing and radius
-      y: position.y - 8,
-      width: 16,
-      height: 16,
-      type: 'lonePair'
-    });
-  });
-  
-  // Add bounds for charge (accounting for smaller circle)
-  if (positioning.chargePosition) {
-    bounds.push({
-      x: positioning.chargePosition.x - 8, // Account for smaller circle radius
-      y: positioning.chargePosition.y - 8,
-      width: 16,
-      height: 16,
-      type: 'charge'
-    });
-  }
-  
-  return bounds;
-};

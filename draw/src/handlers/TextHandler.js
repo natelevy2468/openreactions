@@ -13,8 +13,7 @@
  * @returns {boolean} Whether text creation was handled
  */
 export const handleTextButtonClick = (clickPosition, offset, state, actions) => {
-  const { vertices, molecularBoundaryRadius } = state;
-  const { setVertices, setShowAtomInput, setAtomInputPosition, setAtomInputValue, setMenuVertexKey } = actions;
+  const { setVertices } = actions;
 
   // Convert to world coordinates
   const worldX = clickPosition.x - offset.x;
@@ -63,7 +62,6 @@ export const handleEnterKeyOnVertex = (hoveredVertex, mousePosition, actions) =>
 export const handleQuickElementKey = (letter, hoveredVertex, state, actions) => {
   if (!hoveredVertex || !isValidElementLetter(letter)) return false;
 
-  const { vertexAtoms } = state;
   const { setVertexAtoms } = actions;
 
   const vertexKey = `${hoveredVertex.x.toFixed(2)},${hoveredVertex.y.toFixed(2)}`;
@@ -117,46 +115,6 @@ export const isValidElementLetter = (letter) => {
 };
 
 /**
- * Calculates implicit hydrogen count for an element
- * @param {string} elementSymbol - Element symbol (C, N, O, etc.)
- * @param {Object} vertex - The vertex
- * @param {Object} state - Current application state
- * @returns {number} Number of implicit hydrogens
- */
-export const calculateImplicitHydrogens = (elementSymbol, vertex, state) => {
-  const { segments } = state;
-  
-  // Count bonds connected to this vertex
-  const connectedBonds = segments.filter(segment => {
-    if (segment.bondOrder <= 0) return false;
-    
-    const tolerance = 0.01;
-    const connectsToVertex = (
-      (Math.abs(segment.x1 - vertex.x) < tolerance && Math.abs(segment.y1 - vertex.y) < tolerance) ||
-      (Math.abs(segment.x2 - vertex.x) < tolerance && Math.abs(segment.y2 - vertex.y) < tolerance)
-    );
-    
-    return connectsToVertex;
-  });
-
-  // Calculate total bond orders
-  const totalBondOrders = connectedBonds.reduce((sum, bond) => sum + bond.bondOrder, 0);
-
-  // Calculate implicit hydrogens based on element and bonding
-  switch (elementSymbol) {
-    case 'C': return Math.max(0, 4 - totalBondOrders);
-    case 'N': return Math.max(0, 3 - totalBondOrders);
-    case 'O': return Math.max(0, 2 - totalBondOrders);
-    case 'F':
-    case 'Cl':
-    case 'Br':
-    case 'I': return Math.max(0, 1 - totalBondOrders);
-    case 'H': return 0; // Hydrogen doesn't have implicit hydrogens
-    default: return 0;
-  }
-};
-
-/**
  * Formats atom text for display (handles subscripts, charges, etc.)
  * Automatically treats numbers in the symbol as subscripts
  * @param {Object} atomData - Atom data {symbol, charge, implicitH}
@@ -206,10 +164,16 @@ export const formatAtomTextForDisplay = (atomData) => {
     hasSegments: hasNumbers // Use segmented rendering if there are any numbers
   };
   
-  // Add explicit hydrogens if specified
+  // Append implicit hydrogens the way chemists write them: a full-size "H"
+  // followed by a subscript count only when there is more than one (OH, NH2 ->
+  // "NH₂"). Routing them through the segment stream keeps the H at element size
+  // instead of shrinking/dropping the whole thing like a subscript.
   if (atomData.implicitH > 0) {
-    formatted.subscript = atomData.implicitH > 1 ? `H${atomData.implicitH}` : 'H';
-    formatted.hasSubscript = true;
+    segments.push({ text: 'H', isNumber: false });
+    if (atomData.implicitH > 1) {
+      segments.push({ text: String(atomData.implicitH), isNumber: true });
+    }
+    formatted.hasSegments = true;
   }
 
   // Note: Charges are now rendered separately as circles with symbols
@@ -258,55 +222,6 @@ export const parseAtomInput = (inputText) => {
 };
 
 /**
- * Validates element symbol and provides suggestions
- * @param {string} symbol - Element symbol to validate
- * @returns {Object} Validation result with suggestions
- */
-export const validateElementSymbol = (symbol) => {
-  const commonElements = [
-    'H', 'He', 'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne',
-    'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar', 'K', 'Ca',
-    'Br', 'I'
-  ];
-
-  const validation = {
-    isValid: commonElements.includes(symbol),
-    suggestions: [],
-    warnings: []
-  };
-
-  if (!validation.isValid) {
-    // Find similar elements
-    validation.suggestions = commonElements.filter(element => 
-      element.toLowerCase().startsWith(symbol.toLowerCase()) ||
-      element.toLowerCase().includes(symbol.toLowerCase())
-    ).slice(0, 3);
-
-    if (validation.suggestions.length === 0) {
-      validation.warnings.push(`Unknown element: ${symbol}`);
-    }
-  }
-
-  return validation;
-};
-
-/**
- * Gets the current mouse position for text input positioning
- * @param {Object} event - Mouse event
- * @param {HTMLElement} canvas - Canvas element
- * @returns {Object} Screen position {x, y}
- */
-export const getMouseScreenPosition = (event, canvas) => {
-  if (!canvas) return { x: 0, y: 0 };
-  
-  const rect = canvas.getBoundingClientRect();
-  return {
-    x: event.clientX - rect.left,
-    y: event.clientY - rect.top
-  };
-};
-
-/**
  * Handles text input completion and validation
  * @param {string} inputText - User's input text
  * @param {string} vertexKey - Vertex key being edited
@@ -342,36 +257,3 @@ export const handleTextInputComplete = (inputText, vertexKey, state, actions) =>
   return true;
 };
 
-/**
- * Common element data for quick access
- */
-export const COMMON_ELEMENTS = {
-  'H': { name: 'Hydrogen', valence: 1, color: '#FFFFFF' },
-  'C': { name: 'Carbon', valence: 4, color: '#000000' },
-  'N': { name: 'Nitrogen', valence: 3, color: '#3050F8' },
-  'O': { name: 'Oxygen', valence: 2, color: '#FF0D0D' },
-  'F': { name: 'Fluorine', valence: 1, color: '#90E050' },
-  'P': { name: 'Phosphorus', valence: 3, color: '#FF8000' },
-  'S': { name: 'Sulfur', valence: 2, color: '#FFFF30' },
-  'Cl': { name: 'Chlorine', valence: 1, color: '#1FF01F' },
-  'Br': { name: 'Bromine', valence: 1, color: '#A62929' },
-  'I': { name: 'Iodine', valence: 1, color: '#940094' }
-};
-
-/**
- * Gets element color for rendering
- * @param {string} elementSymbol - Element symbol
- * @returns {string} Hex color code
- */
-export const getElementColor = (elementSymbol) => {
-  return COMMON_ELEMENTS[elementSymbol]?.color || '#000000';
-};
-
-/**
- * Gets element valence for bonding calculations
- * @param {string} elementSymbol - Element symbol
- * @returns {number} Typical valence
- */
-export const getElementValence = (elementSymbol) => {
-  return COMMON_ELEMENTS[elementSymbol]?.valence || 4;
-};

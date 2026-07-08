@@ -85,96 +85,6 @@ export const findNearestSnapBond = (mousePos, segments, snapThreshold = 80) => {
 };
 
 /**
- * Calculates benzene snap alignment to a vertex
- * Aligns one vertex of the benzene to coincide with the existing vertex
- * @param {Object} targetVertex - The vertex to snap to
- * @param {Object} mousePos - Current mouse position
- * @param {number} benzeneRadius - Radius of the benzene ring
- * @returns {Object} Snap info {center, type, target}
- */
-export const calculateBenzeneVertexSnap = (targetVertex, mousePos, benzeneRadius) => {
-  // Find which benzene vertex would be closest to the target
-  // Try all 6 possible orientations
-  let bestCenter = null;
-  let bestDistance = Infinity;
-  
-  for (let i = 0; i < 6; i++) {
-    const angle = (Math.PI / 6) + (i * Math.PI / 3);
-    
-    // Calculate what center position would place this benzene vertex at the target
-    const centerX = targetVertex.x - Math.cos(angle) * benzeneRadius;
-    const centerY = targetVertex.y - Math.sin(angle) * benzeneRadius;
-    
-    // Check how far this center is from mouse (prefer orientation closest to mouse intent)
-    const distance = Math.sqrt(
-      Math.pow(centerX - mousePos.x, 2) + 
-      Math.pow(centerY - mousePos.y, 2)
-    );
-    
-    if (distance < bestDistance) {
-      bestDistance = distance;
-      bestCenter = { x: centerX, y: centerY };
-    }
-  }
-  
-  return {
-    center: bestCenter,
-    type: 'vertex',
-    target: targetVertex
-  };
-};
-
-/**
- * Calculates benzene snap alignment to a bond
- * Aligns one edge of the benzene to coincide with the existing bond
- * @param {Object} bondSnapInfo - Bond snap info from findNearestSnapBond
- * @param {number} benzeneRadius - Radius of the benzene ring
- * @returns {Object} Snap info {center, type, target}
- */
-export const calculateBenzeneBondSnap = (bondSnapInfo, benzeneRadius) => {
-  const bond = bondSnapInfo.bond;
-  const snapPoint = bondSnapInfo.snapPoint;
-  
-  // Calculate bond angle
-  const bondAngle = Math.atan2(bond.y2 - bond.y1, bond.x2 - bond.x1);
-  
-  // Calculate bond midpoint
-  const bondMidX = (bond.x1 + bond.x2) / 2;
-  const bondMidY = (bond.y1 + bond.y2) / 2;
-  
-  // Calculate perpendicular angle
-  const perpAngle = bondAngle + Math.PI / 2;
-  
-  // Try both sides of the bond (above and below)
-  const side1CenterX = bondMidX + Math.cos(perpAngle) * (benzeneRadius * Math.sqrt(3) / 2);
-  const side1CenterY = bondMidY + Math.sin(perpAngle) * (benzeneRadius * Math.sqrt(3) / 2);
-  
-  const side2CenterX = bondMidX - Math.cos(perpAngle) * (benzeneRadius * Math.sqrt(3) / 2);
-  const side2CenterY = bondMidY - Math.sin(perpAngle) * (benzeneRadius * Math.sqrt(3) / 2);
-  
-  // Choose the side closer to the snap point
-  const dist1 = Math.sqrt(
-    Math.pow(side1CenterX - snapPoint.x, 2) + 
-    Math.pow(side1CenterY - snapPoint.y, 2)
-  );
-  const dist2 = Math.sqrt(
-    Math.pow(side2CenterX - snapPoint.x, 2) + 
-    Math.pow(side2CenterY - snapPoint.y, 2)
-  );
-  
-  const bestCenter = dist1 < dist2 
-    ? { x: side1CenterX, y: side1CenterY }
-    : { x: side2CenterX, y: side2CenterY };
-  
-  return {
-    center: bestCenter,
-    type: 'bond',
-    target: bond,
-    snapPoint: snapPoint
-  };
-};
-
-/**
  * Calculates snap position for benzene preset
  * @param {Object} mousePos - Mouse position {x, y} in world coordinates
  * @param {Array} vertices - All existing vertices
@@ -269,10 +179,6 @@ export const calculateRingBondSnap = (bondSnapInfo, ringRadius, numSides) => {
   // Calculate perpendicular distance from ring center to edge (apothem)
   const edgeDistance = ringRadius * Math.cos(Math.PI / numSides);
   
-  // Determine which side of the bond the mouse is on using cross product
-  const dx = bond.x2 - bond.x1;
-  const dy = bond.y2 - bond.y1;
-  
   // Get actual mouse position from bondSnapInfo
   // Use the original mouse position that initiated the snap check
   const mousePos = bondSnapInfo.mousePos || bondSnapInfo.snapPoint;
@@ -304,9 +210,6 @@ export const calculateRingBondSnap = (bondSnapInfo, ringRadius, numSides) => {
   } else if (numSides === 4) {
     baseVertexAngle = Math.PI / 4; // 45°
   }
-  
-  // The direction from ring center toward the bond (opposite of offset direction)
-  const towardBondAngle = perpAngle + (side > 0 ? Math.PI : 0);
   
   // For an edge to face the bond and be parallel to it:
   // - Edge midpoint radial should point toward bond (perpendicular to bond)
