@@ -110,7 +110,10 @@ export const openTextInput = (vertexKey, screenPosition, actions) => {
  * @returns {boolean} Whether it's a valid element letter
  */
 export const isValidElementLetter = (letter) => {
-  const validElements = ['F', 'N', 'O', 'C', 'H', 'P', 'S'];
+  // Every single-character element symbol that shows up in organic/general
+  // chemistry. Multi-letter symbols (Cl, Br, Na, …) still go through the text
+  // input; these are the ones a hovered-vertex keypress can set instantly.
+  const validElements = ['B', 'C', 'F', 'H', 'I', 'K', 'N', 'O', 'P', 'S', 'U', 'V', 'W', 'Y'];
   return validElements.includes(letter.toUpperCase());
 };
 
