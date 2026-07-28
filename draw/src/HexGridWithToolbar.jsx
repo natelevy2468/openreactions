@@ -3,6 +3,10 @@ import logoFinal4 from '/logoFinal4.png';
 import gearIcon from '/gear.png';
 import { formatAtomText } from './utils/TextUtils.jsx';
 import ToolPalette from './components/ToolPalette.jsx';
+import AboutPopup from './components/AboutPopup.jsx';
+import ExportPopup from './components/ExportPopup.jsx';
+import SettingsDropdown from './components/SettingsDropdown.jsx';
+import MoleculeInfoPanel from './components/MoleculeInfoPanel.jsx';
 import { detectAllRingsEnhanced } from './rendering/RingDetectionUtils.js';
 import { renderDoubleBondByCase } from './rendering/DoubleBondRenderer.js';
 import {
@@ -21,6 +25,7 @@ import {
   getCurvedArrowMidHandleWorld,
   getCurvedArrowPerpAndAlong,
   strokeCurvedArrowShaft,
+  arrowLabelFont,
 } from './rendering/ArrowRenderer.js';
 import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
 import {
@@ -46,7 +51,8 @@ import {
   findHoveredArrowIndex,
 } from './utils/hitTest.js';
 import { buildMoleculeGraph } from './chemistry/moleculeGraph.js';
-import { graphToSmiles } from './chemistry/exportStructure.js';
+import { graphToSmiles, graphToFormula } from './chemistry/exportStructure.js';
+import { canonicalAbbreviation } from './chemistry/abbreviations.js';
 import { smilesToGraph } from './chemistry/importStructure.js';
 
 const RING_PRESET_MODES = ['benzene', 'cyclohexane', 'cyclopentane', 'cyclobutane', 'cyclopropane', 'chair', 'newman'];
@@ -89,6 +95,71 @@ const HexGridWithToolbar = () => {
     
     // UI interaction state
     const [offset, setOffset] = useState({ x: 0, y: 0 });
+    const offsetRef = useRef(offset);
+    offsetRef.current = offset;
+    // View zoom. screen = (world + offset) * scale. At scale === 1 every zoom-aware
+    // calc below is an identity, so the un-zoomed app is byte-for-byte unchanged.
+    const [scale, setScale] = useState(1);
+    const scaleRef = useRef(1);
+    scaleRef.current = scale;
+    const MIN_SCALE = 0.3;
+    const MAX_SCALE = 4;
+    // Apply a zoom, keeping the center of the visible canvas fixed. `computeRaw`
+    // receives the current scale and returns the desired new scale (so callers can
+    // multiply for +/− steps or return an absolute for reset). We read prev scale
+    // and offset from refs and write them back synchronously, so several rapid
+    // clicks in one tick accumulate instead of all seeing the same stale state.
+    const applyZoom = (computeRaw) => {
+      const canvas = canvasRef.current;
+      const w = canvas ? canvas.width : window.innerWidth;
+      const h = canvas ? canvas.height : window.innerHeight;
+      const prevScale = scaleRef.current;
+      const prevOff = offsetRef.current;
+      const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, computeRaw(prevScale)));
+      // Center in canvas px is (w/2, h/2); its world point must stay put:
+      //   worldCx = (screenCx / s) - offset  →  solve new offset for next scale.
+      const worldCx = (w / 2) / prevScale - prevOff.x;
+      const worldCy = (h / 2) / prevScale - prevOff.y;
+      const newOff = { x: (w / 2) / next - worldCx, y: (h / 2) / next - worldCy };
+      scaleRef.current = next;
+      offsetRef.current = newOff;
+      setScale(next);
+      setOffset(newOff);
+    };
+    // Fit the whole drawing into the viewport and center it (Marvin "fit to
+    // screen"). Computes raw world-space content bounds, picks a scale that fits
+    // with margin (never zooming past 100% for a small molecule), then solves the
+    // offset so the content center lands at the canvas center. Empty canvas just
+    // resets to 100% at the current center.
+    const fitToContent = () => {
+      const canvas = canvasRef.current;
+      const w = canvas ? canvas.width : window.innerWidth;
+      const h = canvas ? canvas.height : window.innerHeight;
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      const add = (x, y) => {
+        if (x < minX) minX = x; if (y < minY) minY = y;
+        if (x > maxX) maxX = x; if (y > maxY) maxY = y;
+      };
+      vertices.forEach((v) => add(v.x, v.y));
+      segments.forEach((s) => { if (s.bondOrder > 0) { add(s.x1, s.y1); add(s.x2, s.y2); } });
+      arrows.forEach((a) => { add(a.x, a.y); if (a.x2 != null) add(a.x2, a.y2); });
+      if (!Number.isFinite(minX)) { applyZoom(() => 1); return; }
+      const margin = 80;
+      const contentW = Math.max(1, maxX - minX);
+      const contentH = Math.max(1, maxY - minY);
+      const fitScale = Math.max(MIN_SCALE, Math.min(
+        MAX_SCALE, 1,
+        (w - margin * 2) / contentW,
+        (h - margin * 2) / contentH
+      ));
+      const worldCx = (minX + maxX) / 2;
+      const worldCy = (minY + maxY) / 2;
+      const newOff = { x: (w / 2) / fitScale - worldCx, y: (h / 2) / fitScale - worldCy };
+      scaleRef.current = fitScale;
+      offsetRef.current = newOff;
+      setScale(fitScale);
+      setOffset(newOff);
+    };
     const [menuVertexKey, setMenuVertexKey] = useState(null);
 
     // Selection state
@@ -102,6 +173,10 @@ const HexGridWithToolbar = () => {
     const [hoveredArrow, setHoveredArrow] = useState(null); // Arrow under cursor
     const [draggingArrow, setDraggingArrow] = useState(null); // Arrow being dragged
     const [draggingArrowEnd, setDraggingArrowEnd] = useState(null); // Which end: 'start', 'end', or 'middle'
+    // Reagent/condition text editing over a straight reaction arrow.
+    // { index, position: 'above' | 'below', screenX, screenY } while an input is open.
+    const [arrowTextEdit, setArrowTextEdit] = useState(null);
+    const [arrowTextValue, setArrowTextValue] = useState('');
     const [justCompletedSelection, setJustCompletedSelection] = useState(false); // Prevent click after selection
 
     // Copy/paste state
@@ -175,6 +250,21 @@ const HexGridWithToolbar = () => {
     // helpers it depends on are declared.
     const [smilesInput, setSmilesInput] = useState('');
     const [smilesImportMessage, setSmilesImportMessage] = useState(null); // { text, isError }
+
+    // Molecule info panel (formula / molecular weight). Computed lazily via
+    // OpenChemLib only while the panel is open, and recomputed when the structure
+    // changes, so it never costs anything when hidden.
+    const [showInfoPanel, setShowInfoPanel] = useState(false);
+    const [moleculeInfo, setMoleculeInfo] = useState(null); // result of graphToFormula or null
+    React.useEffect(() => {
+      if (!showInfoPanel) return;
+      let cancelled = false;
+      const graph = buildMoleculeGraph({ vertices, segments, vertexAtoms });
+      graphToFormula(graph)
+        .then((info) => { if (!cancelled) setMoleculeInfo(info); })
+        .catch(() => { if (!cancelled) setMoleculeInfo(null); });
+      return () => { cancelled = true; };
+    }, [showInfoPanel, vertices, segments, vertexAtoms]);
 
     // Mode switching function
     const setModeAndClearSelection = (newMode) => {
@@ -1237,7 +1327,7 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const clickPosition = { x: event.clientX - rect.left, y: event.clientY - rect.top };
+      const clickPosition = { x: (event.clientX - rect.left) / scale, y: (event.clientY - rect.top) / scale };
       
       // Check if clicking on existing vertex first
       const clickedVertex = findNearestVertex(clickPosition.x, clickPosition.y);
@@ -1251,12 +1341,13 @@ const HexGridWithToolbar = () => {
             setShowAtomInput,
             setAtomInputPosition,
             setAtomInputValue,
-            setMenuVertexKey
+            setMenuVertexKey,
+            scale
           }
         );
         return;
       }
-      
+
       // Create new vertex with text input
       const success = handleTextButtonClick(
         clickPosition,
@@ -1267,7 +1358,8 @@ const HexGridWithToolbar = () => {
           setShowAtomInput,
           setAtomInputPosition,
           setAtomInputValue,
-          setMenuVertexKey
+          setMenuVertexKey,
+          scale
         }
       );
       return;
@@ -1291,8 +1383,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       const worldX = x - offset.x;
       const worldY = y - offset.y;
       
@@ -1440,8 +1532,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       
       // Find the nearest vertex
       const clickedVertex = findNearestVertex(x, y);
@@ -1486,8 +1578,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       
       // Convert to world coordinates
       const worldX = x - offset.x;
@@ -1561,8 +1653,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       
       // Convert to world coordinates
       const worldX = x - offset.x;
@@ -1592,8 +1684,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       
       // Convert to world coordinates
       const worldX = x - offset.x;
@@ -1624,8 +1716,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       
       // Convert to world coordinates
       const worldX = x - offset.x;
@@ -1662,8 +1754,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       
       // Convert to world coordinates
       const worldX = x - offset.x;
@@ -1731,8 +1823,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       const worldX = x - offset.x;
       const worldY = y - offset.y;
       
@@ -1778,8 +1870,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       const worldX = x - offset.x;
       const worldY = y - offset.y;
       
@@ -1826,8 +1918,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       const worldX = x - offset.x;
       const worldY = y - offset.y;
       
@@ -1874,8 +1966,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       const worldX = x - offset.x;
       const worldY = y - offset.y;
       
@@ -1922,8 +2014,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       const worldX = x - offset.x;
       const worldY = y - offset.y;
 
@@ -1986,8 +2078,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       const worldX = x - offset.x;
       const worldY = y - offset.y;
       const newmanRadius = hexRadius * 0.68;
@@ -2085,8 +2177,8 @@ const HexGridWithToolbar = () => {
     if (!canvas) return;
     
     const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const x = (event.clientX - rect.left) / scale;
+    const y = (event.clientY - rect.top) / scale;
     
     // Convert to world coordinates
     const worldX = x - offset.x;
@@ -2186,25 +2278,27 @@ const HexGridWithToolbar = () => {
       const clickedBond = segments[clickedBondIndex];
       revealNewmanRotateControlForBond(clickedBond);
       
-      // Handle draw mode: convert to double bond
-      if (mode === 'draw' && clickedBond.bondOrder === 1 && !clickedBond.bondType) {
-        // Convert to double bond
-        saveToHistory(); // Save before converting to double bond
+      // Handle draw mode: cycle the bond order 1 → 2 → 3 → 1 on each click
+      // (ChemDraw/Marvin behaviour). Cycling means every order is reachable and a
+      // misclick is recoverable without reaching for Undo.
+      if (mode === 'draw' && !clickedBond.bondType) {
+        saveToHistory(); // Save before changing bond order
+        const nextOrder = (clickedBond.bondOrder % 3) + 1;
         setSegments(prev => {
           const newSegments = [...prev];
-          const doubleBond = {
+          const cycledBond = {
             ...clickedBond,
-            bondOrder: 2
+            bondOrder: nextOrder
           };
-          newSegments[clickedBondIndex] = doubleBond;
-          
-          // Regenerate suggestions from the new double bond
+          newSegments[clickedBondIndex] = cycledBond;
+
+          // Regenerate suggestions from the changed bond
           setTimeout(() => {
-            setBondSuggestions(generateBondSuggestions(doubleBond));
-            // Update ring detection after double bond creation
+            setBondSuggestions(generateBondSuggestions(cycledBond));
+            // Update ring detection after bond-order change
             updateRingDetection();
           }, 0);
-          
+
           return newSegments;
         });
         return; // Exit early
@@ -2457,15 +2551,15 @@ const HexGridWithToolbar = () => {
       setBondStartPoint(null);
       setBondPreviewEnd(null);
     }
-  }, [mode, isCreatingBond, bondStartPoint, vertices, segments, offset, hexRadius, bondSuggestions, findHoveredSuggestion, generateBondSuggestions, checkAndPerformVertexMerging, shouldDisableAngleSnapping, findClosestSnapAngle, updateVertexBondState, calculateBondDirection, molecularBoundaryRadius, justCompletedSelection, clipboard, isPastePreviewMode, updateRingDetection, saveToHistory, vertexAtoms, arrows, findMolecule, findHoveredArrow, vertexBondStates, revealNewmanRotateControlForVertex, revealNewmanRotateControlForBond, hideNewmanRotateControls]);
+  }, [mode, isCreatingBond, bondStartPoint, vertices, segments, offset, hexRadius, bondSuggestions, findHoveredSuggestion, generateBondSuggestions, checkAndPerformVertexMerging, shouldDisableAngleSnapping, findClosestSnapAngle, updateVertexBondState, calculateBondDirection, molecularBoundaryRadius, justCompletedSelection, clipboard, isPastePreviewMode, updateRingDetection, saveToHistory, vertexAtoms, arrows, findMolecule, findHoveredArrow, vertexBondStates, revealNewmanRotateControlForVertex, revealNewmanRotateControlForBond, hideNewmanRotateControls, scale]);
 
   const handleCanvasMouseMove = useCallback((event) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const x = (event.clientX - rect.left) / scale;
+    const y = (event.clientY - rect.top) / scale;
     
     // Update current mouse position for text input positioning
     setCurrentMousePosition({ x, y });
@@ -2745,7 +2839,7 @@ const HexGridWithToolbar = () => {
     setHoveredVertex(hoveredVertex);
     setHoveredBondIndex(hoveredBond);
     setHoveredSuggestionIndex(hoveredSuggestion);
-  }, [mode, isCreatingBond, offset, bondStartPoint, hexRadius, vertices, segments, vertexThreshold, lineThreshold, bondSuggestions, shouldDisableAngleSnapping, findClosestSnapAngle, getAvailableBondAngles, isPastePreviewMode, clipboard, isSelecting, isDraggingSelection, selectedMolecules, selectedVertices, selectedArrows, dragSelectionStart, vertexAtoms, arrows, findMolecule, findNearestVertex, findHoveredArrow, vertexBondStates, draggingArrow, draggingArrowEnd]);
+  }, [mode, isCreatingBond, offset, bondStartPoint, hexRadius, vertices, segments, vertexThreshold, lineThreshold, bondSuggestions, shouldDisableAngleSnapping, findClosestSnapAngle, getAvailableBondAngles, isPastePreviewMode, clipboard, isSelecting, isDraggingSelection, selectedMolecules, selectedVertices, selectedArrows, dragSelectionStart, vertexAtoms, arrows, findMolecule, findNearestVertex, findHoveredArrow, vertexBondStates, draggingArrow, draggingArrowEnd, scale]);
 
   // Enhanced keyboard handler for text and bond creation
   const handleKeyDown = useCallback((event) => {
@@ -2805,16 +2899,51 @@ const HexGridWithToolbar = () => {
       return;
     }
 
+    // Escape (fallthrough): clear the selection and drop back to the select tool.
+    if (event.key === 'Escape' && !showAtomInput) {
+      setSelectedSegments(new Set());
+      setSelectedVertices(new Set());
+      setSelectedArrows(new Set());
+      setSelectedMolecules([]);
+      setMode('mouse');
+      return;
+    }
+
+    // Keyboard tool shortcuts (Marvin-style single-key tool switching). Only when
+    // not typing a label and with no modifier held. The chosen letters are
+    // deliberately NOT element symbols, so hovering an atom and pressing them can
+    // never be mistaken for setting an element.
+    if (!showAtomInput && !arrowTextEdit && !event.metaKey && !event.ctrlKey && !event.altKey) {
+      const TOOL_KEYS = {
+        d: 'draw', e: 'erase', m: 'mouse', t: 'text',
+        a: 'arrow', q: 'equil', r: 'benzene', l: 'lone',
+        g: 'plus', j: 'minus',
+        '3': 'cyclopropane', '4': 'cyclobutane', '5': 'cyclopentane', '6': 'cyclohexane',
+      };
+      const tool = TOOL_KEYS[event.key.toLowerCase()];
+      if (tool) {
+        event.preventDefault();
+        setMode(tool);
+        setSelectedSegments(new Set());
+        setSelectedVertices(new Set());
+        setSelectedArrows(new Set());
+        setSelectedMolecules([]);
+        setBondSuggestions([]);
+        return;
+      }
+    }
+
     // Handle Enter key for text input on hovered vertex
     if (event.key === 'Enter' && hoveredVertex && !showAtomInput) {
       const success = handleEnterKeyOnVertex(
-        hoveredVertex, 
-        currentMousePosition, 
+        hoveredVertex,
+        currentMousePosition,
         {
           setShowAtomInput,
           setAtomInputPosition,
           setAtomInputValue,
-          setMenuVertexKey
+          setMenuVertexKey,
+          scale
         }
       );
       if (success) return;
@@ -2831,7 +2960,7 @@ const HexGridWithToolbar = () => {
       );
       if (success) return;
     }
-  }, [isCreatingBond, hoveredVertex, showAtomInput, currentMousePosition, vertexAtoms, segments, curvedArrowStartPoint, handleUndo, handleRedo, saveToHistory, copySelectionToClipboard, deleteSelection, selectedMolecules, selectedArrows, updateRingDetection, isPastePreviewMode]);
+  }, [isCreatingBond, hoveredVertex, showAtomInput, arrowTextEdit, currentMousePosition, vertexAtoms, segments, curvedArrowStartPoint, handleUndo, handleRedo, saveToHistory, copySelectionToClipboard, deleteSelection, selectedMolecules, selectedArrows, updateRingDetection, isPastePreviewMode, scale]);
 
   // Handle mouse leaving canvas - clear hover states
   const handleCanvasMouseLeave = useCallback(() => {
@@ -2841,6 +2970,62 @@ const HexGridWithToolbar = () => {
     setHoveredMolecule(null);
     setHoveredArrow(null);
   }, []);
+
+  // Double-click a straight reaction arrow to add/edit the reagents (above) or
+  // conditions (below) that make it a full ChemDraw-style equation. Which half
+  // of the arrow you double-click decides which label you edit.
+  const handleCanvasDoubleClick = useCallback((event) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const wx = (event.clientX - rect.left) / scale - offset.x;
+    const wy = (event.clientY - rect.top) / scale - offset.y;
+
+    let best = -1;
+    let bestDy = Infinity;
+    arrows.forEach((a, i) => {
+      const isStraight = a.type === 'forward' || a.type === 'equilibrium' || a.type === 'equil';
+      if (!isStraight) return;
+      const halfLen = (a.length || 80) / 2;
+      if (wx < a.x - halfLen - 8 || wx > a.x + halfLen + 8) return; // outside horizontal span
+      const dy = Math.abs(wy - a.y);
+      if (dy < 40 && dy < bestDy) {
+        bestDy = dy;
+        best = i;
+      }
+    });
+    if (best === -1) return;
+
+    event.preventDefault();
+    const arrow = arrows[best];
+    const position = wy <= arrow.y ? 'above' : 'below';
+    // Store viewport coordinates so the overlay input lands exactly over the arrow
+    // (rect.left/top account for the toolbar; offset accounts for canvas panning).
+    setArrowTextEdit({
+      index: best,
+      position,
+      screenX: rect.left + (arrow.x + offset.x) * scale,
+      screenY: rect.top + (arrow.y + offset.y) * scale,
+    });
+    setArrowTextValue((position === 'above' ? arrow.textAbove : arrow.textBelow) || '');
+  }, [arrows, offset, scale]);
+
+  // Commit the arrow-label editor back onto the arrow (empty clears the label).
+  const commitArrowText = useCallback(() => {
+    if (!arrowTextEdit) return;
+    const { index, position } = arrowTextEdit;
+    const value = arrowTextValue.trim();
+    saveToHistory();
+    setArrows((prev) => prev.map((a, i) => {
+      if (i !== index) return a;
+      const next = { ...a };
+      if (position === 'above') next.textAbove = value;
+      else next.textBelow = value;
+      return next;
+    }));
+    setArrowTextEdit(null);
+    setArrowTextValue('');
+  }, [arrowTextEdit, arrowTextValue, saveToHistory]);
 
   // Handle mouse down for dragging
   const handleCanvasMouseDown = useCallback((event) => {
@@ -2853,8 +3038,8 @@ const HexGridWithToolbar = () => {
     if (!canvas) return;
     
     const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const x = (event.clientX - rect.left) / scale;
+    const y = (event.clientY - rect.top) / scale;
     const worldX = x - offset.x;
     const worldY = y - offset.y;
     
@@ -2931,7 +3116,7 @@ const HexGridWithToolbar = () => {
     setIsSelecting(true);
     setSelectionStart({ x: worldX, y: worldY });
     setSelectionEnd({ x: worldX, y: worldY });
-  }, [mode, offset, arrows, selectedMolecules, selectedVertices, selectedArrows, findNearestVertex, findHoveredArrow, saveToHistory, isPastePreviewMode, detectArrowPart]);
+  }, [mode, offset, arrows, selectedMolecules, selectedVertices, selectedArrows, findNearestVertex, findHoveredArrow, saveToHistory, isPastePreviewMode, detectArrowPart, scale]);
 
   // Handle mouse up for completing drag or selection
   const handleCanvasMouseUp = useCallback((event) => {
@@ -2951,8 +3136,8 @@ const HexGridWithToolbar = () => {
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = event.clientX - rect.left;
-      const y = event.clientY - rect.top;
+      const x = (event.clientX - rect.left) / scale;
+      const y = (event.clientY - rect.top) / scale;
       const worldX = x - offset.x;
       const worldY = y - offset.y;
       
@@ -3090,10 +3275,17 @@ const HexGridWithToolbar = () => {
     canvas.width = window.innerWidth;
     canvas.height = window.innerHeight;
 
-    // Clear canvas
+    // Clear canvas (in device space, before the zoom transform)
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.fillStyle = colors.canvasBackground;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Apply the view zoom. Everything below draws in (world + offset) space and is
+    // scaled uniformly, so line weights stay proportional (crisp vector zoom).
+    // Setting canvas.width above already reset the transform, so this is safe even
+    // if an early return skips a matching restore.
+    ctx.save();
+    ctx.setTransform(scale, 0, 0, scale, 0, 0);
 
     // Draw Newman projection circles as non-interactive visual guides.
     newmanInstances.forEach(circle => {
@@ -3228,7 +3420,9 @@ const HexGridWithToolbar = () => {
         const drawSeg = clip.clipped
           ? { ...segment, x1: clip.x1, y1: clip.y1, x2: clip.x2, y2: clip.y2 }
           : segment;
-        const doubleBondDeps = { detectedRings, countVertexBonds };
+        // Topology (ring membership, interior direction, substitution) is decided
+        // from the untrimmed `segment`; only the drawn lines use the clipped coords.
+        const doubleBondDeps = { detectedRings, countVertexBonds, geomBond: segment };
         if (!isExportingRef.current && hoveredBondIndex === index) {
           const tempColors = { ...colors, bonds: '#007bff' };
           renderDoubleBondByCase(ctx, drawSeg, offset, tempColors, doubleBondDeps);
@@ -4205,7 +4399,9 @@ const HexGridWithToolbar = () => {
       ctx.arc(hoveredVertex.x + offset.x, hoveredVertex.y + offset.y, 10, 0, 2 * Math.PI);
       ctx.fill();
     }
-  }, [colors, segments, vertices, vertexAtoms, offset, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint, getAvailableBondAngles, shouldDisableAngleSnapping, hexRadius, vertexBondStates, selectedMolecules, selectedArrows, hoveredMolecule, hoveredArrow, isSelecting, selectionStart, selectionEnd, isDraggingSelection, selectedVertices, isPastePreviewMode, clipboard, pastePreviewPosition, draggingArrow, draggingArrowEnd, newmanInstances]);
+
+    ctx.restore(); // undo the zoom transform
+  }, [colors, segments, vertices, vertexAtoms, offset, scale, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint, getAvailableBondAngles, shouldDisableAngleSnapping, hexRadius, vertexBondStates, selectedMolecules, selectedArrows, hoveredMolecule, hoveredArrow, isSelecting, selectionStart, selectionEnd, isDraggingSelection, selectedVertices, isPastePreviewMode, clipboard, pastePreviewPosition, draggingArrow, draggingArrowEnd, newmanInstances]);
 
   /** PNG of the live canvas, cropped to drawn content. Redraws without any interactive overlays. */
   const renderCleanCanvas = useCallback(
@@ -4218,17 +4414,24 @@ const HexGridWithToolbar = () => {
       }
       const canvas = canvasRef.current;
       if (!canvas) return null;
+      // Content bounds are in (world + offset) space; the canvas pixels are scaled
+      // by the current zoom, so compute bounds in world space then scale the crop
+      // rect up to pixels to keep the export correctly framed at any zoom.
+      const s = scaleRef.current;
       const crop = computeCanvasContentBounds(
         vertices,
         segments,
         arrows,
         offset,
-        canvas.width,
-        canvas.height,
+        canvas.width / s,
+        canvas.height / s,
         72
       );
       if (!crop) return null;
-      return exportCanvasCroppedSnapshot(canvas, crop, resolution);
+      const pxCrop = s === 1
+        ? crop
+        : { x: crop.x * s, y: crop.y * s, width: crop.width * s, height: crop.height * s };
+      return exportCanvasCroppedSnapshot(canvas, pxCrop, resolution);
     },
     [drawCanvas, vertices, segments, arrows, offset]
   );
@@ -4249,7 +4452,23 @@ const HexGridWithToolbar = () => {
     if (!canvas) return;
     const onWheel = (event) => {
       event.preventDefault();
-      setOffset((prev) => ({ x: prev.x - event.deltaX, y: prev.y - event.deltaY }));
+      const s = scaleRef.current;
+      // Ctrl/Cmd + wheel (or pinch, which browsers report as ctrl+wheel) zooms
+      // toward the cursor; a plain wheel pans. Dividing the pan delta by the zoom
+      // keeps panning a constant on-screen speed at any zoom level.
+      if (event.ctrlKey || event.metaKey) {
+        const rect = canvas.getBoundingClientRect();
+        const mx = event.clientX - rect.left;
+        const my = event.clientY - rect.top;
+        const next = Math.max(0.3, Math.min(4, s * Math.exp(-event.deltaY * 0.0015)));
+        setOffset((prev) => ({
+          x: mx / next - (mx / s - prev.x),
+          y: my / next - (my / s - prev.y),
+        }));
+        setScale(next);
+      } else {
+        setOffset((prev) => ({ x: prev.x - event.deltaX / s, y: prev.y - event.deltaY / s }));
+      }
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
@@ -4387,6 +4606,34 @@ const HexGridWithToolbar = () => {
           gap: '8px',
           marginTop: '3px'
         }}>
+          <div style={{ position: 'relative', display: 'inline-block' }} data-info-dropdown>
+            <button
+              onClick={() => setShowInfoPanel((v) => !v)}
+              title="Molecular weight & formula for the current structure"
+              style={{
+                backgroundColor: showInfoPanel ? 'rgba(54, 98, 227, 0.2)' : 'transparent',
+                color: '#333',
+                textDecoration: 'none',
+                border: 'none',
+                padding: '10px 12px',
+                borderRadius: '6px',
+                fontSize: '16px',
+                fontWeight: '400',
+                fontFamily: 'Roboto, sans-serif',
+                cursor: 'pointer',
+                transition: 'all 0.15s ease-out',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(54, 98, 227, 0.2)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = showInfoPanel ? 'rgba(54, 98, 227, 0.2)' : 'transparent';
+              }}
+            >
+              Info
+            </button>
+            <MoleculeInfoPanel show={showInfoPanel} colors={colors} info={moleculeInfo} />
+          </div>
           <button
             onClick={() => setShowAboutPopup(true)}
             style={{
@@ -4445,240 +4692,18 @@ const HexGridWithToolbar = () => {
                 }}
               />
             </button>
-            {/* Settings Dropdown */}
-            {showSettingsDropdown && (
-              <div style={{
-                position: 'absolute',
-                right: 0,
-                top: '100%',
-                backgroundColor: colors.surface,
-                minWidth: '280px',
-                boxShadow: `0 8px 16px ${colors.shadow}`,
-                borderRadius: '8px',
-                border: `1px solid ${colors.border}`,
-                zIndex: 1000,
-                marginTop: '8px',
-                padding: '16px',
-                fontSize: '14px',
-                lineHeight: '1.4',
-                fontFamily: 'Roboto, sans-serif',
-                animation: 'fadeIn 0.2s ease-out'
-              }}>
-                <div style={{
-                  position: 'absolute',
-                  top: '-8px',
-                  right: '20px',
-                  width: 0,
-                  height: 0,
-                  borderLeft: '8px solid transparent',
-                  borderRight: '8px solid transparent',
-                  borderBottom: `8px solid ${colors.surface}`
-                }} />
-                <div style={{
-                  color: colors.text,
-                  fontSize: '16px',
-                  fontWeight: '600',
-                  marginBottom: '16px'
-                }}>
-                  Settings
-                </div>
-                
-                {/* Dark Mode Toggle */}
-                <div style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '12px 0',
-                  borderBottom: `1px solid ${colors.border}`
-                }}>
-                  <div style={{
-                    display: 'flex',
-                    flexDirection: 'column'
-                  }}>
-                    <span style={{
-                      color: colors.text,
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      marginBottom: '2px'
-                    }}>
-                      Dark Mode
-                    </span>
-                    <span style={{
-                      color: colors.textSecondary,
-                      fontSize: '12px'
-                    }}>
-                      Switch to dark color scheme
-                    </span>
-                  </div>
-                  
-                  <button
-                    onClick={() => setIsDarkMode(!isDarkMode)}
-                    style={{
-                      position: 'relative',
-                      width: '44px',
-                      height: '24px',
-                      backgroundColor: isDarkMode ? colors.buttonActive : colors.button,
-                      borderRadius: '12px',
-                      border: 'none',
-                      cursor: 'pointer',
-                      transition: 'all 0.2s ease',
-                      outline: 'none'
-                    }}
-                  >
-                    <div style={{
-                      position: 'absolute',
-                      top: '2px',
-                      left: isDarkMode ? '22px' : '2px',
-                      width: '20px',
-                      height: '20px',
-                      backgroundColor: '#ffffff',
-                      borderRadius: '50%',
-                      transition: 'all 0.2s ease',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
-                    }} />
-                  </button>
-                </div>
-
-                {/* Copy as SMILES */}
-                <div style={{ padding: '12px 0' }}>
-                  <div style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between'
-                  }}>
-                    <div style={{ display: 'flex', flexDirection: 'column' }}>
-                      <span style={{
-                        color: colors.text,
-                        fontSize: '14px',
-                        fontWeight: '500',
-                        marginBottom: '2px'
-                      }}>
-                        Copy as SMILES
-                      </span>
-                      <span style={{ color: colors.textSecondary, fontSize: '12px' }}>
-                        Export the structure as a SMILES string
-                      </span>
-                    </div>
-                    <button
-                      onClick={handleCopySmiles}
-                      style={{
-                        backgroundColor: colors.button,
-                        color: colors.text,
-                        border: `1px solid ${colors.border}`,
-                        borderRadius: '6px',
-                        padding: '6px 12px',
-                        fontSize: '13px',
-                        fontWeight: '500',
-                        cursor: 'pointer',
-                        fontFamily: 'Roboto, sans-serif',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      Copy
-                    </button>
-                  </div>
-
-                  {smilesResult && (
-                    <div style={{ marginTop: '10px' }}>
-                      <div style={{
-                        backgroundColor: colors.background,
-                        border: `1px solid ${colors.border}`,
-                        borderRadius: '6px',
-                        padding: '8px 10px',
-                        fontFamily: 'monospace',
-                        fontSize: '13px',
-                        color: colors.text,
-                        wordBreak: 'break-all',
-                        userSelect: 'all',
-                        maxHeight: '96px',
-                        overflowY: 'auto'
-                      }}>
-                        {smilesResult.smiles || '(empty — nothing drawn)'}
-                      </div>
-                      {smilesResult.copied && smilesResult.smiles && (
-                        <div style={{ color: colors.textSecondary, fontSize: '12px', marginTop: '6px' }}>
-                          ✓ Copied to clipboard
-                        </div>
-                      )}
-                      {smilesResult.warnings && smilesResult.warnings.length > 0 && (
-                        <div style={{ marginTop: '6px' }}>
-                          {smilesResult.warnings.map((w, i) => (
-                            <div key={i} style={{ color: '#c77', fontSize: '12px', marginTop: '2px' }}>
-                              ⚠ {w}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Import from SMILES */}
-                <div style={{ padding: '12px 0', borderTop: `1px solid ${colors.border}` }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', marginBottom: '8px' }}>
-                    <span style={{
-                      color: colors.text,
-                      fontSize: '14px',
-                      fontWeight: '500',
-                      marginBottom: '2px'
-                    }}>
-                      Import from SMILES
-                    </span>
-                    <span style={{ color: colors.textSecondary, fontSize: '12px' }}>
-                      Paste a SMILES string to add it to the canvas
-                    </span>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <input
-                      type="text"
-                      value={smilesInput}
-                      onChange={(e) => setSmilesInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === 'Enter') handleImportSmiles(); }}
-                      placeholder="e.g. c1ccccc1"
-                      spellCheck={false}
-                      style={{
-                        flex: 1,
-                        minWidth: 0,
-                        backgroundColor: colors.background,
-                        color: colors.text,
-                        border: `1px solid ${colors.border}`,
-                        borderRadius: '6px',
-                        padding: '6px 10px',
-                        fontSize: '13px',
-                        fontFamily: 'monospace',
-                        outline: 'none'
-                      }}
-                    />
-                    <button
-                      onClick={handleImportSmiles}
-                      style={{
-                        backgroundColor: colors.buttonActive,
-                        color: '#ffffff',
-                        border: 'none',
-                        borderRadius: '6px',
-                        padding: '6px 14px',
-                        fontSize: '13px',
-                        fontWeight: '500',
-                        cursor: 'pointer',
-                        fontFamily: 'Roboto, sans-serif',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      Add
-                    </button>
-                  </div>
-                  {smilesImportMessage && (
-                    <div style={{
-                      marginTop: '8px',
-                      fontSize: '12px',
-                      color: smilesImportMessage.isError ? '#c77' : colors.textSecondary
-                    }}>
-                      {smilesImportMessage.isError ? '⚠ ' : '✓ '}{smilesImportMessage.text}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+            <SettingsDropdown
+              show={showSettingsDropdown}
+              colors={colors}
+              isDarkMode={isDarkMode}
+              setIsDarkMode={setIsDarkMode}
+              onCopySmiles={handleCopySmiles}
+              smilesResult={smilesResult}
+              smilesInput={smilesInput}
+              setSmilesInput={setSmilesInput}
+              onImportSmiles={handleImportSmiles}
+              smilesImportMessage={smilesImportMessage}
+            />
           </div>
         </div>
       </div>
@@ -4936,6 +4961,7 @@ const HexGridWithToolbar = () => {
         <canvas
           ref={canvasRef}
           onClick={handleCanvasClick}
+          onDoubleClick={handleCanvasDoubleClick}
           onMouseDown={handleCanvasMouseDown}
           onMouseMove={handleCanvasMouseMove}
           onMouseUp={handleCanvasMouseUp}
@@ -5021,20 +5047,28 @@ const HexGridWithToolbar = () => {
               value={atomInputValue}
               onChange={(e) => {
                 const newValue = e.target.value;
-                // Allow letters and numbers for custom text labels
-                const allowedChars = newValue.replace(/[^a-zA-Z0-9]/g, '');
-                // Auto-capitalize letters only
-                const capitalized = allowedChars.split('').map(char => 
-                  /[a-z]/.test(char) ? char.toUpperCase() : char
-                ).join('');
+                // Allow letters, numbers and +/- signs. The signs let a trailing
+                // charge (N+, O-) be typed, and let a standalone "+"/"-" be placed
+                // as a literal label — e.g. the "+" between reactants in an equation.
+                const allowedChars = newValue.replace(/[^a-zA-Z0-9+\-]/g, '');
+                // Capitalize only the FIRST letter (so a lone "cl" becomes "Cl")
+                // while preserving the rest of the case the user typed — this is
+                // what lets mixed-case superatom groups like OMe, tBu, NMe2 and
+                // CO2Me be entered and shown correctly.
+                const capitalized = allowedChars.length > 0
+                  ? allowedChars.charAt(0).toUpperCase() + allowedChars.slice(1)
+                  : allowedChars;
                 setAtomInputValue(capitalized);
               }}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  // Handle text input completion
+                  // Handle text input completion. If the label is a recognized
+                  // superatom abbreviation, normalize it to the canonical spelling
+                  // (e.g. "ome" -> "OMe") so it displays and expands consistently.
                   saveToHistory(); // Save before modifying atom text
+                  const canonical = canonicalAbbreviation(atomInputValue) || atomInputValue;
                   handleTextInputComplete(
-                    atomInputValue,
+                    canonical,
                     menuVertexKey,
                     { segments },
                     { setVertexAtoms, setShowAtomInput }
@@ -5067,7 +5101,48 @@ const HexGridWithToolbar = () => {
         </div>
         </>
       )}
-      
+
+      {/* Reagent/condition text editor for reaction arrows (double-click an arrow) */}
+      {arrowTextEdit && (
+        <>
+          <div
+            onMouseDown={() => commitArrowText()}
+            style={{ position: 'fixed', inset: 0, zIndex: 9, background: 'transparent' }}
+          />
+          <input
+            autoFocus
+            value={arrowTextValue}
+            onChange={(e) => setArrowTextValue(e.target.value)}
+            onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); commitArrowText(); }
+              else if (e.key === 'Escape') { e.preventDefault(); setArrowTextEdit(null); setArrowTextValue(''); }
+              e.stopPropagation();
+            }}
+            placeholder={arrowTextEdit.position === 'above' ? 'reagents' : 'conditions'}
+            style={{
+              position: 'absolute',
+              left: `${arrowTextEdit.screenX}px`,
+              top: `${arrowTextEdit.screenY + (arrowTextEdit.position === 'above' ? -30 : 30)}px`,
+              transform: 'translate(-50%, -50%)',
+              zIndex: 10,
+              minWidth: '90px',
+              width: `${Math.max(90, arrowTextValue.length * 9 + 24)}px`,
+              padding: '3px 8px',
+              font: arrowLabelFont(15),
+              textAlign: 'center',
+              border: '2px solid #3662e3',
+              borderRadius: '6px',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.18)',
+              backgroundColor: 'white',
+              color: 'black',
+              outline: 'none',
+              pointerEvents: 'auto',
+            }}
+          />
+        </>
+      )}
+
       {/* Copy — fixed top-center (molecule selection only; arrows use sidebar / Cmd+C) */}
       {(selectedSegments.size > 0 ||
         selectedVertices.size > 0 ||
@@ -5328,315 +5403,24 @@ const HexGridWithToolbar = () => {
         </button>
       )}
       
-      {/* About Popup */}
-      {showAboutPopup && (
-        <>
-          {/* Overlay for dismissing popup by clicking outside */}
-          <div
-            onClick={() => setShowAboutPopup(false)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              zIndex: 15,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          />
-          <div
-            style={{
-              position: 'fixed',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 16,
-              pointerEvents: 'auto',
-              width: '400px',
-              maxWidth: '90vw',
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
-              border: '2px solid #e0e0e0',
-              padding: '30px',
-              textAlign: 'center',
-              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-            }}
-          >
-            <div style={{
-              fontSize: '20px',
-              fontWeight: '600',
-              color: '#1a1a1a',
-              marginBottom: '20px',
-              lineHeight: '1.4',
-            }}>
-              Made by: Nathan Levy PO '27
-            </div>
-            
-            <div style={{
-              fontSize: '18px',
-              fontWeight: '500',
-              color: '#333',
-              marginBottom: '20px',
-              lineHeight: '1.4',
-            }}>
-              text 925-808-9441 with questions!
-            </div>
-            
-            <div style={{
-              fontSize: '16px',
-              fontWeight: '400',
-              color: '#666',
-              fontStyle: 'italic',
-              lineHeight: '1.4',
-            }}>
-              still under development.
-            </div>
-            
-            <button
-              onClick={() => setShowAboutPopup(false)}
-              style={{
-                marginTop: '25px',
-                backgroundColor: '#e9ecef',
-                color: 'white',
-                border: `1px solid ${colors.border}`,
-                borderRadius: '8px',
-                padding: '10px 20px',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                transition: 'background 0.2s',
-              }}
-              onMouseEnter={(e) => e.target.style.backgroundColor = '#dee2e6'}
-              onMouseLeave={(e) => e.target.style.backgroundColor = '#e9ecef'}
-            >
-              Close
-            </button>
-          </div>
-        </>
-      )}
-      
-      {/* Export Popup */}
-      {showExportPopup && exportImageUrl && (
-        <>
-          {/* Overlay for dismissing popup by clicking outside */}
-          <div
-            onClick={() => {
-              setShowExportPopup(false);
-              setExportImageUrl(null);
-              setExportMetadata(null);
-            }}
-            style={{
-        position: 'fixed',
-              inset: 0,
-              zIndex: 15,
-              backgroundColor: 'rgba(0, 0, 0, 0.5)',
-        display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          />
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              position: 'fixed',
-              top: '50%',
-              left: '50%',
-              transform: 'translate(-50%, -50%)',
-              zIndex: 16,
-              pointerEvents: 'auto',
-              width: '500px',
-              maxWidth: '90vw',
-              backgroundColor: 'white',
-              borderRadius: '12px',
-              boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
-              border: '2px solid #e0e0e0',
-              padding: '30px',
-              textAlign: 'center',
-              fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
-            }}
-          >
-            <div style={{
-              fontSize: '24px',
-              fontWeight: '600',
-              color: '#1a1a1a',
-              marginBottom: '20px',
-            }}>
-              Export Molecular Structure
-            </div>
-            
-            {/* Image Preview */}
-            <div style={{
-              marginBottom: '24px',
-              border: '2px solid #e0e0e0',
-              borderRadius: '8px',
-              padding: '16px',
-              backgroundColor: '#f8f9fa',
-            }}>
-              <img
-                src={exportImageUrl}
-                alt="Molecular structure preview"
-                style={{
-                  maxWidth: '100%',
-                  maxHeight: '300px',
-                  objectFit: 'contain',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  backgroundColor: 'white',
-                }}
-              />
-            </div>
-            
-            {/* Action Buttons */}
-            <div style={{
-              display: 'flex',
-              gap: '12px',
-              justifyContent: 'center',
-              marginBottom: '16px',
-      }}>
-        <button
-          onClick={() => {
-                  // Create download link with smart filename
-                  const link = document.createElement('a');
-                  link.href = exportImageUrl;
-                  
-                  const date = new Date().toISOString().split('T')[0];
-                  const sizeInfo = exportMetadata ? `_${exportMetadata.width}x${exportMetadata.height}` : '';
-                  link.download = `molecule_${date}${sizeInfo}.png`;
-                  
-                  document.body.appendChild(link);
-                  link.click();
-                  document.body.removeChild(link);
-                }}
-          style={{
-                  backgroundColor: '#4CAF50',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  padding: '12px 20px',
-                  fontSize: '14px',
-                  fontWeight: '600',
-            cursor: 'pointer',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-            display: 'flex',
-            alignItems: 'center',
-                  gap: '8px',
-                  transition: 'all 0.2s ease',
-                }}
-                onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#45a049';
-                  e.target.style.transform = 'translateY(-1px)';
-                }}
-                onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#4CAF50';
-                  e.target.style.transform = 'translateY(0)';
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="7,10 12,15 17,10"/>
-                  <line x1="12" y1="15" x2="12" y2="3"/>
-                </svg>
-                Save as PNG
-              </button>
-              
-              <button
-                onClick={async (e) => {
-                  const btn = e.currentTarget;
-                  try {
-                    const response = await fetch(exportImageUrl);
-                    const blob = await response.blob();
-                    
-                    await navigator.clipboard.write([
-                      new ClipboardItem({ 'image/png': blob })
-                    ]);
-                    
-                    const originalText = btn.innerHTML;
-                    btn.innerHTML = '✅ Copied!';
-                    btn.style.backgroundColor = '#28a745';
-                    setTimeout(() => {
-                      btn.innerHTML = originalText;
-                      btn.style.backgroundColor = '#2196F3';
-                    }, 1500);
-                  } catch (error) {
-                    alert('Clipboard copy failed. Please use "Save as PNG" instead.');
-                  }
-                }}
-                style={{
-                  backgroundColor: '#2196F3',
-                  color: 'white',
-                  border: 'none',
-                  borderRadius: '8px',
-                  padding: '12px 20px',
-            fontSize: '14px',
-            fontWeight: '600',
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  transition: 'all 0.2s ease',
-                }}
-          onMouseEnter={(e) => {
-                  e.target.style.backgroundColor = '#1976D2';
-                  e.target.style.transform = 'translateY(-1px)';
-          }}
-          onMouseLeave={(e) => {
-                  e.target.style.backgroundColor = '#2196F3';
-                  e.target.style.transform = 'translateY(0)';
-                }}
-              >
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
-                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-                </svg>
-                Copy Image
-        </button>
-            </div>
-            
-            <div style={{
-              fontSize: '13px',
-              color: '#666',
-              marginBottom: '20px',
-              lineHeight: '1.4',
-            }}>
-              {exportMetadata ? (
-                <>
-                  Cropped to drawing: {exportMetadata.width}×{exportMetadata.height}px • {exportMetadata.scaleFactor}× scale (same pixels as canvas)
-                </>
-              ) : (
-                'PNG zoomed to your structure — copied from the canvas'
-              )}
-            </div>
-        
-        <button
-              onClick={() => {
-                setShowExportPopup(false);
-                setExportImageUrl(null);
-                setExportMetadata(null);
-              }}
-              style={{
-                backgroundColor: '#e9ecef',
-                color: '#333',
-                border: `1px solid ${colors.border}`,
-                borderRadius: '8px',
-                padding: '10px 20px',
-                fontSize: '14px',
-                fontWeight: '600',
-                cursor: 'pointer',
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                transition: 'background 0.2s',
-              }}
-              onMouseEnter={(e) => e.target.style.backgroundColor = '#dee2e6'}
-              onMouseLeave={(e) => e.target.style.backgroundColor = '#e9ecef'}
-            >
-              Close
-            </button>
-          </div>
-        </>
-      )}
-      
+      <AboutPopup
+        show={showAboutPopup}
+        onClose={() => setShowAboutPopup(false)}
+        colors={colors}
+      />
+
+      <ExportPopup
+        show={showExportPopup}
+        imageUrl={exportImageUrl}
+        metadata={exportMetadata}
+        onClose={() => {
+          setShowExportPopup(false);
+          setExportImageUrl(null);
+          setExportMetadata(null);
+        }}
+        colors={colors}
+      />
+
       {/* Bottom Right Toolbar - Export */}
       <div style={{
         position: 'fixed',
@@ -5654,6 +5438,52 @@ const HexGridWithToolbar = () => {
         zIndex: 3,
         transition: 'bottom 0.3s ease'
       }}>
+        {/* Zoom control */}
+        <div style={{
+          display: 'flex',
+          alignItems: 'center',
+          alignSelf: 'flex-end',
+          gap: '2px',
+          backgroundColor: '#e9ecef',
+          border: `1px solid ${colors.border}`,
+          borderRadius: '6px',
+          boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
+          padding: '2px',
+          fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
+        }}>
+          {[
+            { label: '−', title: 'Zoom out', on: () => applyZoom((s) => s / 1.2), w: 30, fs: 20 },
+            { label: `${Math.round(scale * 100)}%`, title: 'Fit drawing to screen', on: () => fitToContent(), w: 48, fs: 12 },
+            { label: '+', title: 'Zoom in', on: () => applyZoom((s) => s * 1.2), w: 30, fs: 20 },
+          ].map((b) => (
+            <button
+              key={b.title}
+              onClick={b.on}
+              title={b.title}
+              className="toolbar-button"
+              style={{
+                width: `${b.w}px`,
+                height: '28px',
+                border: 'none',
+                background: 'transparent',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                outline: 'none',
+                fontSize: `${b.fs}px`,
+                fontWeight: 600,
+                color: '#333',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                lineHeight: 1,
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#dde1e5')}
+              onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+            >
+              {b.label}
+            </button>
+          ))}
+        </div>
         <button
           onClick={async () => {
             if (vertices.length === 0 && segments.filter(s => s.bondOrder > 0).length === 0 && arrows.length === 0) {

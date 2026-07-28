@@ -86,16 +86,17 @@ export const handleQuickElementKey = (letter, hoveredVertex, state, actions) => 
  * @param {Object} actions - Available actions
  */
 export const openTextInput = (vertexKey, screenPosition, actions) => {
-  const { setShowAtomInput, setAtomInputPosition, setAtomInputValue, setMenuVertexKey } = actions;
+  const { setShowAtomInput, setAtomInputPosition, setAtomInputValue, setMenuVertexKey, scale = 1 } = actions;
 
-  // Position the input box at the click/hover position
-  // Account for toolbar offset
+  // Position the input box at the click/hover position. screenPosition is in
+  // (world + offset) space, so multiply by the current zoom to get canvas pixels,
+  // then add the toolbar offset to reach viewport coordinates.
   const toolbarWidth = Math.min(240, window.innerWidth * 0.22);
   const toolbarHeight = 50;
-  
+
   setAtomInputPosition({
-    x: screenPosition.x + toolbarWidth,
-    y: screenPosition.y + toolbarHeight
+    x: screenPosition.x * scale + toolbarWidth,
+    y: screenPosition.y * scale + toolbarHeight
   });
 
   // Clear input and set vertex
@@ -203,10 +204,13 @@ export const parseAtomInput = (inputText) => {
   // Accept any text as the symbol - don't restrict to element symbols
   // This allows custom labels, group abbreviations, etc.
   let symbolText = text;
-  
-  // Parse charge (+ or - at the end) and remove it from symbol
+
+  // Parse a trailing charge (e.g. "N+", "O-", "Fe3+") and remove it from the
+  // symbol — but only when an actual atom/label precedes it. A bare "+"/"-"/"2+"
+  // is kept as a literal label so a reaction "+" (or a lone charge glyph) can be
+  // placed with the text tool instead of collapsing to an empty symbol.
   const chargeMatch = text.match(/([+-]\d*|\d*[+-])$/);
-  if (chargeMatch) {
+  if (chargeMatch && chargeMatch.index > 0) {
     const chargeStr = chargeMatch[1];
     if (chargeStr === '+') result.charge = 1;
     else if (chargeStr === '-') result.charge = -1;
@@ -217,7 +221,7 @@ export const parseAtomInput = (inputText) => {
     // Remove charge from symbol
     symbolText = text.substring(0, chargeMatch.index);
   }
-  
+
   // Store the full text as symbol (numbers will be auto-subscripted during rendering)
   result.symbol = symbolText;
 

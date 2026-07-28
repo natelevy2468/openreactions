@@ -72,23 +72,34 @@ const shorterLineEndpoints = (bond) => {
 /**
  * Render a double bond.
  * @param {CanvasRenderingContext2D} ctx
- * @param {Object} bond - {x1,y1,x2,y2}
+ * @param {Object} bond - {x1,y1,x2,y2} coordinates to actually draw (may be trimmed
+ *   back from a labeled atom so the line stops before the letters)
  * @param {Object} offset - canvas pan offset
  * @param {Object} colors - color scheme (uses colors.bonds)
  * @param {Object} deps
  * @param {Array} deps.detectedRings - rings for interior-offset decisions
  * @param {(vertex:{x:number,y:number})=>number} deps.countVertexBonds
+ * @param {Object} [deps.geomBond] - the ORIGINAL, untrimmed bond endpoints used for
+ *   all topology decisions (ring membership, interior direction, substitution
+ *   counts). Defaults to `bond`. This matters when `bond` was clipped to clear an
+ *   atom label: the clipped coordinates no longer match the ring's stored bond
+ *   endpoints, so ring detection must run against the untrimmed geometry — otherwise
+ *   a ring double bond next to a heteroatom (e.g. the O in a pyran) wrongly falls
+ *   back to the symmetric two-equal-lines style.
  */
-export const renderDoubleBondByCase = (ctx, bond, offset, colors, { detectedRings, countVertexBonds }) => {
+export const renderDoubleBondByCase = (ctx, bond, offset, colors, { detectedRings, countVertexBonds, geomBond }) => {
   ctx.strokeStyle = colors.bonds;
   ctx.lineWidth = 3;
   ctx.lineCap = 'round';
 
-  const ring = findBondRing(bond, detectedRings);
+  const topo = geomBond || bond;
+  const ring = findBondRing(topo, detectedRings);
 
   if (ring) {
     // Ring double bond: main line + interior shorter line toward the ring center.
-    const dir = ringInteriorDirection(bond, ring);
+    // Direction comes from the untrimmed geometry; the lines are drawn on the
+    // (possibly trimmed) visible bond so they stop cleanly at any atom label.
+    const dir = ringInteriorDirection(topo, ring);
     const offX = Math.cos(dir) * RING_OFFSET_DISTANCE;
     const offY = Math.sin(dir) * RING_OFFSET_DISTANCE;
     strokeLine(ctx, bond.x1, bond.y1, bond.x2, bond.y2, offset);
@@ -98,8 +109,8 @@ export const renderDoubleBondByCase = (ctx, bond, offset, colors, { detectedRing
   }
 
   const bothEndsSubstituted =
-    countVertexBonds({ x: bond.x1, y: bond.y1 }) > 1 &&
-    countVertexBonds({ x: bond.x2, y: bond.y2 }) > 1;
+    countVertexBonds({ x: topo.x1, y: topo.y1 }) > 1 &&
+    countVertexBonds({ x: topo.x2, y: topo.y2 }) > 1;
 
   const bondAngle = Math.atan2(bond.y2 - bond.y1, bond.x2 - bond.x1);
   const perpAngle = bondAngle + Math.PI / 2;

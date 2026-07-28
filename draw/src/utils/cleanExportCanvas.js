@@ -17,8 +17,25 @@ function expandArrowPoints(a, add) {
     const co = a.controlOffset ?? 40;
     add(midX + perpX * co, midY + perpY * co);
   } else {
-    add(a.x, a.y);
-    add(a.x + a.length * Math.cos(a.angle), a.y + a.length * Math.sin(a.angle));
+    // Straight arrows are centered on (a.x, a.y) and span ±length/2.
+    const halfLen = (a.length || 80) / 2;
+    const ux = Math.cos(a.angle || 0);
+    const uy = Math.sin(a.angle || 0);
+    add(a.x - ux * halfLen, a.y - uy * halfLen);
+    add(a.x + ux * halfLen, a.y + uy * halfLen);
+    // Reagent (above) / condition (below) labels sit centered over the arrow.
+    // Approximate their extent so a wide label isn't cropped out of the export.
+    const labelHalfW = (t) => (t ? Math.max(halfLen, (String(t).length * 8) / 2) : 0);
+    if (a.textAbove) {
+      const hw = labelHalfW(a.textAbove);
+      add(a.x - hw, a.y - 27);
+      add(a.x + hw, a.y - 27);
+    }
+    if (a.textBelow) {
+      const hw = labelHalfW(a.textBelow);
+      add(a.x - hw, a.y + 27);
+      add(a.x + hw, a.y + 27);
+    }
   }
 }
 

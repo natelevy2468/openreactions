@@ -343,7 +343,7 @@ export function strokeCurvedArrowShaft(ctx, arrow, offset, strokeStyle, lineWidt
  */
 export const renderArrow = (ctx, arrow, offset, colors, isPreview = false) => {
   if (!arrow) return;
-  
+
   switch (arrow.type) {
     case 'forward':
       renderForwardArrow(ctx, arrow, offset, colors, isPreview);
@@ -359,6 +359,47 @@ export const renderArrow = (ctx, arrow, offset, colors, isPreview = false) => {
       // Unknown arrow type
       break;
   }
+
+  if (!isPreview) renderArrowLabels(ctx, arrow, offset, colors);
+};
+
+/**
+ * Font used for reagent/condition text over reaction arrows. Also exported so
+ * the editor can size its inline <input> to match what will be drawn.
+ */
+export const ARROW_LABEL_FONT_PX = 15;
+export const arrowLabelFont = (px = ARROW_LABEL_FONT_PX) =>
+  `${px}px "Helvetica Neue", Arial, sans-serif`;
+
+/**
+ * Renders the reagents (above) and conditions (below) that sit over a straight
+ * reaction arrow — the ChemDraw convention for a full reaction equation.
+ * Only forward/equilibrium arrows carry labels; curved (mechanism) arrows don't.
+ */
+export const renderArrowLabels = (ctx, arrow, offset, colors) => {
+  if (!arrow) return;
+  const isStraight = arrow.type === 'forward' || arrow.type === 'equilibrium' || arrow.type === 'equil';
+  if (!isStraight) return;
+  if (!arrow.textAbove && !arrow.textBelow) return;
+
+  const cx = arrow.x + offset.x;
+  const cy = arrow.y + offset.y;
+  const color = colors.bonds || '#000000';
+  const GAP = 11; // clearance from the arrow line to the text
+
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.font = arrowLabelFont();
+  ctx.textAlign = 'center';
+  if (arrow.textAbove) {
+    ctx.textBaseline = 'bottom';
+    ctx.fillText(arrow.textAbove, cx, cy - GAP);
+  }
+  if (arrow.textBelow) {
+    ctx.textBaseline = 'top';
+    ctx.fillText(arrow.textBelow, cx, cy + GAP);
+  }
+  ctx.restore();
 };
 
 /**

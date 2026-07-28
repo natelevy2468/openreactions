@@ -32,7 +32,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
         
         {/* Draw/Erase Buttons as icon buttons side by side */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0 }}>
-          <ToolButton active={mode === 'draw'} onClick={() => setModeAndClearSelection('draw')} title="Draw Mode" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
+          <ToolButton active={mode === 'draw'} onClick={() => setModeAndClearSelection('draw')} title="Draw (D)" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
             {(c) => (
               <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" style={{ pointerEvents: 'none' }}>
                 <path d="M12 20h9" />
@@ -40,7 +40,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               </svg>
             )}
           </ToolButton>
-          <ToolButton active={mode === 'mouse'} onClick={() => setModeAndClearSelection('mouse')} title="Mouse Mode" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
+          <ToolButton active={mode === 'mouse'} onClick={() => setModeAndClearSelection('mouse')} title="Select / move (M or Esc)" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
             {(c) => (
               <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
                 <path d="M6 3L12 17L14.5 12.5L19 10.5L6 3Z" fill={c} stroke={c} strokeWidth="1.2" strokeLinejoin="round"/>
@@ -51,7 +51,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
         </div>
         {/* Erase and Text mode buttons */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginBottom: 0, marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))' }}>
-          <ToolButton active={mode === 'erase'} onClick={() => setModeAndClearSelection('erase')} title="Erase Mode" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
+          <ToolButton active={mode === 'erase'} onClick={() => setModeAndClearSelection('erase')} title="Erase (E)" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
             {(c) => (
               <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
                 <g transform="rotate(45 13 13)">
@@ -61,7 +61,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               </svg>
             )}
           </ToolButton>
-          <ToolButton active={mode === 'text'} onClick={() => setModeAndClearSelection('text')} title="Text Mode" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
+          <ToolButton active={mode === 'text'} onClick={() => setModeAndClearSelection('text')} title="Text label (T)" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
             {(c) => (
               <svg width="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" height="max(18px, min(24px, calc(min(280px, 25vw) * 0.086)))" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
                 <text x="5" y="18" fill={c} style={{ font: 'bold 20px "Times New Roman", serif' }}>T</text>
@@ -72,7 +72,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
 
         {/* Buttons for charges/lone pairs */}
         <div style={{ display: 'flex', flexDirection: 'row', gap: 'max(6px, calc(min(280px, 25vw) * 0.025))', marginTop: 'max(2px, calc(min(280px, 25vw) * 0.006))' }}>
-          <ToolButton active={mode === 'plus'} onClick={() => setModeAndClearSelection('plus')} title="Add Positive Charge" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
+          <ToolButton active={mode === 'plus'} onClick={() => setModeAndClearSelection('plus')} title="Add positive charge (G)" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
             {(c) => (
               <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
                 <circle cx="13" cy="13" r="9" stroke={c} strokeWidth="2.2" fill="none" />
@@ -83,7 +83,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               </svg>
             )}
           </ToolButton>
-          <ToolButton active={mode === 'minus'} onClick={() => setModeAndClearSelection('minus')} title="Add Negative Charge" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
+          <ToolButton active={mode === 'minus'} onClick={() => setModeAndClearSelection('minus')} title="Add negative charge (J)" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)' }}>
             {(c) => (
               <svg width="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 26 26" fill="none" style={{ pointerEvents: 'none' }}>
                 <circle cx="13" cy="13" r="9" stroke={c} strokeWidth="2.2" fill="none" />
@@ -91,7 +91,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               </svg>
             )}
           </ToolButton>
-          <ToolButton active={mode === 'lone'} onClick={() => setModeAndClearSelection('lone')} title="Add Lone Pair" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)', borderRadius: 'calc(min(240px, 22vw) * 0.019)' }}>
+          <ToolButton active={mode === 'lone'} onClick={() => setModeAndClearSelection('lone')} title="Add lone pair (L)" colors={colors} style={{ aspectRatio: '1/1', height: 'min(44px, 7vh)', borderRadius: 'calc(min(240px, 22vw) * 0.019)' }}>
             {(c) => (
               <svg width="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" height="max(16px, min(22px, calc(min(280px, 25vw) * 0.079)))" viewBox="0 0 22 22" fill="none" style={{ pointerEvents: 'none' }}>
                 <circle cx="7" cy="11" r="2.6" fill={c} />
@@ -146,7 +146,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
-            title="Arrow"
+            title="Reaction arrow (A)"
           >
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               <line x1="6" y1="13" x2="32" y2="13" stroke={mode === 'arrow' ? '#fff' : colors.textSecondary} strokeWidth="3" strokeLinecap="round" />
@@ -184,7 +184,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
-            title="Equilibrium Arrow"
+            title="Equilibrium arrow (Q)"
           >
             <svg width="max(32px, min(46px, calc(min(280px, 25vw) * 0.164)))" height="max(18px, min(26px, calc(min(280px, 25vw) * 0.093)))" viewBox="0 0 46 26" fill="none" xmlns="http://www.w3.org/2000/svg" style={{ pointerEvents: 'none' }}>
               {/* Top arrow: left to right */}
@@ -635,7 +635,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
-            title="Benzene Ring"
+            title="Benzene ring (R)"
           >
             {/* Benzene ring SVG preview (enlarged) */}
             <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
@@ -702,7 +702,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
-            title="Cyclohexane Ring"
+            title="Cyclohexane ring (6)"
           >
             {/* Cyclohexane ring SVG preview (enlarged) */}
             <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
@@ -751,7 +751,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
-            title="Cyclopentane Ring"
+            title="Cyclopentane ring (5)"
           >
             {/* Cyclopentane ring SVG preview (enlarged) */}
             <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
@@ -798,7 +798,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
-            title="Cyclobutane Ring"
+            title="Cyclobutane ring (4)"
           >
             {/* Cyclobutane ring SVG preview (enlarged) */}
             <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
@@ -844,7 +844,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
                 e.target.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
-            title="Cyclopropane Ring"
+            title="Cyclopropane ring (3)"
           >
             {/* Cyclopropane ring SVG preview (enlarged) */}
             <svg width="32" height="32" viewBox="40 40 120 120" fill="none" style={{ pointerEvents: 'none' }}>
