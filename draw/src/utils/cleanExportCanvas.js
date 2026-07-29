@@ -135,3 +135,45 @@ export function exportCanvasCroppedSnapshot(canvas, cropRect, scaleFactor = 2) {
     scaleFactor: s,
   };
 }
+
+/**
+ * Small opaque preview of the same crop, for the drawing cards on the homepage.
+ *
+ * Downscaled (smoothing on, unlike the export) and flattened onto a solid
+ * background so it reads on a card whatever the theme, then kept under a few tens
+ * of kilobytes since it's stored in a database column and in local storage.
+ *
+ * @param {HTMLCanvasElement} canvas
+ * @param {{ x: number, y: number, width: number, height: number }} cropRect - Canvas pixel coords
+ * @param {number} [maxSize=440] - Longest edge of the result
+ * @param {string} [background='#ffffff']
+ * @returns {string|null} PNG data URL
+ */
+export function exportCanvasThumbnail(canvas, cropRect, maxSize = 440, background = '#ffffff') {
+  if (!canvas?.getContext || !cropRect) return null;
+
+  const cw = canvas.width;
+  const ch = canvas.height;
+  if (cw <= 0 || ch <= 0) return null;
+
+  const sx = Math.max(0, Math.min(cropRect.x, cw - 1));
+  const sy = Math.max(0, Math.min(cropRect.y, ch - 1));
+  const sw = Math.min(cropRect.width, cw - sx);
+  const sh = Math.min(cropRect.height, ch - sy);
+  if (sw <= 0 || sh <= 0) return null;
+
+  const factor = Math.min(1, maxSize / Math.max(sw, sh));
+  const out = document.createElement('canvas');
+  out.width = Math.max(1, Math.round(sw * factor));
+  out.height = Math.max(1, Math.round(sh * factor));
+  const ctx = out.getContext('2d');
+  if (!ctx) return null;
+
+  ctx.fillStyle = background;
+  ctx.fillRect(0, 0, out.width, out.height);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(canvas, sx, sy, sw, sh, 0, 0, out.width, out.height);
+
+  return out.toDataURL('image/png');
+}

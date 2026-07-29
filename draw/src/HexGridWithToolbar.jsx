@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
 import logoFinal4 from '/logoFinal4.png';
 import gearIcon from '/gear.png';
 import { formatAtomText } from './utils/TextUtils.jsx';
@@ -7,6 +7,14 @@ import AboutPopup from './components/AboutPopup.jsx';
 import ExportPopup from './components/ExportPopup.jsx';
 import SettingsDropdown from './components/SettingsDropdown.jsx';
 import MoleculeInfoPanel from './components/MoleculeInfoPanel.jsx';
+import AuthModal from './components/AuthModal.jsx';
+import AccountButton from './components/AccountButton.jsx';
+import DrawingsPanel from './components/DrawingsPanel.jsx';
+import DocumentTitle from './components/DocumentTitle.jsx';
+import { useAuth } from './hooks/useAuth.js';
+import { useDocumentSync } from './hooks/useDocumentSync.js';
+import { listDrawings, updateDrawing, deleteDrawing, duplicateDrawing } from './lib/documents.js';
+import { DOC_VERSION } from './lib/docModel.js';
 import { detectAllRingsEnhanced } from './rendering/RingDetectionUtils.js';
 import { renderDoubleBondByCase } from './rendering/DoubleBondRenderer.js';
 import {
@@ -31,6 +39,7 @@ import { calculateBenzeneSnap, calculateRingSnap } from './utils/SnapUtils.js';
 import {
   computeCanvasContentBounds,
   exportCanvasCroppedSnapshot,
+  exportCanvasThumbnail,
 } from './utils/cleanExportCanvas.js';
 import {
   calculateBondDirection,
@@ -265,6 +274,18 @@ const HexGridWithToolbar = () => {
         .catch(() => { if (!cancelled) setMoleculeInfo(null); });
       return () => { cancelled = true; };
     }, [showInfoPanel, vertices, segments, vertexAtoms]);
+
+    // Accounts and saved drawings. The document itself is persisted by
+    // useDocumentSync, wired up further down once drawCanvas exists (thumbnails
+    // need it); these are just the pieces of UI state that belong up here with
+    // the rest of the panel toggles.
+    const [showAuthModal, setShowAuthModal] = useState(false);
+    const [authModalReason, setAuthModalReason] = useState(null);
+    const [showAccountMenu, setShowAccountMenu] = useState(false);
+    const [showDrawingsPanel, setShowDrawingsPanel] = useState(false);
+    const [drawings, setDrawings] = useState([]);
+    const [drawingsLoading, setDrawingsLoading] = useState(false);
+    const [drawingsError, setDrawingsError] = useState(null);
 
     // Mode switching function
     const setModeAndClearSelection = (newMode) => {
@@ -1283,9 +1304,26 @@ const HexGridWithToolbar = () => {
     const removeKey = getVertexKey(remove);
 
     // Remove the newer vertex; the kept vertex stays put.
-    setVertices(prevVertices =>
-      prevVertices.filter(v => !(near(v.x, remove.x) && near(v.y, remove.y)))
-    );
+    //
+    // Exactly one entry comes out. Filtering by coordinate used to drop *every*
+    // vertex at that position, which silently emptied a structure whenever two
+    // coincident vertices met — e.g. dropping a ring template exactly on top of
+    // an identical one removed both copies of all six atoms. The bonds survived
+    // (they carry their own coordinates) so the drawing still looked right while
+    // having no atoms left to extend, and autosave then made that permanent.
+    setVertices(prevVertices => {
+      const matches = (v) => near(v.x, remove.x) && near(v.y, remove.y);
+      // Prefer the index the merge was planned against; fall back to the last
+      // match, since freshly-placed vertices are appended and `remove` is always
+      // the newer of the pair.
+      const planned = mergeOperation.vertex2Index;
+      const index =
+        Number.isInteger(planned) && matches(prevVertices[planned] || {})
+          ? planned
+          : prevVertices.findLastIndex(matches);
+      if (index < 0) return prevVertices;
+      return [...prevVertices.slice(0, index), ...prevVertices.slice(index + 1)];
+    });
 
     // Reassign the removed vertex's bonds onto the kept vertex, then clean up
     // self-loops and duplicate bonds (pure helper, unit-tested).
@@ -2843,6 +2881,15 @@ const HexGridWithToolbar = () => {
 
   // Enhanced keyboard handler for text and bond creation
   const handleKeyDown = useCallback((event) => {
+    // Never let a text field's keystrokes double as tool shortcuts. Single letters
+    // switch tools (D/E/M/T/A/…), so typing a name into the document title or an
+    // email into the sign-in dialog would otherwise silently change the tool
+    // behind the dialog. The canvas's own inputs are handled by their own guards.
+    const target = event.target;
+    if (target && (target.isContentEditable || /^(input|textarea|select)$/i.test(target.tagName || ''))) {
+      return;
+    }
+
     // Handle Cmd/Ctrl+Z for undo
     if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'z' && !event.shiftKey) {
       event.preventDefault();
@@ -4436,6 +4483,225 @@ const HexGridWithToolbar = () => {
     [drawCanvas, vertices, segments, arrows, offset]
   );
 
+  // ===========================================================================
+  // Accounts + autosave
+  //
+  // The document is whatever the canvas is currently showing; useDocumentSync
+  // mirrors it to local storage on every edit and to Supabase on a debounce, so
+  // reloading, closing the tab or switching machines all resume the same drawing.
+  // ===========================================================================
+
+  const auth = useAuth();
+
+  /** The saved shape of the drawing. Rebuilt on every edit; see lib/docModel.js. */
+  const docPayload = useMemo(
+    () => ({
+      version: DOC_VERSION,
+      vertices,
+      segments,
+      vertexAtoms,
+      arrows,
+      newmanInstances,
+      vertexBondStates,
+      offset,
+      scale,
+    }),
+    [vertices, segments, vertexAtoms, arrows, newmanInstances, vertexBondStates, offset, scale]
+  );
+
+  /**
+   * Loads a saved document onto the canvas. This is a document *switch*, not an
+   * edit, so the undo history and any selection are dropped rather than letting
+   * the user "undo" their way into the previous drawing.
+   */
+  const applyLoadedDoc = useCallback((loaded) => {
+    applyDocument(loaded);
+    setOffset(loaded.offset || { x: 0, y: 0 });
+    offsetRef.current = loaded.offset || { x: 0, y: 0 };
+    const nextScale = loaded.scale || 1;
+    setScale(nextScale);
+    scaleRef.current = nextScale;
+
+    // Newman ids must not collide with the ones we just loaded.
+    const maxNewmanId = (loaded.newmanInstances || []).reduce((max, inst) => {
+      const n = parseInt(String(inst?.id).replace('newman-', ''), 10);
+      return Number.isFinite(n) && n > max ? n : max;
+    }, 0);
+    newmanIdRef.current = maxNewmanId + 1;
+
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setCanUndo(false);
+    setCanRedo(false);
+    setSelectedMolecules([]);
+    setSelectedVertices(new Set());
+    setSelectedSegments(new Set());
+    setSelectedArrows(new Set());
+    setHoveredVertex(null);
+    setHoveredBondIndex(null);
+    setShowAtomInput(false);
+    setArrowTextEdit(null);
+  }, []);
+
+  /**
+   * Small preview for the drawing cards. Draws the canvas once without the
+   * interactive overlays (hover highlights, template ghosts), grabs the pixels,
+   * then repaints so the user never sees the clean frame.
+   */
+  const captureThumbnail = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    try {
+      isExportingRef.current = true;
+      drawCanvas();
+      const s = scaleRef.current;
+      const crop = computeCanvasContentBounds(
+        vertices,
+        segments,
+        arrows,
+        offset,
+        canvas.width / s,
+        canvas.height / s,
+        40
+      );
+      if (!crop) return null;
+      const pxCrop = s === 1
+        ? crop
+        : { x: crop.x * s, y: crop.y * s, width: crop.width * s, height: crop.height * s };
+      return exportCanvasThumbnail(canvas, pxCrop, 440, isDarkMode ? '#1a1a1a' : '#ffffff');
+    } catch {
+      // A preview is never worth failing a save over.
+      return null;
+    } finally {
+      isExportingRef.current = false;
+      drawCanvas();
+    }
+  }, [drawCanvas, vertices, segments, arrows, offset, isDarkMode]);
+
+  const docSync = useDocumentSync({
+    doc: docPayload,
+    applyDoc: applyLoadedDoc,
+    userId: auth.user?.id || null,
+    authLoading: auth.loading,
+    captureThumbnail,
+  });
+
+  const refreshDrawings = useCallback(async () => {
+    if (!auth.user) {
+      setDrawings([]);
+      return;
+    }
+    setDrawingsLoading(true);
+    const { data, error } = await listDrawings();
+    setDrawings(data || []);
+    setDrawingsError(error);
+    setDrawingsLoading(false);
+  }, [auth.user]);
+
+  // Fetch the list when the panel opens, so it's fresh without polling.
+  useEffect(() => {
+    if (showDrawingsPanel && auth.user) refreshDrawings();
+  }, [showDrawingsPanel, auth.user, refreshDrawings]);
+
+  const openSignIn = useCallback((reason) => {
+    setAuthModalReason(reason || null);
+    setShowAuthModal(true);
+    setShowDrawingsPanel(false);
+    setShowAccountMenu(false);
+  }, []);
+
+  const handleOpenDrawing = useCallback(
+    async (id) => {
+      setShowDrawingsPanel(false);
+      await docSync.openDocument(id);
+    },
+    [docSync]
+  );
+
+  const handleNewDrawing = useCallback(() => {
+    setShowDrawingsPanel(false);
+    docSync.newDocument();
+  }, [docSync]);
+
+  const handleRenameDrawing = useCallback(
+    async (id, nextTitle) => {
+      // Renaming the open document goes through the sync hook so the header
+      // updates immediately; other rows are a direct write.
+      if (id === docSync.docId) {
+        docSync.setTitle(nextTitle);
+        docSync.saveNow();
+        setDrawings((prev) => prev.map((d) => (d.id === id ? { ...d, title: nextTitle } : d)));
+        return;
+      }
+      await updateDrawing(id, { title: nextTitle });
+      refreshDrawings();
+    },
+    [docSync, refreshDrawings]
+  );
+
+  const handleDuplicateDrawing = useCallback(
+    async (id) => {
+      if (!auth.user) return;
+      // Flush first: duplicating re-reads the row from the server, so unsaved
+      // edits to the open drawing would otherwise be missing from the copy.
+      if (id === docSync.docId) docSync.saveNow();
+      await duplicateDrawing({ id, userId: auth.user.id });
+      refreshDrawings();
+    },
+    [auth.user, docSync, refreshDrawings]
+  );
+
+  const handleDeleteDrawing = useCallback(
+    async (id) => {
+      await deleteDrawing(id);
+      setDrawings((prev) => prev.filter((d) => d.id !== id));
+      // Deleting what's on screen leaves a fresh untitled canvas rather than
+      // silently re-creating the row on the next keystroke.
+      if (id === docSync.docId) docSync.forgetDocument(id);
+      refreshDrawings();
+    },
+    [docSync, refreshDrawings]
+  );
+
+  const handleSignOut = useCallback(async () => {
+    setShowAccountMenu(false);
+    setShowDrawingsPanel(false);
+    // Land any pending write before the token is revoked, or the last few
+    // seconds of work would only exist in this browser.
+    await docSync.saveNow();
+    await auth.signOut();
+    setDrawings([]);
+  }, [auth, docSync]);
+
+  // Clicking away closes the header dropdowns. One listener covers all of them,
+  // which is also what the `data-*-dropdown` markers were always there for.
+  useEffect(() => {
+    if (!showDrawingsPanel && !showAccountMenu && !showSettingsDropdown && !showInfoPanel) return undefined;
+    const onPointerDown = (event) => {
+      const target = event.target;
+      if (!target?.closest) return;
+      if (!target.closest('[data-drawings-dropdown]')) setShowDrawingsPanel(false);
+      if (!target.closest('[data-account-menu]')) setShowAccountMenu(false);
+      if (!target.closest('[data-settings-dropdown]')) setShowSettingsDropdown(false);
+      if (!target.closest('[data-info-dropdown]')) setShowInfoPanel(false);
+    };
+    document.addEventListener('mousedown', onPointerDown);
+    return () => document.removeEventListener('mousedown', onPointerDown);
+  }, [showDrawingsPanel, showAccountMenu, showSettingsDropdown, showInfoPanel]);
+
+  // Cmd/Ctrl+S: everything is already saved, but the reflex is universal — honour
+  // it by flushing immediately instead of opening the browser's save dialog.
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.metaKey || event.ctrlKey) && String(event.key || '').toLowerCase() === 's') {
+        event.preventDefault();
+        docSync.saveNow();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [docSync]);
+
   // Redraw canvas when relevant data changes
   React.useEffect(() => {
     drawCanvas();
@@ -4577,28 +4843,26 @@ const HexGridWithToolbar = () => {
           </div>
         </div>
         
-        {/* Center title */}
-        <div style={{ 
-          display: 'flex', 
+        {/* Center: the document's name and save state, the way a document editor
+            tells you your work is safe. The OpenReactions wordmark stays on the
+            homepage; here the drawing you're in is the more useful label. */}
+        <div style={{
+          display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           flex: 1,
+          minWidth: 0,
           marginTop: '3px'
         }}>
-          <span style={{
-            fontSize: '28px',
-            fontWeight: '300',
-            background: 'linear-gradient(135deg, #1042e8 0%, #7921f3 50%, #9C27B0 100%)',
-            WebkitBackgroundClip: 'text',
-            WebkitTextFillColor: 'transparent',
-            backgroundClip: 'text',
-            fontFamily: 'Roboto, sans-serif',
-            letterSpacing: '-0.5px'
-          }}>
-            OpenReactions
-          </span>
+          <DocumentTitle
+            title={docSync.title}
+            onRename={docSync.setTitle}
+            onCommit={docSync.saveNow}
+            status={docSync.status}
+            errorText={docSync.error}
+          />
         </div>
-        
+
         {/* Right side buttons */}
         <div style={{ 
           display: 'flex', 
@@ -4606,6 +4870,48 @@ const HexGridWithToolbar = () => {
           gap: '8px',
           marginTop: '3px'
         }}>
+          <div style={{ position: 'relative', display: 'inline-block' }} data-drawings-dropdown>
+            <button
+              onClick={() => setShowDrawingsPanel((v) => !v)}
+              title="Your saved drawings"
+              style={{
+                backgroundColor: showDrawingsPanel ? 'rgba(54, 98, 227, 0.2)' : 'transparent',
+                color: '#333',
+                border: 'none',
+                padding: '10px 12px',
+                borderRadius: '6px',
+                fontSize: '16px',
+                fontWeight: '400',
+                fontFamily: 'Roboto, sans-serif',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s ease-out',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.backgroundColor = 'rgba(54, 98, 227, 0.2)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.backgroundColor = showDrawingsPanel ? 'rgba(54, 98, 227, 0.2)' : 'transparent';
+              }}
+            >
+              My drawings
+            </button>
+            <DrawingsPanel
+              show={showDrawingsPanel}
+              colors={colors}
+              drawings={drawings}
+              loading={drawingsLoading}
+              error={drawingsError}
+              currentId={docSync.docId}
+              onOpen={handleOpenDrawing}
+              onNew={handleNewDrawing}
+              onRename={handleRenameDrawing}
+              onDuplicate={handleDuplicateDrawing}
+              onDelete={handleDeleteDrawing}
+              signedIn={Boolean(auth.user)}
+              onSignInClick={() => openSignIn('Sign in to keep a history of your drawings.')}
+            />
+          </div>
           <div style={{ position: 'relative', display: 'inline-block' }} data-info-dropdown>
             <button
               onClick={() => setShowInfoPanel((v) => !v)}
@@ -4705,8 +5011,30 @@ const HexGridWithToolbar = () => {
               smilesImportMessage={smilesImportMessage}
             />
           </div>
+          <AccountButton
+            isConfigured={auth.isConfigured}
+            user={auth.user}
+            loading={auth.loading}
+            menuOpen={showAccountMenu}
+            onToggleMenu={() => setShowAccountMenu((v) => !v)}
+            onSignInClick={() => openSignIn()}
+            onSignOut={handleSignOut}
+            colors={colors}
+          />
         </div>
       </div>
+
+      <AuthModal
+        show={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        colors={colors}
+        onSignIn={auth.signIn}
+        onSignUp={auth.signUp}
+        onGoogle={auth.signInWithGoogle}
+        onResetPassword={auth.sendPasswordReset}
+        googleEnabled={auth.googleEnabled}
+        reason={authModalReason}
+      />
       
       <style>{`
         .toolbar-button {

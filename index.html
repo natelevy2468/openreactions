@@ -387,8 +387,448 @@
       margin: 0;
     }
 
+    /* ------------------------------------------------------------------
+       Your drawings — recent documents, straight under the CTA.
+       Reuses the glass-card language of .feature-card so the section reads
+       as part of the page rather than a bolted-on dashboard.
+       ------------------------------------------------------------------ */
+    .drawings-section {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 900px;
+      margin: 70px auto 0;
+      text-align: left;
+    }
+
+    .drawings-section[hidden] { display: none; }
+
+    .drawings-header {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .drawings-title {
+      font-size: 1.35rem;
+      font-weight: 600;
+      color: #fff;
+      margin: 0;
+      letter-spacing: -0.2px;
+    }
+
+    .drawings-link {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: rgba(255, 255, 255, 0.85);
+      text-decoration: none;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.35);
+      padding-bottom: 1px;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    .drawings-link:hover {
+      color: #fff;
+      border-bottom-color: #fff;
+    }
+
+    .drawings-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+      gap: 18px;
+    }
+
+    .drawing-card {
+      background: rgba(255, 255, 255, 0.12);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      border-radius: 16px;
+      padding: 12px;
+      text-decoration: none;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: all 0.25s ease;
+    }
+
+    .drawing-card:hover {
+      transform: translateY(-4px);
+      background: rgba(255, 255, 255, 0.2);
+      box-shadow: 0 12px 32px rgba(0, 0, 0, 0.14);
+    }
+
+    .drawing-thumb {
+      height: 110px;
+      border-radius: 10px;
+      background: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+
+    .drawing-thumb img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+    }
+
+    .drawing-thumb .thumb-placeholder {
+      font-size: 1.8rem;
+      color: #cbd5e1;
+    }
+
+    .drawing-name {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #fff;
+      line-height: 1.35;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .drawing-time {
+      font-size: 0.8rem;
+      color: rgba(255, 255, 255, 0.75);
+      margin-top: -6px;
+    }
+
+    /* The "start something new" tile, deliberately lighter than a real card. */
+    .drawing-card.new-card {
+      align-items: center;
+      justify-content: center;
+      min-height: 168px;
+      border-style: dashed;
+      border-color: rgba(255, 255, 255, 0.4);
+      background: rgba(255, 255, 255, 0.06);
+      gap: 6px;
+    }
+
+    .drawing-card.new-card .plus {
+      font-size: 1.9rem;
+      font-weight: 300;
+      color: #fff;
+      line-height: 1;
+    }
+
+    .drawings-message {
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 16px;
+      padding: 22px 26px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .drawings-message p {
+      margin: 0;
+      color: rgba(255, 255, 255, 0.92);
+      font-size: 1rem;
+      line-height: 1.5;
+      max-width: 52ch;
+    }
+
+    /* Account controls in the navbar */
+    .auth-btn {
+      background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+      color: #fff;
+      border: none;
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(72, 187, 120, 0.25);
+      white-space: nowrap;
+    }
+
+    .auth-btn:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 18px rgba(72, 187, 120, 0.35);
+    }
+
+    .auth-btn.secondary {
+      background: rgba(255, 255, 255, 0.18);
+      border: 1px solid rgba(255, 255, 255, 0.4);
+      box-shadow: none;
+      color: #fff;
+    }
+
+    .auth-btn.secondary:hover {
+      background: rgba(255, 255, 255, 0.28);
+      box-shadow: none;
+    }
+
+    .avatar-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: none;
+      background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+      color: #fff;
+      font-size: 15px;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 2px 8px rgba(72, 187, 120, 0.3);
+    }
+
+    .account-email {
+      font-size: 13px;
+      color: #4a5568;
+      word-break: break-all;
+      margin-bottom: 12px;
+    }
+
+    .account-label {
+      font-size: 11px;
+      letter-spacing: 0.05em;
+      color: #94a3b8;
+      font-weight: 600;
+    }
+
+    .account-signout {
+      width: 100%;
+      padding: 9px 0;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: 'Inter', sans-serif;
+      color: #334155;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .account-signout:hover { background: #e2e8f0; }
+
+    /* Sign-in dialog */
+    .auth-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 23, 42, 0.55);
+      backdrop-filter: blur(4px);
+      z-index: 2000;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .auth-overlay[hidden] { display: none; }
+
+    .auth-dialog {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
+      padding: 30px;
+      width: 390px;
+      max-width: 100%;
+      text-align: left;
+    }
+
+    .auth-dialog h2 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: #1a202c;
+      text-align: center;
+    }
+
+    .auth-dialog .auth-sub {
+      margin: 8px 0 0;
+      font-size: 0.85rem;
+      color: #718096;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    .auth-tabs {
+      display: flex;
+      gap: 4px;
+      background: #f1f5f9;
+      padding: 4px;
+      border-radius: 10px;
+      margin: 20px 0 18px;
+    }
+
+    .auth-tab {
+      flex: 1;
+      padding: 9px 0;
+      border: none;
+      border-radius: 7px;
+      background: transparent;
+      color: #64748b;
+      font-size: 13.5px;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+    .auth-tab.active {
+      background: #fff;
+      color: #38a169;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    }
+
+    .auth-field { margin-bottom: 14px; }
+
+    .auth-field label {
+      display: block;
+      font-size: 12px;
+      font-weight: 600;
+      color: #4a5568;
+      margin-bottom: 6px;
+    }
+
+    .auth-field input {
+      width: 100%;
+      padding: 10px 12px;
+      font-size: 14px;
+      font-family: 'Inter', sans-serif;
+      color: #1a202c;
+      border: 1px solid #dbe2ea;
+      border-radius: 8px;
+      outline: none;
+      transition: all 0.15s ease;
+    }
+
+    .auth-field input:focus {
+      border-color: #48bb78;
+      box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.15);
+    }
+
+    .auth-submit {
+      width: 100%;
+      margin-top: 4px;
+      padding: 12px 0;
+      font-size: 14.5px;
+      font-weight: 600;
+      font-family: 'Inter', sans-serif;
+      color: #fff;
+      background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .auth-submit:disabled { opacity: 0.6; cursor: default; }
+
+    .auth-cancel {
+      width: 100%;
+      margin-top: 10px;
+      padding: 9px 0;
+      font-size: 13px;
+      font-family: 'Inter', sans-serif;
+      color: #64748b;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+
+    .auth-note {
+      margin: 14px 0 0;
+      font-size: 11.5px;
+      color: #a0aec0;
+      text-align: center;
+      line-height: 1.5;
+    }
+
+    .auth-alert {
+      margin-top: 14px;
+      padding: 9px 11px;
+      border-radius: 8px;
+      font-size: 12.5px;
+      line-height: 1.45;
+    }
+
+    .auth-alert[hidden] { display: none; }
+
+    .auth-alert.error {
+      background: #fdecec;
+      border: 1px solid #f5c6c6;
+      color: #a32020;
+    }
+
+    .auth-alert.ok {
+      background: #eaf3ea;
+      border: 1px solid #c4e0c4;
+      color: #256b2b;
+    }
+
+    .auth-divider {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin: 16px 0;
+    }
+
+    .auth-divider::before,
+    .auth-divider::after {
+      content: '';
+      flex: 1;
+      height: 1px;
+      background: #edf1f5;
+    }
+
+    .auth-divider span {
+      font-size: 11px;
+      color: #b6c0cc;
+      letter-spacing: 0.05em;
+    }
+
+    .google-btn {
+      width: 100%;
+      padding: 10px 0;
+      font-size: 14px;
+      font-weight: 500;
+      font-family: 'Inter', sans-serif;
+      color: #3c4043;
+      background: #fff;
+      border: 1px solid #dbe2ea;
+      border-radius: 8px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+    }
+
+    .google-btn:hover { background: #f7f8fa; }
+
+    .auth-forgot {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: 12px;
+      color: #94a3b8;
+      cursor: pointer;
+      font-family: 'Inter', sans-serif;
+      text-decoration: underline;
+      margin-bottom: 4px;
+    }
+
     /* Responsive Design */
     @media (max-width: 768px) {
+      .drawings-section { margin-top: 50px; }
+      .drawings-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
+      .drawings-message { padding: 18px; }
+
       .navbar {
         padding: 0 20px;
         height: 50px;
@@ -724,6 +1164,10 @@
           There are no settings to change yet
         </div>
       </div>
+
+      <!-- Account: filled in by the script below. Stays empty when no backend
+           is configured, so nothing dead is ever shown. -->
+      <div id="account-slot"></div>
     </div>
   </div>
   <div class="main-container">
@@ -738,6 +1182,16 @@
         </svg>
       </a>
     </div>
+
+    <!-- Recent drawings. Hidden until the script knows whether there's a
+         backend and a session; filled in by renderDrawings(). -->
+    <section class="drawings-section" id="drawings-section" hidden>
+      <div class="drawings-header">
+        <h2 class="drawings-title" id="drawings-title">Your drawings</h2>
+        <a class="drawings-link" href="/draw/" id="drawings-link" hidden>Open the editor →</a>
+      </div>
+      <div id="drawings-body"></div>
+    </section>
 
     <div class="features-grid">
       <div class="feature-card">
@@ -800,5 +1254,491 @@
       </div>
     </div>
   </div>
+
+  <!-- Sign-in dialog -->
+  <div class="auth-overlay" id="auth-overlay" hidden>
+    <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-heading">
+      <h2 id="auth-heading">Sign in to OpenReactions</h2>
+      <p class="auth-sub">Keep your drawings across devices and pick up where you left off.</p>
+
+      <div class="auth-tabs">
+        <button type="button" class="auth-tab active" id="tab-signin">Sign in</button>
+        <button type="button" class="auth-tab" id="tab-signup">Create account</button>
+      </div>
+
+      <form id="auth-form">
+        <div class="auth-field">
+          <label for="auth-email">Email</label>
+          <input type="email" id="auth-email" autocomplete="email" placeholder="you@university.edu" />
+        </div>
+        <div class="auth-field">
+          <label for="auth-password">Password</label>
+          <input type="password" id="auth-password" autocomplete="current-password" placeholder="••••••••" />
+        </div>
+        <button type="button" class="auth-forgot" id="auth-forgot">Forgot password?</button>
+        <div class="auth-alert error" id="auth-error" hidden></div>
+        <div class="auth-alert ok" id="auth-notice" hidden></div>
+        <button type="submit" class="auth-submit" id="auth-submit">Sign in</button>
+      </form>
+
+      <!-- Shown only once we know the Google provider is actually enabled. -->
+      <div id="auth-google-wrap" hidden>
+        <div class="auth-divider"><span>OR</span></div>
+        <button type="button" class="google-btn" id="auth-google">
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+            <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.91c1.7-1.57 2.69-3.88 2.69-6.62z"/>
+            <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.91-2.26c-.81.54-1.84.86-3.05.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.34A9 9 0 0 0 9 18z"/>
+            <path fill="#FBBC05" d="M3.97 10.72a5.41 5.41 0 0 1 0-3.44V4.94H.96a9 9 0 0 0 0 8.12l3.01-2.34z"/>
+            <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.94l3.01 2.34C4.68 5.16 6.66 3.58 9 3.58z"/>
+          </svg>
+          Continue with Google
+        </button>
+      </div>
+
+      <button type="button" class="auth-cancel" id="auth-cancel">Not now</button>
+      <p class="auth-note">
+        Without an account your work still stays in this browser — signing in just
+        adds sync and history.
+      </p>
+    </div>
+  </div>
+
+  <!-- Backend keys (same file the drawing app reads) and the Supabase client,
+       vendored rather than pulled from a CDN so the page has no runtime
+       dependency on anyone else's uptime. -->
+  <script src="/supabase-config.js"></script>
+  <script src="/vendor/supabase.js"></script>
+  <script>
+  /**
+   * Homepage account UI + "Your drawings".
+   *
+   * Shares the session with /draw/ automatically: same origin, same Supabase
+   * storage key. Signing in here means you're signed in there.
+   *
+   * Everything degrades: with no backend configured the account button and the
+   * cloud list disappear and the section instead offers to resume the drawing
+   * held in this browser (the same local draft the editor writes).
+   */
+  (function () {
+    'use strict';
+
+    var config = window.OPENREACTIONS_CONFIG || {};
+    var url = (config.supabaseUrl || '').trim();
+    var anonKey = (config.supabaseAnonKey || '').trim();
+    var configured = !!(url && anonKey && /^https?:\/\//.test(url) && window.supabase);
+
+    var client = configured
+      ? window.supabase.createClient(url, anonKey, {
+          auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true },
+        })
+      : null;
+
+    var el = function (id) { return document.getElementById(id); };
+    var section = el('drawings-section');
+    var body = el('drawings-body');
+    var slot = el('account-slot');
+    var overlay = el('auth-overlay');
+
+    // ---- helpers ----------------------------------------------------------
+
+    /** Same wording as the editor's list (draw/src/lib/relativeTime.js). */
+    function relativeTime(value) {
+      if (!value) return '';
+      var then = new Date(value).getTime();
+      if (!isFinite(then)) return '';
+      var seconds = Math.round((Date.now() - then) / 1000);
+      if (seconds < 45) return 'just now';
+      if (seconds < 90) return 'a minute ago';
+      var minutes = Math.round(seconds / 60);
+      if (minutes < 60) return minutes + ' minutes ago';
+      var hours = Math.round(minutes / 60);
+      if (hours < 24) return hours === 1 ? 'an hour ago' : hours + ' hours ago';
+      var days = Math.round(hours / 24);
+      if (days === 1) return 'yesterday';
+      if (days < 7) return days + ' days ago';
+      var date = new Date(then);
+      var opts = { month: 'short', day: 'numeric' };
+      if (date.getFullYear() !== new Date().getFullYear()) opts.year = 'numeric';
+      return date.toLocaleDateString(undefined, opts);
+    }
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    /** The editor's local mirror, for the signed-out "continue" card. */
+    function localDraft() {
+      try {
+        var raw = localStorage.getItem('openreactions.draft.local');
+        if (!raw) return null;
+        var parsed = JSON.parse(raw);
+        var doc = parsed.doc || {};
+        var empty =
+          (!doc.vertices || !doc.vertices.length) &&
+          (!doc.segments || !doc.segments.length) &&
+          (!doc.arrows || !doc.arrows.length);
+        if (empty) return null;
+        return { title: parsed.title || 'Untitled drawing', updatedAt: parsed.updatedAt, thumbnail: parsed.thumbnail };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function thumbHtml(thumbnail) {
+      return thumbnail
+        ? '<img src="' + escapeHtml(thumbnail) + '" alt="" />'
+        : '<span class="thumb-placeholder">⬡</span>';
+    }
+
+    function cardHtml(href, title, subtitle, thumbnail) {
+      return (
+        '<a class="drawing-card" href="' + escapeHtml(href) + '">' +
+        '<div class="drawing-thumb">' + thumbHtml(thumbnail) + '</div>' +
+        '<div class="drawing-name">' + escapeHtml(title) + '</div>' +
+        '<div class="drawing-time">' + escapeHtml(subtitle) + '</div>' +
+        '</a>'
+      );
+    }
+
+    var newCardHtml =
+      '<a class="drawing-card new-card" href="/draw/?new=1">' +
+      '<span class="plus">+</span>' +
+      '<span class="drawing-name">New drawing</span>' +
+      '</a>';
+
+    // ---- the drawings section --------------------------------------------
+
+    function showSignedOutSection() {
+      var draft = localDraft();
+      el('drawings-link').hidden = true;
+      if (draft) {
+        el('drawings-title').textContent = 'Pick up where you left off';
+        body.innerHTML =
+          '<div class="drawings-grid">' +
+          cardHtml('/draw/', draft.title, 'On this device · ' + relativeTime(draft.updatedAt), draft.thumbnail) +
+          newCardHtml +
+          '</div>' +
+          (configured
+            ? '<div class="drawings-message" style="margin-top:18px;">' +
+              '<p>This drawing lives in this browser only. Sign in to keep it safe and open it from any device.</p>' +
+              '<button class="auth-btn" data-open-auth>Sign in</button>' +
+              '</div>'
+            : '');
+      } else if (configured) {
+        el('drawings-title').textContent = 'Your drawings';
+        body.innerHTML =
+          '<div class="drawings-message">' +
+          '<p>Sign in and every drawing saves itself automatically — come back any time and your last few will be waiting right here.</p>' +
+          '<button class="auth-btn" data-open-auth>Sign in</button>' +
+          '</div>';
+      } else {
+        // No backend and nothing saved locally: there is nothing useful to show.
+        section.hidden = true;
+        return;
+      }
+      section.hidden = false;
+    }
+
+    function showLoadingSection() {
+      el('drawings-title').textContent = 'Your drawings';
+      body.innerHTML = '<div class="drawings-message"><p>Loading your drawings…</p></div>';
+      section.hidden = false;
+    }
+
+    function showSignedInSection(rows, error) {
+      el('drawings-title').textContent = 'Your drawings';
+      if (error) {
+        el('drawings-link').hidden = true;
+        body.innerHTML =
+          '<div class="drawings-message"><p>Couldn’t load your drawings just now. ' +
+          escapeHtml(error) + '</p></div>';
+        section.hidden = false;
+        return;
+      }
+      el('drawings-link').hidden = rows.length === 0;
+      if (rows.length === 0) {
+        body.innerHTML =
+          '<div class="drawings-grid">' + newCardHtml + '</div>' +
+          '<div class="drawings-message" style="margin-top:18px;">' +
+          '<p>Nothing saved yet. Start a drawing and it will appear here on its own — no save button needed.</p>' +
+          '</div>';
+      } else {
+        var cards = rows
+          .map(function (r) {
+            return cardHtml(
+              '/draw/?doc=' + encodeURIComponent(r.id),
+              r.title || 'Untitled drawing',
+              'Edited ' + relativeTime(r.updated_at),
+              r.thumbnail
+            );
+          })
+          .join('');
+        body.innerHTML = '<div class="drawings-grid">' + cards + newCardHtml + '</div>';
+      }
+      section.hidden = false;
+    }
+
+    /** Six is "the last couple of pages" without turning the homepage into a file manager. */
+    function loadDrawings() {
+      showLoadingSection();
+      client
+        .from('drawings')
+        .select('id, title, thumbnail, updated_at')
+        .order('updated_at', { ascending: false })
+        .limit(6)
+        .then(function (res) {
+          var message = null;
+          if (res.error) {
+            message = /relation .* does not exist/i.test(res.error.message || '')
+              ? 'The database tables are missing — run the SQL from SUPABASE_SETUP.md.'
+              : res.error.message;
+          }
+          showSignedInSection(res.data || [], message);
+        })
+        .catch(function (e) {
+          showSignedInSection([], e && e.message ? e.message : 'Network error.');
+        });
+    }
+
+    // ---- navbar account control ------------------------------------------
+
+    function renderAccount(user) {
+      if (!configured) {
+        slot.innerHTML = '';
+        return;
+      }
+      if (!user) {
+        slot.innerHTML = '<button class="auth-btn" data-open-auth>Sign in</button>';
+        return;
+      }
+      var email = user.email || '';
+      slot.innerHTML =
+        '<div class="dropdown">' +
+        '<button class="avatar-btn" id="avatar-btn" title="' + escapeHtml(email) + '">' +
+        escapeHtml((email[0] || '?').toUpperCase()) +
+        '</button>' +
+        '<div id="account-dropdown" class="dropdown-content">' +
+        '<div class="account-label">SIGNED IN AS</div>' +
+        '<div class="account-email">' + escapeHtml(email) + '</div>' +
+        '<button class="account-signout" id="signout-btn">Sign out</button>' +
+        '</div>' +
+        '</div>';
+      el('avatar-btn').addEventListener('click', function (event) {
+        event.stopPropagation();
+        toggleDropdown('account-dropdown');
+      });
+      el('signout-btn').addEventListener('click', function () {
+        client.auth.signOut();
+      });
+    }
+
+    // ---- auth dialog ------------------------------------------------------
+
+    var mode = 'signin';
+
+    function setMode(next) {
+      mode = next;
+      el('tab-signin').classList.toggle('active', next === 'signin');
+      el('tab-signup').classList.toggle('active', next === 'signup');
+      el('auth-heading').textContent = next === 'signin' ? 'Sign in to OpenReactions' : 'Create an account';
+      el('auth-submit').textContent = next === 'signin' ? 'Sign in' : 'Create account';
+      el('auth-password').setAttribute('autocomplete', next === 'signin' ? 'current-password' : 'new-password');
+      el('auth-password').placeholder = next === 'signin' ? '••••••••' : 'At least 6 characters';
+      el('auth-forgot').style.display = next === 'signin' ? '' : 'none';
+      clearAlerts();
+    }
+
+    function clearAlerts() {
+      el('auth-error').hidden = true;
+      el('auth-notice').hidden = true;
+    }
+
+    function showError(text) {
+      el('auth-error').textContent = text;
+      el('auth-error').hidden = false;
+      el('auth-notice').hidden = true;
+    }
+
+    function showNotice(text) {
+      el('auth-notice').textContent = text;
+      el('auth-notice').hidden = false;
+      el('auth-error').hidden = true;
+    }
+
+    function openAuth() {
+      clearAlerts();
+      overlay.hidden = false;
+      setTimeout(function () { el('auth-email').focus(); }, 30);
+    }
+
+    function closeAuth() {
+      overlay.hidden = true;
+      el('auth-password').value = '';
+    }
+
+    /** Same translations as the editor, so the two dialogs never disagree. */
+    function friendlyError(error) {
+      var message = (error && error.message) || String(error);
+      if (/invalid login credentials/i.test(message)) {
+        return 'That email and password don’t match an account. If you just signed up, check your inbox for a confirmation link.';
+      }
+      if (/already registered|already been registered/i.test(message)) {
+        return 'There’s already an account with that email — try signing in instead.';
+      }
+      if (/password should be at least/i.test(message)) return 'Password needs to be at least 6 characters.';
+      if (/for security purposes/i.test(message)) return 'Too many attempts in a row — wait a few seconds and try again.';
+      if (/unable to validate email|invalid email/i.test(message)) return 'That doesn’t look like a valid email address.';
+      if (/failed to fetch|networkerror/i.test(message)) return 'Couldn’t reach the server. Check your connection and try again.';
+      return message;
+    }
+
+    function submitAuth(event) {
+      if (event) event.preventDefault();
+      var email = el('auth-email').value.trim();
+      var password = el('auth-password').value;
+      clearAlerts();
+      if (!email) return showError('Enter your email address.');
+      if (password.length < 6) return showError('Password needs to be at least 6 characters.');
+
+      var submit = el('auth-submit');
+      submit.disabled = true;
+      submit.textContent = 'Working…';
+
+      var request =
+        mode === 'signin'
+          ? client.auth.signInWithPassword({ email: email, password: password })
+          : client.auth.signUp({ email: email, password: password });
+
+      request
+        .then(function (res) {
+          if (res.error) {
+            showError(friendlyError(res.error));
+            return;
+          }
+          // Email confirmation on: there's a user but no session yet.
+          if (mode === 'signup' && res.data && res.data.user && !res.data.session) {
+            showNotice('Almost there — click the confirmation link we sent to ' + email + ', then sign in.');
+            return;
+          }
+          closeAuth();
+        })
+        .catch(function (e) {
+          showError(friendlyError(e));
+        })
+        .then(function () {
+          submit.disabled = false;
+          submit.textContent = mode === 'signin' ? 'Sign in' : 'Create account';
+        });
+    }
+
+    function forgotPassword() {
+      var email = el('auth-email').value.trim();
+      if (!email) {
+        showError('Enter your email address first, then click "Forgot password".');
+        el('auth-email').focus();
+        return;
+      }
+      client.auth
+        .resetPasswordForEmail(email, { redirectTo: window.location.origin })
+        .then(function (res) {
+          if (res.error) showError(friendlyError(res.error));
+          else showNotice('Password reset link sent to ' + email + '.');
+        });
+    }
+
+    // ---- wiring ----------------------------------------------------------
+
+    // One delegated listener covers every "Sign in" button, including the ones
+    // rendered into the drawings section after the fact.
+    document.addEventListener('click', function (event) {
+      var trigger = event.target.closest ? event.target.closest('[data-open-auth]') : null;
+      if (trigger) {
+        event.preventDefault();
+        openAuth();
+      }
+    });
+
+    el('tab-signin').addEventListener('click', function () { setMode('signin'); });
+    el('tab-signup').addEventListener('click', function () { setMode('signup'); });
+    el('auth-form').addEventListener('submit', submitAuth);
+    el('auth-cancel').addEventListener('click', closeAuth);
+    el('auth-forgot').addEventListener('click', forgotPassword);
+    overlay.addEventListener('click', function (event) {
+      if (event.target === overlay) closeAuth();
+    });
+    document.addEventListener('keydown', function (event) {
+      if (event.key === 'Escape' && !overlay.hidden) closeAuth();
+    });
+
+    // "Continue with Google" appears only when the provider is really enabled.
+    // 'auto' (the default) asks the project, so switching Google on in the
+    // Supabase dashboard is enough — no code change, no redeploy — and an
+    // unconfigured provider can never be clicked.
+    var googleMode = config.enableGoogleSignIn === undefined ? 'auto' : config.enableGoogleSignIn;
+
+    function setUpGoogle() {
+      if (!client) return;
+      el('auth-google').addEventListener('click', function () {
+        client.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: window.location.origin } });
+      });
+      el('auth-google-wrap').hidden = false;
+    }
+
+    if (client && googleMode === true) {
+      setUpGoogle();
+    } else if (client && googleMode === 'auto') {
+      var cached = null;
+      try { cached = sessionStorage.getItem('openreactions.googleProvider'); } catch (e) { /* private mode */ }
+      if (cached === 'true') {
+        setUpGoogle();
+      } else if (cached === null) {
+        fetch(url + '/auth/v1/settings', { headers: { apikey: anonKey } })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (settings) {
+            var enabled = !!(settings && settings.external && settings.external.google);
+            try { sessionStorage.setItem('openreactions.googleProvider', String(enabled)); } catch (e) { /* ignore */ }
+            if (enabled) setUpGoogle();
+          })
+          .catch(function () { /* offline: leave the button hidden */ });
+      }
+    }
+
+    if (!configured) {
+      renderAccount(null);
+      showSignedOutSection();
+      return;
+    }
+
+    function applySession(session) {
+      var user = session ? session.user : null;
+      renderAccount(user);
+      if (user) loadDrawings();
+      else showSignedOutSection();
+    }
+
+    client.auth.getSession().then(function (res) {
+      applySession(res.data ? res.data.session : null);
+    });
+
+    // Covers signing in from the dialog, signing out, and the same happening in
+    // the editor tab.
+    client.auth.onAuthStateChange(function (event, session) {
+      if (event === 'TOKEN_REFRESHED') return;
+      applySession(session);
+    });
+
+    // Coming back to this tab after editing should show the new thumbnail and
+    // timestamp rather than a stale card.
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && client) {
+        client.auth.getSession().then(function (res) {
+          if (res.data && res.data.session) loadDrawings();
+        });
+      }
+    });
+  })();
+  </script>
 </body>
 </html>

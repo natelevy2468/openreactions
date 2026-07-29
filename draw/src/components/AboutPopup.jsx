@@ -16,6 +16,7 @@ const SHORTCUTS = [
   ['Benzene', 'R'], ['Rings 3–6', '3–6'],
   ['Charge + / −', 'G / J'], ['Lone pair', 'L'],
   ['Undo / Redo', '⌘Z / ⇧⌘Z'], ['Delete', '⌫'],
+  ['Save now', '⌘S'],
 ];
 
 export default function AboutPopup({ show, onClose, colors }) {
@@ -85,8 +86,21 @@ export default function AboutPopup({ show, onClose, colors }) {
           still under development.
         </div>
 
-        {/* Keyboard shortcut reference */}
+        {/* How saving works — the question every new user asks first. */}
         <div style={{ marginTop: '22px', borderTop: '1px solid #eee', paddingTop: '16px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 700, color: '#444', marginBottom: '8px', letterSpacing: '0.06em' }}>
+            SAVING
+          </div>
+          <div style={{ fontSize: '12px', color: '#777', lineHeight: 1.55 }}>
+            Drawings save themselves — there's no save button. Your work stays in this
+            browser even if you reload or close the tab, and signing in keeps it in your
+            account so you can open it from anywhere. Use <b>My drawings</b> to switch
+            between them, or click the name in the header to rename one.
+          </div>
+        </div>
+
+        {/* Keyboard shortcut reference */}
+        <div style={{ marginTop: '18px', borderTop: '1px solid #eee', paddingTop: '16px' }}>
           <div style={{ fontSize: '12px', fontWeight: 700, color: '#444', marginBottom: '10px', textAlign: 'center', letterSpacing: '0.06em' }}>
             KEYBOARD SHORTCUTS
           </div>

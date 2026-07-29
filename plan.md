@@ -96,6 +96,28 @@ The drawn structures must look clean and correct — this is the top priority.
 - [ ] FUTURE: one-click "expand superatom to full structure" on canvas (needs 2D layout); a
       palette/menu of groups; contract-selection-to-superatom.
 
+## Accounts + autosave + saved drawings (2026-07-29) — DONE, deployed
+Google-Docs-style persistence. See README ("Accounts and saving") for the design and
+SUPABASE_SETUP.md for the backend. Summary:
+- [x] Sign in / create account (email+password, and Google — auto-detected from the
+      project's enabled providers, so no flag to flip and no redeploy).
+- [x] Autosave: local storage on every edit (crash net, and the only layer when signed
+      out) + Supabase on a 1.2 s debounce. No save button anywhere.
+- [x] Rows created lazily on first non-empty edit; pan/zoom never trigger a network
+      write; newer-copy-wins on load only when content actually differs.
+- [x] Editable document name + live save status in the header; `⌘S` flushes.
+- [x] "My drawings" dropdown: switch / rename / duplicate / delete / new.
+- [x] Homepage "Your drawings": six most recent with thumbnails, under Start Creating;
+      offers to resume the local draft when signed out.
+- [x] `?doc=<uuid>` addresses a drawing, `?new=1` forces a blank one.
+- [x] FIXED (pre-existing): performVertexMerge deleted BOTH coincident vertices instead
+      of one — dropping a ring template onto an identical one drained every vertex.
+      Invisible before (bonds carry their own coords) but autosave made it permanent.
+- [x] FIXED (pre-existing): single-letter tool shortcuts fired while typing in text
+      fields; handleKeyDown now ignores events from inputs/textareas/contentEditable.
+- [ ] FUTURE: share a drawing by link (needs a read policy for non-owners), folders or
+      tags, per-drawing version history, "duplicate as template".
+
 ## Marvin/ChemDraw parity — gaps we DON'T have yet (for equation drawing)
 Have: chain/ring drawing w/ 60° snap, ring templates, bond-order cycle, wedge/dash/wavy stereo,
 charges, lone pairs, heteroatom labels w/ implicit H, reaction/equilibrium/curved arrows,
@@ -124,3 +146,11 @@ copy/paste, export PNG. Notable MISSING vs ChemDraw/Marvin:
 Headless Chrome via CDP (see memory: openreactions-redraw-progress). Start dev
 server, launch Chrome with --remote-debugging-port=9222, drive with scratchpad
 scripts. Restart dev server after rapid edits (stale-module white screen).
+
+For anything touching persistence, add two things: (1) a Node stand-in for
+Supabase's auth + REST endpoints, so failure cases (unreachable server, email
+confirmation required, provider on/off) can be forced on demand; (2) a **fresh
+browser context per run** (`Target.createBrowserContext`) — reusing one profile lets
+a leftover local draft corrupt the next run, which once looked convincingly like an
+app bug. Inject the test config with `Object.defineProperty(..., writable:false)` or
+the page's own supabase-config.js overwrites it.
