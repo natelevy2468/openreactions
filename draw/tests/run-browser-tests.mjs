@@ -76,6 +76,7 @@ try {
   console.log('PASS: Homepage sign-in, modal, Escape, mobile layout');
   await call('Page.navigate', { url: `${base}/?library-fixture=1` });
   await until(`document.querySelectorAll('.drawing-card').length === 105`);
+  assert.equal(await evaluate(`Array.from(document.querySelectorAll('.drawing-card')).every(a => new URL(a.href).searchParams.has('_open') && new URL(a.href).searchParams.has('doc'))`), true, 'Saved drawing links must refresh the editor shell without dropping document IDs');
   await evaluate(`document.querySelector('#drawing-search').value = 'Reaction 104'; document.querySelector('#drawing-search').dispatchEvent(new Event('input'))`);
   assert.equal(await evaluate(`document.querySelectorAll('.drawing-card').length`), 1);
   await evaluate(`document.querySelector('#drawing-search').value = ''; document.querySelector('#drawing-search').dispatchEvent(new Event('input')); document.querySelector('#drawing-sort').value = 'name'; document.querySelector('#drawing-sort').dispatchEvent(new Event('change'))`);
@@ -94,6 +95,20 @@ try {
   for (const test of results) console.log(`${test.passed ? 'PASS' : 'FAIL'}: ${test.name}${test.error ? ` — ${test.error}` : ''}`);
   assert(results.every(t => t.passed), 'Persistence regression failed');
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
+  // A month-old saved document has no drawingStyle or newer optional fields.
+  const oldId = '33333333-3333-4333-8333-333333333333';
+  await evaluate(`localStorage.clear(); localStorage.setItem('openreactions.draft.${oldId}', JSON.stringify({ title: 'Month-old drawing', updatedAt: '2026-08-01T00:00:00Z', doc: { version: 1, vertices: [{x: 300, y: 300}, {x: 360, y: 300}], segments: [{x1: 300, y1: 300, x2: 360, y2: 300, bondOrder: 1}], vertexAtoms: {'360.00,300.00': {symbol: 'O', charge: -1}}, arrows: [] } }))`);
+  await call('Page.navigate', { url: `${base}/draw/?doc=${oldId}&_open=regression` });
+  await until(`document.body?.innerText.includes('Month-old drawing') && !!document.querySelector('.editor-menu-trigger')`);
+  assert.equal(await evaluate(`new URL(location.href).searchParams.get('doc')`), oldId);
+  const restored = await evaluate(`JSON.parse(localStorage.getItem('openreactions.draft.${oldId}')).doc`);
+  assert.equal(restored.segments.length, 1);
+  assert.equal(restored.vertexAtoms['360.00,300.00'].charge, -1);
+  await evaluate(`document.querySelector('.editor-menu-trigger').click()`);
+  await until(`!!document.querySelector('[aria-label="Tools"][role="dialog"]')`);
+  assert.equal(await evaluate(`document.body.innerText.includes('Tidy structure')`), true);
+  console.log('PASS: Month-old drawing opens in the current Tools UI with its identity, bonds, and atom labels preserved');
+  await evaluate(`localStorage.clear()`);
   await call('Page.navigate', { url: `${base}/draw/` });
   await until('!!document.querySelector("canvas")');
   assert.equal(await evaluate('!!Array.from(document.querySelectorAll("button")).find(b => b.innerText === "Sign in")'), true);
