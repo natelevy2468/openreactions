@@ -780,9 +780,24 @@
         : '<span class="thumb-placeholder">⬡</span>';
     }
 
+    // Pages caches HTML by URL. An old ?doc= URL must not reopen a cached
+    // editor shell after a deployment; drawing identity stays in doc/local.
+    function freshEditorUrl(href) {
+      var target = new URL(href, window.location.origin);
+      target.searchParams.set('_open', Date.now().toString(36));
+      return target.pathname + target.search + target.hash;
+    }
+    document.querySelector('.new-drawing').href = freshEditorUrl('/draw/?new=1');
+    document.addEventListener('click', function (event) {
+      var link = event.target.closest('a');
+      if (link && link.origin === window.location.origin && link.pathname === '/draw/') {
+        link.href = freshEditorUrl(link.href);
+      }
+    }, true);
+
     function cardHtml(href, title, subtitle, thumbnail) {
       return (
-        '<a class="drawing-card" href="' + escapeHtml(href) + '">' +
+        '<a class="drawing-card" href="' + escapeHtml(freshEditorUrl(href)) + '">' +
         '<div class="drawing-thumb">' + thumbHtml(thumbnail) + '</div>' +
         '<div class="drawing-name">' + escapeHtml(title) + '</div>' +
         '<div class="drawing-time">' + escapeHtml(subtitle) + '</div>' +
