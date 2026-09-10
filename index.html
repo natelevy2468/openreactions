@@ -3,162 +3,14 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OpenReactions - Molecular Design Platform</title>
+  <title>Drawings — OpenReactions</title>
+  <meta name="description" content="Draw chemical structures and reaction schemes in your browser. Export crisp figures, save automatically, and keep your drawings together with OpenReactions." />
   <link rel="icon" type="image/png" href="logoFinal4.png" />
   <link rel="shortcut icon" type="image/png" href="logoFinal4.png" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Roboto:wght@100;300;400;500;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
-    * {
-      box-sizing: border-box;
-    }
-    
-    body {
-      margin: 0;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      font-weight: 400;
-      background: linear-gradient(135deg, #9bb0ed 0%, #b19ccf 100%);
-      min-height: 100vh;
-      line-height: 1.6;
-      color: #1a1a1a;
-    }
-
-    .navbar {
-      position: fixed;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 60px;
-      background: rgba(248, 250, 252, 0.95);
-      backdrop-filter: blur(20px);
-      border-bottom: 1px solid rgba(203, 213, 225, 0.3);
-      display: flex;
-      align-items: center;
-      padding: 0 40px;
-      z-index: 1000;
-      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-      justify-content: space-between;
-    }
-
-    .navbar-left {
-      display: flex;
-      align-items: center;
-      margin-top: 3px;
-    }
-
-    .navbar-center {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex: 1;
-      margin-top: 3px;
-      min-width: 0;
-      padding: 0 6px;
-    }
-
-    .navbar-title {
-      font-size: clamp(11px, 1.65vw, 18px);
-      font-weight: 300;
-      background: linear-gradient(135deg, #1042e8 0%, #7921f3 50%, #9C27B0 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      font-family: 'Roboto', sans-serif;
-      letter-spacing: -0.5px;
-      line-height: 1.15;
-      max-width: min(92vw, 560px);
-      text-align: center;
-    }
-
-    .navbar-right {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      margin-top: 3px;
-    }
-
-    .navbar a.home-btn {
-      background-color: transparent;
-      color: #333;
-      text-decoration: none;
-      border: none;
-      padding: 10px 12px;
-      margin-right: 2px;
-      margin-left: -16px;
-      border-radius: 6px;
-      font-size: 16px;
-      font-weight: 400;
-      font-family: 'Roboto', sans-serif;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 8px;
-    }
-
-    .navbar .logo {
-      height: 38px;
-      width: auto;
-      pointer-events: none;
-      filter: hue-rotate(0deg) saturate(1.8) brightness(.8);
-    }
-
-    .navbar .nav-btn {
-      background-color: transparent;
-      color: #4a5568;
-      text-decoration: none;
-      border: none;
-      padding: 12px 20px;
-      margin-right: 8px;
-      border-radius: 12px;
-      font-size: 15px;
-      font-weight: 500;
-      font-family: 'Inter', sans-serif;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .navbar .nav-btn:hover {
-      background-color: rgba(72, 187, 120, 0.1);
-      color: #48bb78;
-      transform: translateY(-1px);
-    }
-
-    .navbar .nav-btn.active {
-      background-color: #48bb78;
-      color: #fff;
-      box-shadow: 0 4px 12px rgba(72, 187, 120, 0.3);
-    }
-
-
-
-    .navbar .settings-btn {
-      background-color: transparent;
-      color: #333;
-      text-decoration: none;
-      border: none;
-      padding: 0px 0px;
-      border-radius: 6px;
-      font-size: 14px;
-      font-weight: 400;
-      font-family: 'Roboto', sans-serif;
-      cursor: default;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .navbar .gear-icon {
-      width: 50px;
-      height: 50px;
-      pointer-events: none;
-      filter: brightness(0) saturate(100%) invert(27%) sepia(0%) saturate(1567%) hue-rotate(184deg) brightness(95%) contrast(87%);
-    }
-
-    /* Dropdown menu styles */
     .dropdown {
       position: relative;
       display: inline-block;
@@ -203,195 +55,6 @@
       border-bottom: 8px solid white;
     }
 
-    .main-container {
-      margin-top: 60px;
-      min-height: calc(100vh - 60px);
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 60px 40px;
-      text-align: center;
-      position: relative;
-      overflow: hidden;
-    }
-
-    .main-container::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background: 
-        radial-gradient(circle at 20% 80%, rgba(120, 119, 198, 0.3) 0%, transparent 50%),
-        radial-gradient(circle at 80% 20%, rgba(255, 255, 255, 0.2) 0%, transparent 50%),
-        radial-gradient(circle at 40% 40%, rgba(102, 126, 234, 0.2) 0%, transparent 50%);
-      pointer-events: none;
-    }
-
-    .hero-section {
-      position: relative;
-      z-index: 1;
-      max-width: 800px;
-      margin: 0 auto;
-    }
-
-    .hero-logo {
-      width: 120px;
-      height: 120px;
-      margin: 0 auto 40px;
-      display: block;
-      filter: drop-shadow(0 8px 32px rgba(0, 0, 0, 0.1));
-    }
-
-    .hero-title {
-      font-size: clamp(1.35rem, 4.2vw, 2.5rem);
-      font-weight: 500;
-      background: linear-gradient(135deg, #1a202c 0%, #2d3748 50%, #4a5568 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      font-family: 'Inter', sans-serif;
-      letter-spacing: -0.5px;
-      margin: 0 auto 20px;
-      line-height: 1.15;
-      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      position: relative;
-      max-width: 22ch;
-    }
-
-    .hero-subtitle {
-      font-size: 1.5rem;
-      font-weight: 400;
-      color: rgba(255, 255, 255, 0.9);
-      margin: 0 0 50px 0;
-      line-height: 1.4;
-    }
-
-    .cta-button {
-      background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
-      color: white;
-      border: none;
-      padding: 20px 40px;
-      font-size: 1.2rem;
-      font-weight: 600;
-      font-family: 'Inter', sans-serif;
-      border-radius: 16px;
-      cursor: pointer;
-      transition: all 0.3s ease;
-      text-decoration: none;
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      box-shadow: 0 8px 32px rgba(72, 187, 120, 0.3);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .cta-button::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: -100%;
-      width: 100%;
-      height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
-      transition: left 0.5s ease;
-    }
-
-    .cta-button:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 12px 40px rgba(72, 187, 120, 0.4);
-      background: linear-gradient(135deg, #38a169 0%, #2f855a 100%);
-    }
-
-    .cta-button:hover::before {
-      left: 100%;
-    }
-
-    .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-      gap: 30px;
-      margin-top: 100px;
-      max-width: 900px;
-    }
-
-    .feature-card {
-      background: rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 20px;
-      padding: 30px;
-      text-align: center;
-      transition: all 0.3s ease;
-      overflow: visible;
-      position: relative;
-    }
-
-    .feature-card:hover {
-      transform: translateY(-5px);
-      background: rgba(255, 255, 255, 0.15);
-      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
-    }
-
-    .feature-card.coming-soon {
-      position: relative;
-      opacity: 0.75;
-      cursor: default;
-    }
-
-    .feature-card.coming-soon:hover {
-      transform: none;
-      background: rgba(255, 255, 255, 0.1);
-      box-shadow: none;
-    }
-
-    .coming-soon-badge {
-      background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
-      color: white;
-      font-size: 0.75rem;
-      font-weight: 600;
-      padding: 6px 12px;
-      border-radius: 16px;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
-      box-shadow: 0 2px 8px rgba(75, 85, 99, 0.3);
-      margin-top: 15px;
-      display: inline-block;
-    }
-
-    .feature-icon {
-      font-size: 2.5rem;
-      margin-bottom: 0px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      height: 120px;
-      position: relative;
-      z-index: 1;
-    }
-
-    .feature-title {
-      font-size: 1.3rem;
-      font-weight: 600;
-      color: white;
-      margin: 0 0 15px 0;
-    }
-
-    .feature-description {
-      font-size: 1rem;
-      color: rgba(255, 255, 255, 0.8);
-      line-height: 1.6;
-      margin: 0;
-    }
-
-    /* ------------------------------------------------------------------
-       Your drawings — recent documents, straight under the CTA.
-       Reuses the glass-card language of .feature-card so the section reads
-       as part of the page rather than a bolted-on dashboard.
-       ------------------------------------------------------------------ */
     .drawings-section {
       position: relative;
       z-index: 1;
@@ -538,7 +201,7 @@
 
     /* Account controls in the navbar */
     .auth-btn {
-      background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+      background: linear-gradient(135deg, #8861ca 0%, #7650c5 100%);
       color: #fff;
       border: none;
       padding: 10px 18px;
@@ -574,7 +237,7 @@
       height: 36px;
       border-radius: 50%;
       border: none;
-      background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+      background: linear-gradient(135deg, #8861ca 0%, #7650c5 100%);
       color: #fff;
       font-size: 15px;
       font-weight: 600;
@@ -681,7 +344,7 @@
 
     .auth-tab.active {
       background: #fff;
-      color: #38a169;
+      color: #7650c5;
       box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
     }
 
@@ -708,7 +371,7 @@
     }
 
     .auth-field input:focus {
-      border-color: #48bb78;
+      border-color: #8861ca;
       box-shadow: 0 0 0 3px rgba(72, 187, 120, 0.15);
     }
 
@@ -720,7 +383,7 @@
       font-weight: 600;
       font-family: 'Inter', sans-serif;
       color: #fff;
-      background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
+      background: linear-gradient(135deg, #8861ca 0%, #7650c5 100%);
       border: none;
       border-radius: 8px;
       cursor: pointer;
@@ -823,233 +486,98 @@
       margin-bottom: 4px;
     }
 
-    /* Responsive Design */
-    @media (max-width: 768px) {
-      .drawings-section { margin-top: 50px; }
-      .drawings-grid { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px; }
-      .drawings-message { padding: 18px; }
 
-      .navbar {
-        padding: 0 20px;
-        height: 50px;
-      }
-      
-      .navbar-title {
-        font-size: 24px;
-      }
-      
-      .main-container {
-        margin-top: 50px;
-        padding: 40px 20px;
-      }
-      
-      .hero-logo {
-        width: 80px;
-        height: 80px;
-        margin-bottom: 30px;
-      }
-      
-      .hero-title {
-        font-size: 3rem;
-        letter-spacing: -2px;
-        font-weight: 500;
-      }
-      
-      .hero-subtitle {
-        font-size: 1.2rem;
-        margin-bottom: 40px;
-      }
-      
-      .cta-button {
-        padding: 16px 32px;
-        font-size: 1.1rem;
-      }
-      
-      .features-grid {
-        grid-template-columns: 1fr;
-        gap: 20px;
-        margin-top: 60px;
-      }
-      
-      .feature-card {
-        padding: 25px;
-      }
+    * { box-sizing: border-box; }
+    [hidden] { display: none !important; }
+    body { margin: 0; font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; line-height: 1.6; background: #f3f1fa; color: #29263e; }
+    button, input, select { font: inherit; }
+    button, a, input, select { -webkit-tap-highlight-color: transparent; }
+    :focus-visible { outline: 3px solid #7953d2; outline-offset: 3px; }
+    .navbar { height: 76px; padding: 0 28px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+    .navbar-left, .navbar-right { display: flex; align-items: center; gap: 12px; }
+    .home-btn { display: flex; align-items: center; gap: 10px; color: #403456; text-decoration: none; font-size: 18px; font-weight: 500; letter-spacing: -.5px; }
+    .logo { width: 33px; height: 33px; object-fit: contain; }
+    .auth-btn, .auth-submit { background: #7250c4; border-radius: 8px; font-family: inherit; }
+    .auth-btn:hover { background: #6141ad; transform: none; box-shadow: none; }
+    .auth-tab.active { background: #7250c4; color: #fff; }
+    .app-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); min-height: calc(100vh - 76px); padding: 0 20px 20px 12px; gap: 12px; }
+    .sidebar { padding: 16px 8px; display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+    .sidebar button { display: flex; align-items: center; gap: 12px; border: 0; background: none; padding: 12px 18px; border-radius: 24px; text-align: left; color: #655c76; cursor: pointer; font-size: 14px; }
+    .sidebar button[aria-current="page"] { background: #e2d8f6; color: #563693; font-weight: 600; }
+    .sidebar button:hover { background: #e9e2f6; }
+    .sidebar svg { width: 20px; height: 20px; flex-shrink: 0; }
+    .sidebar-note { padding: 12px 18px; font-size: 11px; color: #746a83; margin-top: auto; }
+    .main-container { background: #fff; border: 1px solid #e9e3f2; border-radius: 20px; padding: 32px 36px; min-width: 0; }
+    .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
+    h1 { font-size: 26px; font-weight: 500; letter-spacing: -.6px; margin: 0; }
+    .new-drawing { display: inline-flex; align-items: center; gap: 12px; text-decoration: none; background: #e5d6f7; color: #603b92; padding: 12px 20px; border-radius: 12px; font-size: 14px; font-weight: 500; }
+    .new-drawing:hover { background: #d9c2f0; box-shadow: 0 2px 6px #603b9212; }
+    .new-drawing span { font-size: 23px; line-height: 1; }
+    .library-tools { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 24px; }
+    .search-field { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #f4f1f9; border: 1px solid transparent; border-radius: 10px; flex: 1; max-width: 520px; min-width: 180px; }
+    .search-field:focus-within { border-color: #9779cc; background: white; }
+    .search-field svg { width: 18px; height: 18px; color: #82728f; flex-shrink: 0; }
+    .search-field input { width: 100%; min-width: 0; border: 0; outline: none; background: none; font-size: 13px; color: #403456; }
+    .library-tools select { padding: 9px 12px; font-size: 12px; color: #655c76; background: white; border: 1px solid #e4deec; border-radius: 8px; }
+    .view-toggle { display: flex; margin-left: auto; padding: 3px; border: 1px solid #e4deec; border-radius: 8px; }
+    .view-toggle button { display: grid; place-items: center; border: 0; background: none; border-radius: 5px; color: #81758d; padding: 7px 10px; cursor: pointer; }
+    .view-toggle button[aria-pressed="true"] { background: #eae1f8; color: #6842a9; }
+    .view-toggle svg { width: 17px; height: 17px; }
+    .drawings-section { margin: 0; max-width: none; }
+    .drawings-header { margin-bottom: 14px; }
+    .drawings-title { color: #655c76; font-size: 13px; font-weight: 500; letter-spacing: 0; }
+    .drawings-link { color: #7653b7; font-size: 12px; border: 0; }
+    .drawings-grid { grid-template-columns: repeat(auto-fill,minmax(210px,1fr)); gap: 18px; }
+    .drawing-card { padding: 10px; border: 1px solid #e6dfef; border-radius: 12px; background: #f8f5fc; backdrop-filter: none; gap: 9px; }
+    .drawing-card:nth-child(3n+2) { background: #f3eefb; border-color: #e0d4f0; }
+    .drawing-card:nth-child(3n+3) { background: #faf0fc; border-color: #ebd8ef; }
+    .drawing-card:hover { transform: none; background: #ece3f8; border-color: #b8a2d5; box-shadow: 0 3px 10px #4932630b; }
+    .drawing-thumb { height: 160px; border-radius: 6px; background: white; }
+    .drawing-thumb .thumb-placeholder { color: #b6a3cf; font-size: 42px; }
+    .drawing-name { color: #403456; font-size: 13px; font-weight: 500; padding: 0 4px; }
+    .drawing-time { color: #82758f; font-size: 11px; margin: -4px 0 2px; padding: 0 4px; }
+    .drawings-grid.list-view { display: flex; flex-direction: column; gap: 0; }
+    .list-view .drawing-card { display: grid; grid-template-columns: 44px minmax(0,1fr) 180px; gap: 16px; align-items: center; border: 0; border-bottom: 1px solid #ece7f3; border-radius: 0; padding: 12px 8px; background: white; }
+    .list-view .drawing-card:hover { background: #f7f3fc; }
+    .list-view .drawing-thumb { height: 38px; background: #f3eef9; }
+    .list-view .thumb-placeholder { font-size: 24px; }
+    .list-view .drawing-time { margin: 0; }
+    .empty-library { min-height: 300px; display: flex; align-items: center; justify-content: center; flex-direction: column; text-align: center; gap: 12px; padding: 40px 20px; border: 1px dashed #e3dbea; border-radius: 12px; background: #fdfbff; }
+    .empty-icon { display: grid; place-items: center; background: #e9def8; color: #8866b6; width: 64px; height: 64px; border-radius: 18px; font-size: 32px; }
+    .empty-library h2 { font-size: 16px; font-weight: 500; margin: 6px 0 0; }
+    .empty-library p { color: #82758f; font-size: 13px; margin: 0; max-width: 330px; }
+    .drawings-message { padding: 14px 18px; border-radius: 10px; border: 1px solid #e4deee; background: #f7f3fc; backdrop-filter: none; margin-top: 20px; gap: 12px; }
+    .drawings-message p { font-size: 12px; color: #746583; }
+    .drawings-message button { font-size: 12px; }
+    .about-content { max-width: 700px; }
+    .about-content h2 { font-size: 17px; font-weight: 500; margin-top: 32px; }
+    .about-content p, .about-content li { font-size: 14px; color: #72667f; }
+    .about-content a { color: #7653b7; }
+    .about-tag { display: inline-block; padding: 4px 10px; background: #e9def8; color: #7650c5; border-radius: 5px; font-size: 12px; }
+    .auth-overlay { z-index: 2000; }
+    .auth-dialog { max-height: calc(100dvh - 32px); overflow-y: auto; }
+    @media(max-width: 800px) {
+      .app-layout { grid-template-columns: 160px minmax(0,1fr); }
+      .main-container { padding: 24px; }
+      .library-tools select { max-width: 150px; }
     }
-
-    @media (max-width: 480px) {
-      .hero-title {
-        font-size: 2.5rem;
-        letter-spacing: -1.5px;
-        font-weight: 500;
-      }
-      
-      .hero-subtitle {
-        font-size: 1.1rem;
-      }
-      
-      .cta-button {
-        padding: 14px 28px;
-        font-size: 1rem;
-      }
+    @media(max-width: 600px) {
+      .navbar { padding: 0 18px; height: 68px; }
+      .home-btn { font-size: 16px; }
+      .app-layout { display: block; padding: 0 10px 10px; }
+      .sidebar { flex-direction: row; padding: 0 4px 12px; gap: 6px; }
+      .sidebar button { padding: 8px 14px; font-size: 12px; }
+      .sidebar-note { display: none; }
+      .main-container { padding: 22px 16px; border-radius: 16px; min-height: calc(100vh - 122px); }
+      h1 { font-size: 23px; }
+      .new-drawing { padding: 10px 13px; font-size: 12px; gap: 8px; }
+      .search-field { flex-basis: 100%; max-width: none; }
+      .drawings-grid { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+      .drawing-thumb { height: 110px; }
+      .list-view .drawing-card { grid-template-columns: 34px minmax(0,1fr); gap: 8px; }
+      .list-view .drawing-time { grid-column: 2; }
     }
-
-    /* Testimonials Content (within main container) */
-    .testimonials-content {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 100px 0 80px 0;
-      text-align: center;
-      position: relative;
-      opacity: 0;
-      transform: translateY(50px);
-      transition: all 0.6s ease-out;
-    }
-
-    .testimonials-content.visible {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .section-header {
-      position: relative;
-      z-index: 1;
-      max-width: 800px;
-      margin-bottom: 60px;
-    }
-
-    .section-title-large {
-      font-size: 3.5rem;
-      font-weight: 600;
-      background: linear-gradient(135deg, #1a202c 0%, #2d3748 50%, #4a5568 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      margin: 0 0 20px 0;
-      font-family: 'Inter', sans-serif;
-      letter-spacing: -1.5px;
-    }
-
-    .section-subtitle {
-      font-size: 1.3rem;
-      color: rgba(255, 255, 255, 0.9);
-      margin: 0;
-      line-height: 1.5;
-    }
-
-    .testimonials-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-      gap: 40px;
-      max-width: 1200px;
-      width: 100%;
-      position: relative;
-      z-index: 1;
-    }
-
-    .testimonial-card {
-      background: rgba(255, 255, 255, 0.15);
-      backdrop-filter: blur(20px);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 20px;
-      padding: 40px;
-      text-align: left;
-      transition: all 0.3s ease;
-      opacity: 0;
-      transform: translateY(30px);
-    }
-
-    .testimonial-card.animate-in {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .testimonial-card:hover {
-      transform: translateY(-5px);
-      background: rgba(255, 255, 255, 0.2);
-      box-shadow: 0 15px 45px rgba(0, 0, 0, 0.1);
-    }
-
-    .publication-stats {
-      display: flex;
-      justify-content: space-around;
-      flex-wrap: wrap;
-      gap: 30px;
-      margin-top: 80px;
-      max-width: 800px;
-      position: relative;
-      z-index: 1;
-    }
-
-    .stat-item {
-      text-align: center;
-      opacity: 0;
-      transform: translateY(30px);
-      transition: all 0.4s ease-out;
-    }
-
-    .stat-item.animate-in {
-      opacity: 1;
-      transform: translateY(0);
-    }
-
-    .stat-item:hover {
-      transform: scale(1.05) translateY(-3px);
-      transition: all 0.2s ease;
-    }
-
-    .stat-number {
-      font-size: 3rem;
-      font-weight: 700;
-      color: white;
-      margin: 0;
-      font-family: 'Inter', sans-serif;
-    }
-
-    .stat-label {
-      font-size: 1rem;
-      color: rgba(255, 255, 255, 0.8);
-      margin: 5px 0 0 0;
-      text-transform: uppercase;
-      letter-spacing: 1px;
-      font-weight: 500;
-    }
-
-    /* Responsive for testimonials content */
-    @media (max-width: 768px) {
-      .testimonials-content {
-        padding: 60px 0;
-      }
-      
-      .section-title-large {
-        font-size: 2.8rem;
-      }
-      
-      .section-subtitle {
-        font-size: 1.1rem;
-      }
-      
-      .testimonials-grid {
-        grid-template-columns: 1fr;
-        gap: 25px;
-      }
-      
-      .testimonial-card {
-        padding: 30px;
-      }
-      
-      .publication-stats {
-        gap: 20px;
-        margin-top: 60px;
-      }
-      
-      .stat-number {
-        font-size: 2.5rem;
-      }
-    }
-
-
+    @media(prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
   </style>
   <script>
     function toggleDropdown(dropdownId) {
@@ -1074,185 +602,46 @@
       }
     });
 
-    // Add smooth scroll animation for CTA button
-    document.addEventListener('DOMContentLoaded', function() {
-      const ctaButton = document.querySelector('.cta-button');
-      if (ctaButton) {
-        ctaButton.addEventListener('click', function(e) {
-          // Add a subtle click animation
-          this.style.transform = 'translateY(-1px) scale(0.98)';
-          setTimeout(() => {
-            this.style.transform = '';
-          }, 150);
-        });
-      }
-
-      // Simple intersection observer for testimonials section (no scroll pause)
-      const testimonialsSection = document.getElementById('testimonialsSection');
-      
-      // Basic intersection observer for animations only
-      const sectionObserver = new IntersectionObserver((entries) => {
-        entries.forEach(entry => {
-          if (entry.isIntersecting) {
-            // Add visible class to trigger section animation
-            entry.target.classList.add('visible');
-            
-            // Animate stats with quick staggered timing
-            const statItems = entry.target.querySelectorAll('.stat-item');
-            statItems.forEach((item, index) => {
-              setTimeout(() => {
-                item.classList.add('animate-in');
-              }, index * 50);
-            });
-
-            // Animate testimonial cards (when content is added)
-            const testimonialCards = entry.target.querySelectorAll('.testimonial-card');
-            testimonialCards.forEach((card, index) => {
-              setTimeout(() => {
-                card.classList.add('animate-in');
-              }, 100 + (index * 50));
-            });
-          }
-        });
-      }, {
-        threshold: 0.3
-      });
-
-      // Observe the testimonials section
-      if (testimonialsSection) {
-        sectionObserver.observe(testimonialsSection);
-      }
-    });
   </script>
 </head>
 <body>
-  <div class="navbar">
-    <!-- Left side buttons -->
-    <div class="navbar-left">
-      <a href="/" class="home-btn">
-                    <img src="logoFinal4.png" alt="OpenReactions Logo" class="logo" />
-        <span>Home</span>
-      </a>
-      <a href="/draw/" class="nav-btn">
-        Draw
-      </a>
-    </div>
-    
-    <!-- Center title -->
-    <div class="navbar-center">
-      <span class="navbar-title">OpenReactions</span>
-    </div>
-    
-    <!-- Right side buttons -->
-    <div class="navbar-right">
-      <div class="dropdown">
-        <button class="nav-btn" onclick="toggleDropdown('about-dropdown')">
-          About
-        </button>
-        <div id="about-dropdown" class="dropdown-content">
-          <strong>Made by: Nathan Levy PO '27</strong><br><br>
-          Text 925-808-9441 with questions!<br><br>
-          <em>Still under development.</em>
-        </div>
-      </div>
-      <div class="dropdown">
-        <div class="settings-btn" title="Settings" onclick="toggleDropdown('settings-dropdown')" style="cursor: pointer;">
-          <img src="gear.png" alt="Settings" class="gear-icon" />
-        </div>
-        <div id="settings-dropdown" class="dropdown-content">
-          <strong>Settings</strong><br><br>
-          There are no settings to change yet
-        </div>
-      </div>
-
-      <!-- Account: filled in by the script below. Stays empty when no backend
-           is configured, so nothing dead is ever shown. -->
-      <div id="account-slot"></div>
-    </div>
-  </div>
-  <div class="main-container">
-    <div class="hero-section">
-      <img src="logoFinal4.png" alt="OpenReactions Logo" class="hero-logo" />
-      <h1 class="hero-title">OpenReactions</h1>
-      <p class="hero-subtitle">The future of molecular design and communication. Build, visualize, and share chemical structures all on your browser.</p>
-      <a href="/draw/" class="cta-button">
-        <span>Start Creating</span>
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12h14M12 5l7 7-7 7"/>
-        </svg>
-      </a>
-    </div>
-
-    <!-- Recent drawings. Hidden until the script knows whether there's a
-         backend and a session; filled in by renderDrawings(). -->
-    <section class="drawings-section" id="drawings-section" hidden>
-      <div class="drawings-header">
-        <h2 class="drawings-title" id="drawings-title">Your drawings</h2>
-        <a class="drawings-link" href="/draw/" id="drawings-link" hidden>Open the editor →</a>
-      </div>
-      <div id="drawings-body"></div>
-    </section>
-
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="feature-icon">
-          <img src="Draw.png" alt="Molecule Drawing" style="width: 120px; height: 120px; object-fit: contain;" />
+  <header class="navbar">
+    <div class="navbar-left"><a href="/" class="home-btn"><img src="logoFinal4.png" alt="" class="logo" /><span>OpenReactions</span></a></div>
+    <div class="navbar-right"><div id="account-slot"><button class="auth-btn" data-open-auth>Sign in</button></div></div>
+  </header>
+  <div class="app-layout">
+    <nav class="sidebar" aria-label="Main navigation">
+      <button id="nav-drawings" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 3h11l5 5v13H4z M14 3v6h6 M8 13h8 M8 17h6"/></svg>Drawings</button>
+      <button id="nav-about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6 M12 7v1"/></svg>About & help</button>
+      <p class="sidebar-note" id="storage-note">Browser storage<br>Sign in for cloud drawings</p>
+    </nav>
+    <main class="main-container">
+      <div id="library-page">
+        <div class="page-header"><h1>Drawings</h1><a class="new-drawing" href="/draw/?new=1"><span aria-hidden="true">+</span>New drawing</a></div>
+        <div class="library-tools">
+          <label class="search-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg><input id="drawing-search" type="search" placeholder="Search drawings" aria-label="Search drawings" /></label>
+          <select id="drawing-sort" aria-label="Sort drawings"><option value="recent">Last edited</option><option value="name">Name (A–Z)</option><option value="oldest">Oldest first</option></select>
+          <div class="view-toggle" role="group" aria-label="Drawing view">
+            <button id="view-grid" aria-label="Grid view" aria-pressed="true"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><rect x="2" y="2" width="6" height="6" rx="1"/><rect x="12" y="2" width="6" height="6" rx="1"/><rect x="2" y="12" width="6" height="6" rx="1"/><rect x="12" y="12" width="6" height="6" rx="1"/></svg></button>
+            <button id="view-list" aria-label="List view" aria-pressed="false"><svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M6 4h12 M6 10h12 M6 16h12 M2 4h1 M2 10h1 M2 16h1"/></svg></button>
           </div>
-        <h3 class="feature-title">Draw Molecule</h3>
-        <p class="feature-description">Draw complex molecules for lab reports and research presentations. Create structures from simple alkanes to advanced organic compounds.</p>
         </div>
-        
-      <div class="feature-card coming-soon">
-        <div class="feature-icon">
-          <img src="Animate.png" alt="Molecule Animation" style="width: 120px; height: 120px; object-fit: contain;" />
-        </div>
-        <h3 class="feature-title">Molecule Animation</h3>
-        <p class="feature-description">Animate chemical reactions and molecular transformations. Visualize reaction mechanisms and electron flow for enhanced learning.</p>
-        <div class="coming-soon-badge">Coming Soon</div>
+        <section class="drawings-section" id="drawings-section" aria-label="Saved drawings">
+          <div class="drawings-header"><h2 class="drawings-title" id="drawings-title">Recent drawings</h2><span id="drawing-count" class="drawings-link" role="status"></span></div>
+          <div id="drawings-body"><div class="empty-library"><p>Loading drawings…</p></div></div>
+        </section>
       </div>
-
-      <div class="feature-card coming-soon">
-        <div class="feature-icon">
-          <img src="Search.png" alt="Molecule Search" style="width: 120px; height: 120px; object-fit: contain;" />
-        </div>
-        <h3 class="feature-title">Molecule Search</h3>
-        <p class="feature-description">Search molecular structures from extensive databases. Find compounds by name, formula, or structure to accelerate research.</p>
-        <div class="coming-soon-badge">Coming Soon</div>
-      </div>
-    </div>
-
-    <!-- Testimonials / Use Cases / Publication Stats Section -->
-    <div class="testimonials-content" id="testimonialsSection">
-      <div class="section-header">
-        <h2 class="section-title-large">Trusted by Researchers</h2>
-        <p class="section-subtitle">Join tens of scientists, students, and educators using OpenReactions</p>
-      </div>
-
-      <!-- Testimonials Grid (Empty for now) -->
-      <div class="testimonials-grid" id="testimonialsGrid">
-        <!-- Testimonial cards will be added here -->
-      </div>
-
-      <!-- Publication Stats -->
-      <div class="publication-stats" id="publicationStats">
-        <div class="stat-item">
-          <div class="stat-number">0</div>
-          <div class="stat-label">Publications</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-number">100+</div>
-          <div class="stat-label">Molecules Created</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-number">1</div>
-          <div class="stat-label">Universities</div>
-        </div>
-        <div class="stat-item">
-          <div class="stat-number">1</div>
-          <div class="stat-label">Countries</div>
-        </div>
-      </div>
-    </div>
+      <section id="about-page" hidden class="about-content" aria-labelledby="about-title">
+        <div class="page-header"><h1 id="about-title">About & help</h1></div>
+        <span class="about-tag">OpenReactions</span>
+        <p>A browser-based chemical structure and reaction editor, made by Nathan Levy (Pomona College ’27).</p>
+        <h2>Drawing</h2><p>Use the toolbar to place bonds, rings, reaction arrows, and stereochemistry. Hover over an atom and type to label it. Double-click an arrow to add reagents and conditions.</p>
+        <h2>Saving & accounts</h2><p>Edits save in this browser. Sign in to save drawings to your account and access them on other devices. The editor’s status shows whether changes are saved locally or to the cloud.</p>
+        <h2>Exporting</h2><p>Use Export in the editor to download a cropped PNG or copy the figure to your clipboard.</p>
+        <h2>Keyboard shortcuts</h2><p>D — draw · M — select · R — benzene · T — text · A — arrow<br>⌘/Ctrl+Z — undo · ⌘/Ctrl+Shift+Z — redo</p>
+        <h2>Project</h2><p><a href="https://github.com/natelevy2468/openreactions">Source code</a> · <a href="https://github.com/natelevy2468/openreactions/issues">Report an issue</a></p>
+      </section>
+    </main>
   </div>
 
   <!-- Sign-in dialog -->
@@ -1315,9 +704,8 @@
    * Shares the session with /draw/ automatically: same origin, same Supabase
    * storage key. Signing in here means you're signed in there.
    *
-   * Everything degrades: with no backend configured the account button and the
-   * cloud list disappear and the section instead offers to resume the drawing
-   * held in this browser (the same local draft the editor writes).
+   * The dashboard always remains available. Without a cloud session it shows
+   * the browser draft; account controls remain visible during session loading.
    */
   (function () {
     'use strict';
@@ -1402,111 +790,112 @@
       );
     }
 
-    var newCardHtml =
-      '<a class="drawing-card new-card" href="/draw/?new=1">' +
-      '<span class="plus">+</span>' +
-      '<span class="drawing-name">New drawing</span>' +
-      '</a>';
+    var libraryRows = [];
+    var libraryCloud = false;
+    var libraryError = null;
+    var libraryLoading = false;
+    var libraryView = 'grid';
+    var loadVersion = 0;
+    try { libraryView = localStorage.getItem('openreactions.libraryView') === 'list' ? 'list' : 'grid'; } catch (e) {}
 
-    // ---- the drawings section --------------------------------------------
+    function renderLibrary() {
+      section.hidden = false;
+      var query = el('drawing-search').value.trim().toLowerCase();
+      var rows = libraryRows.filter(function (r) { return r.title.toLowerCase().includes(query); });
+      var sort = el('drawing-sort').value;
+      rows.sort(function (a, b) {
+        if (sort === 'name') return a.title.localeCompare(b.title);
+        var order = (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0);
+        return sort === 'oldest' ? -order : order;
+      });
+      el('drawings-title').textContent = libraryCloud ? 'All drawings' : 'On this device';
+      el('drawing-count').textContent = libraryLoading ? 'Loading…' : rows.length + (rows.length === 1 ? ' drawing' : ' drawings');
+      el('view-grid').setAttribute('aria-pressed', String(libraryView === 'grid'));
+      el('view-list').setAttribute('aria-pressed', String(libraryView === 'list'));
+      var content;
+      if (libraryLoading) {
+        content = '<div class="empty-library"><p>Loading drawings…</p></div>';
+      } else if (libraryError) {
+        content = '<div class="empty-library"><h2>Drawings couldn’t be loaded</h2><p>Please check your connection and try again.</p><button class="auth-btn" id="retry-drawings">Retry</button></div>';
+      } else if (rows.length) {
+        content = '<div class="drawings-grid' + (libraryView === 'list' ? ' list-view' : '') + '">' + rows.map(function (r) {
+          return cardHtml(r.href, r.title, 'Edited ' + relativeTime(r.updatedAt), r.thumbnail);
+        }).join('') + '</div>';
+      } else {
+        content = '<div class="empty-library"><div class="empty-icon" aria-hidden="true">▤</div><h2>' + (query ? 'No matching drawings' : 'No drawings yet') + '</h2><p>' + (query ? 'Try a different name.' : 'Use New drawing to start a document.') + '</p></div>';
+      }
+      if (!libraryCloud) content += '<div class="drawings-message"><p>Drawings on this device are stored in this browser.' + (configured ? ' Sign in to view your cloud drawings.' : '') + '</p>' + (configured ? '<button class="auth-btn" data-open-auth>Sign in</button>' : '') + '</div>';
+      body.innerHTML = content;
+      var retry = el('retry-drawings');
+      if (retry) retry.addEventListener('click', loadDrawings);
+    }
 
     function showSignedOutSection() {
+      loadVersion++;
+      libraryCloud = false;
+      libraryLoading = false;
+      libraryError = null;
       var draft = localDraft();
-      el('drawings-link').hidden = true;
-      if (draft) {
-        el('drawings-title').textContent = 'Pick up where you left off';
-        body.innerHTML =
-          '<div class="drawings-grid">' +
-          cardHtml('/draw/', draft.title, 'On this device · ' + relativeTime(draft.updatedAt), draft.thumbnail) +
-          newCardHtml +
-          '</div>' +
-          (configured
-            ? '<div class="drawings-message" style="margin-top:18px;">' +
-              '<p>This drawing lives in this browser only. Sign in to keep it safe and open it from any device.</p>' +
-              '<button class="auth-btn" data-open-auth>Sign in</button>' +
-              '</div>'
-            : '');
-      } else if (configured) {
-        el('drawings-title').textContent = 'Your drawings';
-        body.innerHTML =
-          '<div class="drawings-message">' +
-          '<p>Sign in and every drawing saves itself automatically — come back any time and your last few will be waiting right here.</p>' +
-          '<button class="auth-btn" data-open-auth>Sign in</button>' +
-          '</div>';
-      } else {
-        // No backend and nothing saved locally: there is nothing useful to show.
-        section.hidden = true;
-        return;
-      }
-      section.hidden = false;
+      try {
+        libraryRows = Object.keys(localStorage).filter(function (key) { return key.startsWith('openreactions.localDocument.'); }).map(function (key) {
+          var entry = JSON.parse(localStorage.getItem(key));
+          return entry && !entry.deletedAt ? { href: '/draw/?local=' + encodeURIComponent(key.slice('openreactions.localDocument.'.length)), title: entry.title || 'Untitled drawing', updatedAt: entry.updatedAt, thumbnail: entry.thumbnail } : null;
+        }).filter(Boolean);
+      } catch (e) { libraryRows = []; }
+      if (!libraryRows.length && draft) libraryRows = [{ href: '/draw/', title: draft.title, updatedAt: draft.updatedAt, thumbnail: draft.thumbnail }];
+      el('storage-note').innerHTML = 'Browser storage<br>Sign in for cloud drawings';
+      renderLibrary();
     }
 
-    function showLoadingSection() {
-      el('drawings-title').textContent = 'Your drawings';
-      body.innerHTML = '<div class="drawings-message"><p>Loading your drawings…</p></div>';
-      section.hidden = false;
+    async function loadDrawings() {
+      var version = ++loadVersion;
+      libraryCloud = true;
+      libraryLoading = true;
+      libraryError = null;
+      el('storage-note').textContent = 'Cloud drawings';
+      renderLibrary();
+      try {
+        var rows = [], page;
+        do {
+          var result = await client.from('drawings').select('id, title, thumbnail, updated_at').order('updated_at', { ascending: false }).order('id', { ascending: true }).range(rows.length, rows.length + 99);
+          if (version !== loadVersion) return;
+          if (result.error) throw result.error;
+          page = result.data || [];
+          rows = rows.concat(page);
+        } while (page.length === 100);
+        libraryRows = rows.map(function (r) { return { href: '/draw/?doc=' + encodeURIComponent(r.id), title: r.title || 'Untitled drawing', updatedAt: r.updated_at, thumbnail: r.thumbnail }; });
+      } catch (e) {
+        if (version !== loadVersion) return;
+        libraryError = true;
+      }
+      libraryLoading = false;
+      renderLibrary();
     }
 
-    function showSignedInSection(rows, error) {
-      el('drawings-title').textContent = 'Your drawings';
-      if (error) {
-        el('drawings-link').hidden = true;
-        body.innerHTML =
-          '<div class="drawings-message"><p>Couldn’t load your drawings just now. ' +
-          escapeHtml(error) + '</p></div>';
-        section.hidden = false;
-        return;
-      }
-      el('drawings-link').hidden = rows.length === 0;
-      if (rows.length === 0) {
-        body.innerHTML =
-          '<div class="drawings-grid">' + newCardHtml + '</div>' +
-          '<div class="drawings-message" style="margin-top:18px;">' +
-          '<p>Nothing saved yet. Start a drawing and it will appear here on its own — no save button needed.</p>' +
-          '</div>';
-      } else {
-        var cards = rows
-          .map(function (r) {
-            return cardHtml(
-              '/draw/?doc=' + encodeURIComponent(r.id),
-              r.title || 'Untitled drawing',
-              'Edited ' + relativeTime(r.updated_at),
-              r.thumbnail
-            );
-          })
-          .join('');
-        body.innerHTML = '<div class="drawings-grid">' + cards + newCardHtml + '</div>';
-      }
-      section.hidden = false;
+    el('drawing-search').addEventListener('input', renderLibrary);
+    el('drawing-sort').addEventListener('change', renderLibrary);
+    ['grid', 'list'].forEach(function (view) {
+      el('view-' + view).addEventListener('click', function () {
+        libraryView = view;
+        try { localStorage.setItem('openreactions.libraryView', view); } catch (e) {}
+        renderLibrary();
+      });
+    });
+    function showPage(about) {
+      el('library-page').hidden = about;
+      el('about-page').hidden = !about;
+      el('nav-about').setAttribute('aria-current', about ? 'page' : 'false');
+      el('nav-drawings').setAttribute('aria-current', about ? 'false' : 'page');
+      document.title = (about ? 'About & help' : 'Drawings') + ' — OpenReactions';
     }
-
-    /** Six is "the last couple of pages" without turning the homepage into a file manager. */
-    function loadDrawings() {
-      showLoadingSection();
-      client
-        .from('drawings')
-        .select('id, title, thumbnail, updated_at')
-        .order('updated_at', { ascending: false })
-        .limit(6)
-        .then(function (res) {
-          var message = null;
-          if (res.error) {
-            message = /relation .* does not exist/i.test(res.error.message || '')
-              ? 'The database tables are missing — run the SQL from SUPABASE_SETUP.md.'
-              : res.error.message;
-          }
-          showSignedInSection(res.data || [], message);
-        })
-        .catch(function (e) {
-          showSignedInSection([], e && e.message ? e.message : 'Network error.');
-        });
-    }
+    el('nav-about').addEventListener('click', function () { showPage(true); });
+    el('nav-drawings').addEventListener('click', function () { showPage(false); });
 
     // ---- navbar account control ------------------------------------------
 
     function renderAccount(user) {
       if (!configured) {
-        slot.innerHTML = '';
+        slot.innerHTML = '<button class="auth-btn" data-open-auth>Sign in</button>';
         return;
       }
       if (!user) {
@@ -1567,15 +956,19 @@
       el('auth-error').hidden = true;
     }
 
+    var authReturnFocus = null;
     function openAuth() {
       clearAlerts();
+      authReturnFocus = document.activeElement;
       overlay.hidden = false;
+      if (!configured) showError('Sign-in is temporarily unavailable. You can still draw and save your work in this browser.');
       setTimeout(function () { el('auth-email').focus(); }, 30);
     }
 
     function closeAuth() {
       overlay.hidden = true;
       el('auth-password').value = '';
+      if (authReturnFocus) authReturnFocus.focus();
     }
 
     /** Same translations as the editor, so the two dialogs never disagree. */
@@ -1596,6 +989,7 @@
 
     function submitAuth(event) {
       if (event) event.preventDefault();
+      if (!client) return showError('Sign-in is temporarily unavailable. Please try again later.');
       var email = el('auth-email').value.trim();
       var password = el('auth-password').value;
       clearAlerts();
@@ -1634,6 +1028,7 @@
     }
 
     function forgotPassword() {
+      if (!client) return showError('Password reset is temporarily unavailable. Please try again later.');
       var email = el('auth-email').value.trim();
       if (!email) {
         showError('Enter your email address first, then click "Forgot password".');
@@ -1669,7 +1064,14 @@
       if (event.target === overlay) closeAuth();
     });
     document.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape' && !overlay.hidden) closeAuth();
+      if (overlay.hidden) return;
+      if (event.key === 'Escape') closeAuth();
+      if (event.key === 'Tab') {
+        var focusable = Array.from(overlay.querySelectorAll('button, input, a[href]')).filter(function (node) { return !node.disabled && node.getClientRects().length; });
+        var first = focusable[0], last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
     });
 
     // "Continue with Google" appears only when the provider is really enabled.
@@ -1718,9 +1120,11 @@
       else showSignedOutSection();
     }
 
+    renderAccount(null);
+    showSignedOutSection();
     client.auth.getSession().then(function (res) {
       applySession(res.data ? res.data.session : null);
-    });
+    }).catch(function () { applySession(null); });
 
     // Covers signing in from the dialog, signing out, and the same happening in
     // the editor tab.
