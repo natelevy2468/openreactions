@@ -30,7 +30,7 @@ const getFragment = (OCL, smiles) => {
  * @param {{atoms:Array, bonds:Array}} graph
  * @returns {{ molecule: import('openchemlib').Molecule, warnings: string[] }}
  */
-const graphToOCLMolecule = (OCL, graph) => {
+export const graphToOCLMolecule = (OCL, graph) => {
   const { atoms, bonds } = graph;
   const warnings = [];
   const unknownLabels = new Set();
@@ -77,6 +77,8 @@ const graphToOCLMolecule = (OCL, graph) => {
       }
     }
     if (atom.charge) molecule.setAtomCharge(oclIndex, atom.charge);
+    if (atom.isotope) molecule.setAtomMass(oclIndex, atom.isotope);
+    if (atom.radical) molecule.setAtomRadical(oclIndex, atom.radical);
     // Coordinates help OCL with 2D-dependent perception and future Molfile
     // export. Screen y grows downward; flip it so drawings aren't upside down.
     molecule.setAtomX(oclIndex, atom.x);
@@ -89,6 +91,12 @@ const graphToOCLMolecule = (OCL, graph) => {
     // flag, not the order, so set the order explicitly.
     const bondIndex = molecule.addBond(attachmentIndex[bond.from], attachmentIndex[bond.to]);
     molecule.setBondOrder(bondIndex, bond.order);
+    if (bond.bondType === 'wedge') molecule.setBondType(bondIndex, OCL.Molecule.cBondTypeUp);
+    if (bond.bondType === 'dash') molecule.setBondType(bondIndex, OCL.Molecule.cBondTypeDown);
+    if (bond.bondType === 'ambiguous') {
+      molecule.setBondType(bondIndex, bond.order === 2 ? OCL.Molecule.cBondTypeCross : OCL.Molecule.cBondTypeSingle);
+      molecule.setAtomConfigurationUnknown(attachmentIndex[bond.from], true);
+    }
   });
 
   if (unknownLabels.size > 0) {

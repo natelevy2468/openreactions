@@ -58,6 +58,8 @@ export const buildMoleculeGraph = ({ vertices = [], segments = [], vertexAtoms =
       key,
       element: rawSymbol || 'C', // an unlabeled vertex is an implicit carbon
       charge: Number.isFinite(info.charge) ? info.charge : 0,
+      isotope: Number.isFinite(info.isotope) ? info.isotope : 0,
+      radical: Number.isFinite(info.radical) ? info.radical : 0,
       x,
       y,
     };
@@ -68,7 +70,7 @@ export const buildMoleculeGraph = ({ vertices = [], segments = [], vertexAtoms =
   };
 
   vertices.forEach((v) => {
-    if (v && Number.isFinite(v.x) && Number.isFinite(v.y)) ensureAtom(v.x, v.y);
+    if (v && Number.isFinite(v.x) && Number.isFinite(v.y) && vertexAtoms[vertexKey(v.x, v.y)]?.symbol !== '+') ensureAtom(v.x, v.y);
   });
 
   // 2. Collect real bonds, mapping endpoints to atom indices. Deduplicate bonds
@@ -86,7 +88,7 @@ export const buildMoleculeGraph = ({ vertices = [], segments = [], vertexAtoms =
     const pairKey = from < to ? `${from}-${to}` : `${to}-${from}`;
     const existing = bondMap.get(pairKey);
     if (!existing || order > existing.order) {
-      bondMap.set(pairKey, { from, to, order });
+      bondMap.set(pairKey, { from, to, order, bondType: seg.bondType || null });
     }
   });
 
@@ -138,7 +140,7 @@ export const splitComponents = (graph) => {
     });
     const subBonds = bonds
       .filter((b) => localIndex.has(b.from) && localIndex.has(b.to))
-      .map((b) => ({ from: localIndex.get(b.from), to: localIndex.get(b.to), order: b.order }));
+      .map((b) => ({ ...b, from: localIndex.get(b.from), to: localIndex.get(b.to) }));
     return { atoms: subAtoms, bonds: subBonds };
   });
 };

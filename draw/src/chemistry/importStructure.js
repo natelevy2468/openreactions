@@ -44,6 +44,7 @@ export const smilesToGraph = async (smiles, { bondLength = 60 } = {}) => {
 
   // Generate 2D coordinates for the parsed molecule.
   mol.inventCoordinates();
+  mol.setStereoBondsFromParity();
 
   const atomCount = mol.getAllAtoms();
   const bondCount = mol.getAllBonds();
@@ -77,6 +78,8 @@ export const smilesToGraph = async (smiles, { bondLength = 60 } = {}) => {
     atoms.push({
       element: mol.getAtomLabel(a),
       charge: mol.getAtomCharge(a),
+      isotope: mol.getAtomMass(a),
+      radical: mol.getAtomRadical(a),
       x: (mol.getAtomX(a) - centroidX) * scale,
       // Flip Y: OCL y points up, the canvas y points down.
       y: -(mol.getAtomY(a) - centroidY) * scale,
@@ -90,6 +93,9 @@ export const smilesToGraph = async (smiles, { bondLength = 60 } = {}) => {
       from: mol.getBondAtom(0, b),
       to: mol.getBondAtom(1, b),
       order: order >= 1 && order <= 3 ? order : 1,
+      bondType: mol.getBondType(b) === OCL.Molecule.cBondTypeUp ? 'wedge'
+        : mol.getBondType(b) === OCL.Molecule.cBondTypeDown ? 'dash'
+        : mol.getBondType(b) === OCL.Molecule.cBondTypeCross ? 'ambiguous' : null,
     });
   }
 

@@ -21,6 +21,7 @@
  *    replaceState so reloading and the back button both land in the right place.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { adoptLocalDocument, saveLocalDocument, startLocalDocument, currentLocalId, recordVersion, readVersions } from '../lib/localLibrary.js';
 import { isSupabaseConfigured } from '../lib/supabase.js';
 import { DEFAULT_TITLE, contentFingerprint, emptyDoc, isDocEmpty, normalizeDoc } from '../lib/docModel.js';
 import { createDrawing, fetchDrawing, updateDrawing } from '../lib/documents.js';
@@ -63,16 +64,16 @@ const wantsNewDocument = () => {
   }
 };
 
-const writeDocIdToUrl = (id, { replace = true } = {}) => {
+const writeDocIdToUrl = (id, { replace = true, localId = null } = {}) => {
   try {
     const url = new URL(window.location.href);
     const hadNewFlag = url.searchParams.has('new');
-    if (!hadNewFlag && url.searchParams.get('doc') === (id || null)) return;
+    if (!hadNewFlag && url.searchParams.get('doc') === (id || null) && (!localId || url.searchParams.get('local') === localId)) return;
     // `new=1` is a one-shot instruction; drop it so a reload doesn't discard the
     // drawing the user has since made.
     url.searchParams.delete('new');
-    if (id) url.searchParams.set('doc', id);
-    else url.searchParams.delete('doc');
+    if (id) { url.searchParams.set('doc', id); url.searchParams.delete('local'); }
+    else { url.searchParams.delete('doc'); if (localId) url.searchParams.set('local', localId); }
     const next = `${url.pathname}${url.search}${url.hash}`;
     if (replace) window.history.replaceState({}, '', next);
     else window.history.pushState({}, '', next);
@@ -123,6 +124,8 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
   const docRef = useRef(doc);
   const titleRef = useRef(title);
   const docIdRef = useRef(null);
+  const localLibraryIdRef = useRef(null);
+  const durableRef = useRef(true);
   const userIdRef = useRef(userId);
   const readyRef = useRef(false);
   const savedFingerprintRef = useRef(null);
@@ -130,6 +133,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
   const saveTimerRef = useRef(null);
   const inFlightRef = useRef(false);
   const rerunRef = useRef(false);
+  const saveWaitersRef = useRef([]);
   const lastThumbAtRef = useRef(0);
   const captureThumbnailRef = useRef(captureThumbnail);
   const applyDocRef = useRef(applyDoc);
@@ -144,10 +148,19 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
 
   /** Writes the local mirror. Cheap enough to call on any change. */
   const mirrorLocally = useCallback((key) => {
-    writeDraft(key ?? (docIdRef.current || LOCAL_DOC_KEY), {
-      title: titleRef.current,
-      doc: docRef.current,
-    });
+    const payload = { title: titleRef.current, doc: docRef.current };
+    let durable = writeDraft(key ?? (docIdRef.current || LOCAL_DOC_KEY), payload);
+    try {
+      if (!localLibraryIdRef.current) localLibraryIdRef.current = currentLocalId();
+      if (!docIdRef.current) { saveLocalDocument(payload, localLibraryIdRef.current); durable = true; }
+      recordVersion(docIdRef.current || localLibraryIdRef.current, payload);
+    } catch { /* The main mirror may still have succeeded. */ }
+    durableRef.current = durable;
+    if (!durable) {
+      setError('Browser storage is full or unavailable. Export your drawing before closing this tab.');
+      setStatus('storage-error');
+    }
+    return durable;
   }, []);
 
   const maybeThumbnail = useCallback((force = false) => {
@@ -161,8 +174,8 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
   /** The actual write. Serialized: a save in flight queues one re-run. */
   const performSave = useCallback(async () => {
     if (inFlightRef.current) {
-      rerunRef.current = true;
-      return;
+      await new Promise((resolve) => saveWaitersRef.current.push(resolve));
+      return performSave();
     }
     const snapshot = docRef.current;
     const snapshotTitle = titleRef.current;
@@ -171,6 +184,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
 
     // Signed out (or no backend): the local mirror is the whole story.
     if (!isSupabaseConfigured || !uid) {
+      if (!durableRef.current) { setStatus('storage-error'); return; }
       savedFingerprintRef.current = fingerprint;
       savedTitleRef.current = snapshotTitle;
       setStatus('local');
@@ -181,7 +195,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
     // already checks this; saveNow (title commits, tab hide, sign-out, Cmd+S)
     // doesn't, and firing a redundant request there is how a clean document
     // ended up reporting a save error when its request raced a sign-out.
-    if (fingerprint === savedFingerprintRef.current && snapshotTitle === savedTitleRef.current) return;
+    if (fingerprint === savedFingerprintRef.current && snapshotTitle === savedTitleRef.current) { durableRef.current = true; return; }
 
     // Never create a row for a canvas nobody has drawn on yet.
     if (!docIdRef.current && isDocEmpty(snapshot)) {
@@ -243,6 +257,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       savedTitleRef.current = snapshotTitle;
       setError(null);
       setLastSavedAt(new Date().toISOString());
+      durableRef.current = true;
       setStatus('saved');
     } catch (e) {
       if (stale()) return;
@@ -250,6 +265,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       setStatus('error');
     } finally {
       inFlightRef.current = false;
+      saveWaitersRef.current.splice(0).forEach((resolve) => resolve());
       if (rerunRef.current) {
         rerunRef.current = false;
         performSave();
@@ -299,7 +315,8 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       setLastSavedAt(updatedAt);
       setStatus(statusValue);
       setLastDocId(id || LOCAL_DOC_KEY);
-      writeDocIdToUrl(id);
+      if (!id && !localLibraryIdRef.current) { try { localLibraryIdRef.current = currentLocalId(); } catch {} }
+      writeDocIdToUrl(id, { localId: !id ? localLibraryIdRef.current : null });
       readyRef.current = true;
       setReady(true);
       pruneDrafts();
@@ -329,8 +346,22 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
     const remembered = getLastDocId();
     const rememberedId = remembered && UUID_RE.test(remembered) ? remembered : null;
 
+    const requestedLocal = new URL(window.location.href).searchParams.get('local');
+    if (requestedLocal && UUID_RE.test(requestedLocal) && !requested) {
+      const archived = adoptLocalDocument(requestedLocal);
+      if (archived) {
+        localLibraryIdRef.current = requestedLocal;
+        writeDraft(LOCAL_DOC_KEY, archived);
+        finish({ id: null, docTitle: archived.title, nextDoc: archived.doc, fingerprintSaved: !userId, statusValue: userId ? 'dirty' : 'local' });
+        return () => { cancelled = true; };
+      }
+    }
+
     // "New drawing" from the homepage: an explicitly blank canvas, no resuming.
     if (wantsNewDocument() && !requested) {
+      const previous = readDraft(LOCAL_DOC_KEY);
+      if (previous) { try { saveLocalDocument(previous); } catch { /* existing mirror remains */ } }
+      try { localLibraryIdRef.current = startLocalDocument(); } catch { /* storage state handled on save */ }
       deleteDraft(LOCAL_DOC_KEY);
       finish({
         id: null,
@@ -379,12 +410,23 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       if (cancelled) return;
 
       if (fetchError || !data) {
-        // Asked for a document that isn't ours or no longer exists. Don't strand
-        // the user on an error screen — start them on a fresh drawing.
-        if (fetchError && fetchError !== 'not_found') setError(fetchError);
-        writeDocIdToUrl(null);
-        deleteDraft(target);
-        openLocalDraft();
+        // A failed request is not evidence that the local recovery copy is
+        // disposable. Open it without treating an unverified copy as a cloud edit.
+        const recovery = readDraft(target);
+        if (recovery) {
+          finish({
+            id: target,
+            docTitle: recovery.title,
+            nextDoc: recovery.doc,
+            fingerprintSaved: true,
+            statusValue: 'error',
+            updatedAt: recovery.updatedAt,
+          });
+          setError('Could not open the cloud copy. Your saved browser copy is available; reload to try again.');
+        } else {
+          setError('Could not open this drawing. Reload to try again, or open another drawing from My drawings.');
+          setStatus('error');
+        }
         return;
       }
 
@@ -425,7 +467,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
 
     mirrorLocally(draftKey);
     if (isSupabaseConfigured && userId) setStatus((s) => (s === 'saving' ? s : 'dirty'));
-    else setStatus('local');
+    else setStatus(durableRef.current ? 'local' : 'storage-error');
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     saveTimerRef.current = setTimeout(() => {
@@ -471,7 +513,8 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
   const openDocument = useCallback(
     async (id) => {
       if (id === docIdRef.current) return { error: null };
-      saveNow();
+      await saveNow();
+      if (!durableRef.current) return { error: 'Export the current drawing before switching: it could not be saved.' };
       setStatus('loading');
       const { data, error: fetchError } = await fetchDrawing(id);
       if (fetchError || !data) {
@@ -494,14 +537,19 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       setLastDocId(data.id);
       writeDocIdToUrl(data.id);
       setError(null);
+      readyRef.current = true;
+      setReady(true);
       return { error: null };
     },
     [saveNow]
   );
 
   /** Flushes the current document, then starts an empty untitled one. */
-  const newDocument = useCallback(() => {
-    saveNow();
+  const newDocument = useCallback(async ({ skipSave = false } = {}) => {
+    if (!skipSave) { await saveNow(); if (!durableRef.current) return { error: 'Export the current drawing before starting another: it could not be saved.' }; }
+    readyRef.current = true;
+    setReady(true);
+    try { localLibraryIdRef.current = startLocalDocument(); } catch { /* storage state handled on save */ }
     const fresh = emptyDoc();
     docIdRef.current = null;
     setDocId(null);
@@ -514,7 +562,8 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
     setStatus(isSupabaseConfigured && userId ? 'clean' : 'local');
     deleteDraft(LOCAL_DOC_KEY);
     setLastDocId(LOCAL_DOC_KEY);
-    writeDocIdToUrl(null);
+    try { const url = new URL(window.location.href); url.searchParams.delete('local'); window.history.replaceState({}, '', url); } catch {}
+    writeDocIdToUrl(null, { localId: localLibraryIdRef.current });
     setError(null);
   }, [saveNow, userId]);
 
@@ -525,7 +574,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
   const forgetDocument = useCallback(
     (id) => {
       deleteDraft(id);
-      if (id === docIdRef.current) newDocument();
+      if (id === docIdRef.current) newDocument({ skipSave: true });
     },
     [newDocument]
   );
@@ -547,6 +596,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       openDocument,
       newDocument,
       forgetDocument,
+      getVersions: () => readVersions(docIdRef.current || localLibraryIdRef.current),
     }),
     [docId, title, renameDocument, status, error, lastSavedAt, ready, saveNow, openDocument, newDocument, forgetDocument]
   );

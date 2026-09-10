@@ -23,7 +23,7 @@ import { relativeTime } from '../lib/relativeTime.js';
  * @param {boolean}  signedIn
  * @param {Function} onSignInClick
  */
-const ACCENT = 'rgb(54,98,227)';
+const ACCENT = '#7650c5';
 
 export default function DrawingsPanel({
   show,
@@ -211,7 +211,7 @@ export default function DrawingsPanel({
                   padding: '7px 6px',
                   borderRadius: '7px',
                   cursor: isOpen ? 'default' : 'pointer',
-                  background: isOpen ? 'rgba(54,98,227,0.10)' : 'transparent',
+                  background: isOpen ? 'rgba(118,80,197,0.10)' : 'transparent',
                   transition: 'background 0.12s ease-out',
                 }}
                 onMouseEnter={(e) => {

@@ -17,3 +17,39 @@ body {
 #root {
   min-height: 100vh;
 }
+
+button:focus-visible, a:focus-visible, input:focus-visible {
+  outline: 2px solid #7650c5;
+  outline-offset: 3px;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+.chemistry-tools { display: grid; gap: 7px; font-size: 12px; }
+.chemistry-tools button, .chemistry-tools select, .chemistry-tools input, .chemistry-tools textarea {
+  font-family: inherit; font-size: 11px; color: var(--chem-text); background: var(--chem-bg);
+  border: 1px solid var(--chem-border); border-radius: 6px; padding: 6px 8px; max-width: 100%; box-sizing: border-box;
+}
+.chemistry-tools button { cursor: pointer; }
+.chemistry-tools button:hover { border-color: var(--chem-accent); }
+.chemistry-tools button:disabled { opacity: .5; cursor: default; }
+.chemistry-tools summary { color: var(--chem-text); }
+.chemistry-tools details > button { margin: 3px 3px 3px 0; }
+.chemistry-tools label { display: block; line-height: 1.8; }
+.chemistry-tools select { margin-left: 4px; }
+
+.editor-menu-trigger { border: 0; border-radius: 7px; padding: 10px 12px; font: inherit; font-size: 16px; cursor: pointer; white-space: nowrap; }
+.editor-menu-trigger:hover { background: #eee6fa !important; color: #49317d !important; }
+.editor-popover { position: fixed; z-index: 3000; padding: 20px; box-sizing: border-box; border: 1px solid var(--chem-border); border-radius: 12px; box-shadow: 0 12px 40px #25134430; max-height: calc(100dvh - 80px); overflow-y: auto; font-size: 15px; gap: 12px; }
+.editor-popover button, .editor-popover input, .editor-popover select, .editor-popover textarea { font-size: 14px; padding: 9px 12px; }
+.editor-popover-heading { display: flex; align-items: center; justify-content: space-between; font-size: 19px; }
+.editor-popover details { padding: 8px 0; border-bottom: 1px solid var(--chem-border); }
+.editor-popover summary { font-size: 16px; font-weight: 600; cursor: pointer; }
+.editor-popover details[open] > summary { margin-bottom: 12px; }
+.element-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.element-grid button { padding: 10px 0; font-size: 18px; }
+.element-help { margin: 0; line-height: 1.7; }
+.element-help kbd { background: var(--chem-bg); border: 1px solid var(--chem-border); border-radius: 4px; padding: 1px 4px; font: inherit; font-size: 13px; }
+.editor-popover:focus { outline: 2px solid var(--chem-accent); outline-offset: 2px; }
+.chemistry-tools .editor-menu-trigger { font-size: 16px; padding: 10px 12px; }

@@ -13,7 +13,7 @@ Marvin-like ease of use.
 ## Repo layout
 
 ```
-index.html              the marketing homepage — plain HTML/CSS/JS, no build step
+index.html              the drawings dashboard — plain HTML/CSS/JS, no build step
 supabase-config.js      backend keys, read at runtime by BOTH the homepage and the app
 vendor/supabase.js      Supabase client for the homepage (vendored, no CDN)
 draw/                   the drawing app — React 19 + Vite, served at /draw/
@@ -95,7 +95,7 @@ survive reloads, and are listed on the homepage.
 - On load, whichever copy is newer wins — but only if the content actually
   differs, so re-opening a document doesn't bump it to the top of "recent".
 - `?doc=<uuid>` is a document's address. `?new=1` forces a blank one (that's what
-  the homepage's "New drawing" tile links to).
+  the homepage's "New drawing" button links to).
 - Signing out keeps the drawing on screen and remembers which document it is, so
   signing back in **resumes** it rather than cloning it.
 - If a save fails, the header says so and the work stays local; it gets pushed on
@@ -103,8 +103,10 @@ survive reloads, and are listed on the homepage.
 
 **What the user sees:** an editable document name plus a live save status in the
 editor's header, a **My drawings** dropdown (switch / rename / duplicate / delete
-/ new), an account menu, and a **Your drawings** grid of the six most recent —
-with thumbnails — under the homepage's *Start Creating* button.
+/ new), an account menu, and a homepage **Drawings** dashboard. The dashboard
+loads the full cloud library in pages, with name search, sorting, and grid/list
+views. Product information and instructions live in a separate **About & help**
+section. Signed-out users see their browser draft.
 
 ### Backend
 
@@ -120,7 +122,7 @@ them. The anon key is meant to be public; RLS is what protects the data. Never p
 the `service_role` key there.
 
 Leaving that file blank is a supported state: the app still works completely,
-keeps drawings in the browser, and hides all account UI.
+keeps drawings in the browser. The homepage keeps sign-in visible and explains when accounts are unavailable; the editor hides account controls when no backend is configured.
 
 Google sign-in **auto-detects** — the app asks the project which providers are
 enabled, so switching Google on in the Supabase dashboard makes the button appear
@@ -196,18 +198,37 @@ Things that have already cost time:
   truth.
 - **`draw/node_modules` is tracked in git** (committed before `.gitignore`
   existed). Harmless, but it makes `git status` noisy — filter it out.
-- **In dev, Vite drops the non-module `<script src="/supabase-config.js">`** from
-  `draw/index.html`, so the dev app doesn't load it. The built `dist/index.html`
-  keeps it, which is what matters in production.
+- **Runtime configuration is served in development at both** `/supabase-config.js`
+  and `/draw/supabase-config.js`. The production site serves the root file directly.
 
 ## Testing
 
-There's no automated test suite. The accounts/autosave work was verified by
-driving headless Chrome over the DevTools Protocol against (a) a small Node
-stand-in for Supabase's auth and REST APIs, so failure cases like an unreachable
-server could be forced, and (b) the real project. Worth rebuilding that harness
-if you touch persistence again — the flows with the most edge cases are sign-out /
-sign-in, offline recovery, and switching documents.
+Run the production build and browser regression suite:
+
+```sh
+npm run build
+cd draw
+npm run test:chemistry
+npm run test:browser
+```
+
+The suite starts a temporary local server and headless Chrome. On macOS it uses
+Google Chrome from Applications; elsewhere set `CHROME_PATH` to the Chrome binary.
+It requires Node 20 or newer and permission to open local ports and launch Chrome.
+
+It covers homepage sign-in visibility on desktop and mobile, opening/dismissing
+the auth dialog, a 105-document library fixture (pagination, search, sorting,
+grid/list views, and About navigation), local recovery after a failed cloud load, switching documents
+while cloud creation or updates are pending, and deleting without re-saving.
+It also drives the production editor to draw benzene, rename, reload, and export
+a PNG and a vector SVG, and exercise structure cleanup. Chemistry unit tests
+check stereochemistry, isotope/radical exchange, layout, reflection, validation,
+MOL/SDF/RXN exchange, and abbreviation contraction. Persistence tests use a controlled backend; they do not modify real
+Supabase accounts or drawings. Screenshots are written to a temporary directory
+printed at the end of the run.
+
+Real Google OAuth, email delivery, and cross-device account sync still require
+an end-to-end check with a configured test account.
 
 ## Roadmap
 
@@ -216,6 +237,26 @@ parity (templates → stereochemistry → SMILES/Molfile I/O → chemistry check
 export quality → reaction mapping → query features → biomolecules → 3D).
 `plan.md` is the running log of what's been done and what's next.
 
-Biggest known gaps: rotate/flip a selection, structure clean-up / auto-layout,
-expanding an abbreviation group to its full structure on the canvas, and coupling
-charge to implicit hydrogen count.
+## Chemistry editing additions
+
+The editor now includes structure cleanup, selection rotation and reflection,
+reaction alignment and spacing, common-element shortcuts, plus signs, resonance
+arrows, and duplication of a selected structure as a product. Open **Tools** in the top bar for SMILES/MOL/SDF/RXN import and export, basic chemistry checks,
+saved fragments, abbreviation expansion/contraction, drawing styles, vector SVG,
+and browser print/save as PDF. Geometry changes participate in undo/redo.
+
+Chemical exchange preserves tested tetrahedral and double-bond stereochemistry,
+isotopes, and radicals. Abbreviation contraction verifies chemical identity before
+replacing a selected fragment. RXN exchange supports a single reaction arrow;
+imports containing agents are rejected explicitly. Layout and selection transforms
+have separate restrictions for Newman projections. Chemistry checks detect common
+valence problems and are not a comprehensive chemical validity guarantee.
+
+Browser recovery includes independent local drawings, up to 20 local checkpoints,
+and locally recoverable copies of cloud drawings deleted through the editor.
+These recovery records are device-local, not shared cloud version history or
+server-side trash. Storage failures are surfaced instead of reporting a successful
+save. Real-account OAuth and cross-device sync still need manual verification.
+
+Remaining advanced gaps include atom mapping, multistep reaction semantics,
+collaborative editing, cloud version history, folders, and access-controlled sharing.

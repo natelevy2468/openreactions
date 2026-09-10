@@ -58,6 +58,8 @@ export function useAuth() {
       if (cancelled) return;
       setSession(data?.session ?? null);
       setLoading(false);
+    }).catch(() => {
+      if (!cancelled) setLoading(false);
     });
 
     // Fires for sign-in, sign-out and token refresh — and in other tabs too, so

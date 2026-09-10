@@ -20,7 +20,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
     <>
         {/* Toolbar Title */}
         <div style={{
-          color: '#666',
+          color: colors.textSecondary,
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
@@ -104,7 +104,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
         
         {/* Reactions Section Title */}
         <div style={{
-          color: '#666',
+          color: colors.textSecondary,
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
@@ -129,7 +129,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'arrow' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -167,7 +167,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'equil' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -214,7 +214,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve2' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -247,7 +247,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve1' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -280,7 +280,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve0' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -313,7 +313,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve5' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -346,7 +346,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve4' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -379,7 +379,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'curve3' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -404,7 +404,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
         </div>
         {/* Stereochemistry Section Title */}
         <div style={{
-          color: '#666',
+          color: colors.textSecondary,
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
@@ -429,7 +429,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'wedge' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -466,7 +466,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'dash' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -512,7 +512,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'ambiguous' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -545,7 +545,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
 
         {/* Special Section Title */}
         <div style={{
-          color: '#666',
+          color: colors.textSecondary,
           fontWeight: 600,
           fontSize: 'max(11px, min(calc(min(280px, 25vw) * 0.052), 2vh))',
           letterSpacing: '0.04em',
@@ -577,7 +577,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               borderRadius: 'calc(min(280px, 25vw) * 0.019)',
               cursor: 'pointer',
               boxShadow: mode === 'triple' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: 0,
@@ -618,7 +618,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               justifyContent: 'center',
               cursor: 'pointer',
               boxShadow: mode === 'benzene' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
@@ -685,7 +685,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               justifyContent: 'center',
               cursor: 'pointer',
               boxShadow: mode === 'cyclohexane' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
@@ -734,7 +734,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               justifyContent: 'center',
               cursor: 'pointer',
               boxShadow: mode === 'cyclopentane' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
@@ -781,7 +781,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               justifyContent: 'center',
               cursor: 'pointer',
               boxShadow: mode === 'cyclobutane' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
@@ -827,7 +827,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               justifyContent: 'center',
               cursor: 'pointer',
               boxShadow: mode === 'cyclopropane' ? 
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
@@ -872,7 +872,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               justifyContent: 'center',
               cursor: 'pointer',
               boxShadow: mode === 'chair' ?
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',
@@ -921,7 +921,7 @@ export default function ToolPalette({ mode, setModeAndClearSelection, colors, is
               justifyContent: 'center',
               cursor: 'pointer',
               boxShadow: mode === 'newman' ?
-                '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
+                '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)' :
                 '0 2px 4px rgba(0,0,0,0.05)',
               outline: 'none',
               padding: '4px',

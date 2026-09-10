@@ -12,7 +12,7 @@
 import React from 'react';
 
 const ACTIVE_SHADOW =
-  '0 4px 12px rgba(54,98,227,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
+  '0 4px 12px rgba(118,80,197,0.3), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
 const RADIUS = 'calc(min(280px, 25vw) * 0.019)';
 
 export default function ToolButton({ active, onClick, title, colors, style, children }) {
@@ -21,6 +21,8 @@ export default function ToolButton({ active, onClick, title, colors, style, chil
       onClick={onClick}
       className="toolbar-button"
       title={title}
+      aria-label={title}
+      aria-pressed={active}
       style={{
         flex: 1,
         display: 'flex',
@@ -31,7 +33,6 @@ export default function ToolButton({ active, onClick, title, colors, style, chil
         borderRadius: RADIUS,
         cursor: 'pointer',
         boxShadow: active ? ACTIVE_SHADOW : '0 2px 4px rgba(0,0,0,0.05)',
-        outline: 'none',
         padding: 0,
         ...style,
       }}

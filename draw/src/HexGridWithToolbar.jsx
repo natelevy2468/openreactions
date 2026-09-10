@@ -2,6 +2,7 @@ import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import logoFinal4 from '/logoFinal4.png';
 import gearIcon from '/gear.png';
 import { formatAtomText } from './utils/TextUtils.jsx';
+import EditorPopover from './components/EditorPopover.jsx';
 import ToolPalette from './components/ToolPalette.jsx';
 import AboutPopup from './components/AboutPopup.jsx';
 import ExportPopup from './components/ExportPopup.jsx';
@@ -13,8 +14,8 @@ import DrawingsPanel from './components/DrawingsPanel.jsx';
 import DocumentTitle from './components/DocumentTitle.jsx';
 import { useAuth } from './hooks/useAuth.js';
 import { useDocumentSync } from './hooks/useDocumentSync.js';
-import { listDrawings, updateDrawing, deleteDrawing, duplicateDrawing } from './lib/documents.js';
-import { DOC_VERSION } from './lib/docModel.js';
+import { listDrawings, fetchDrawing, updateDrawing, deleteDrawing, duplicateDrawing } from './lib/documents.js';
+import { DOC_VERSION, contentFingerprint } from './lib/docModel.js';
 import { detectAllRingsEnhanced } from './rendering/RingDetectionUtils.js';
 import { renderDoubleBondByCase } from './rendering/DoubleBondRenderer.js';
 import {
@@ -62,6 +63,15 @@ import {
 import { buildMoleculeGraph } from './chemistry/moleculeGraph.js';
 import { graphToSmiles, graphToFormula } from './chemistry/exportStructure.js';
 import { canonicalAbbreviation } from './chemistry/abbreviations.js';
+import { listLocalDocuments, archiveDeletedDocument, restoreDeletedDocument } from './lib/localLibrary.js';
+import { contractAbbreviation } from './chemistry/contractAbbreviation.js';
+import { abbreviationNames } from './chemistry/abbreviations.js';
+import { graphToDrawing } from './chemistry/graphToDrawing.js';
+import { validateStructure } from './chemistry/validateStructure.js';
+import { importChemicalFile, exportChemicalFile } from './chemistry/fileFormats.js';
+import { SvgContext } from './rendering/SvgContext.js';
+import { transformSelection, alignReaction } from './utils/arrangeDocument.js';
+import { tidyStructure } from './chemistry/tidyStructure.js';
 import { smilesToGraph } from './chemistry/importStructure.js';
 
 const RING_PRESET_MODES = ['benzene', 'cyclohexane', 'cyclopentane', 'cyclobutane', 'cyclopropane', 'chair', 'newman'];
@@ -73,7 +83,21 @@ const HexGridWithToolbar = () => {
     const newmanIdRef = useRef(1);
     
     // State variables needed for visual appearance
-    const [isDarkMode, setIsDarkMode] = useState(false);
+    // Dark mode survives reloads — flipping the switch shouldn't be a per-visit chore.
+    const [isDarkMode, setIsDarkMode] = useState(() => {
+      try {
+        return window.localStorage.getItem('openreactions.darkMode') === 'true';
+      } catch {
+        return false;
+      }
+    });
+    useEffect(() => {
+      try {
+        window.localStorage.setItem('openreactions.darkMode', String(isDarkMode));
+      } catch {
+        /* private browsing — theme just resets next visit */
+      }
+    }, [isDarkMode]);
     const [isExporting, setIsExporting] = useState(false);
     const [showAboutPopup, setShowAboutPopup] = useState(false);
     const [showSettingsDropdown, setShowSettingsDropdown] = useState(false);
@@ -229,6 +253,7 @@ const HexGridWithToolbar = () => {
     
     // Additional UI state
     const [showExportPopup, setShowExportPopup] = useState(false);
+    const [drawingStyle, setDrawingStyle] = useState({ lineScale: 1, fontScale: 1 });
     const [exportImageUrl, setExportImageUrl] = useState(null);
     const [exportMetadata, setExportMetadata] = useState(null);
 
@@ -264,6 +289,14 @@ const HexGridWithToolbar = () => {
     // OpenChemLib only while the panel is open, and recomputed when the structure
     // changes, so it never costs anything when hidden.
     const [showInfoPanel, setShowInfoPanel] = useState(false);
+    const [chemistryIssues, setChemistryIssues] = useState(null);
+    const [checkChemistry, setCheckChemistry] = useState(false);
+    useEffect(() => {
+      if (!checkChemistry) return;
+      let cancelled = false;
+      const timer = setTimeout(() => validateStructure(buildMoleculeGraph({ vertices, segments, vertexAtoms })).then(issues => { if (!cancelled) setChemistryIssues(issues); }).catch(error => { if (!cancelled) setChemistryIssues([{ message: 'Could not check chemistry: ' + error.message }]); }), 200);
+      return () => { cancelled = true; clearTimeout(timer); };
+    }, [checkChemistry, vertices, segments, vertexAtoms]);
     const [moleculeInfo, setMoleculeInfo] = useState(null); // result of graphToFormula or null
     React.useEffect(() => {
       if (!showInfoPanel) return;
@@ -327,9 +360,10 @@ const HexGridWithToolbar = () => {
     // the freshest values available without recreating callbacks on every edit.
     const MAX_HISTORY = 100;
     const stateRef = useRef({});
-    stateRef.current = { vertices, segments, vertexAtoms, arrows, newmanInstances, detectedRings, vertexBondStates };
+    stateRef.current = { vertices, segments, vertexAtoms, arrows, newmanInstances, detectedRings, vertexBondStates, drawingStyle };
     const snapshotDocument = () => JSON.parse(JSON.stringify(stateRef.current));
     const applyDocument = (snap) => {
+      setDrawingStyle(snap.drawingStyle || { lineScale: 1, fontScale: 1 });
       setVertices(JSON.parse(JSON.stringify(snap.vertices || [])));
       setSegments(JSON.parse(JSON.stringify(snap.segments || [])));
       setVertexAtoms(JSON.parse(JSON.stringify(snap.vertexAtoms || {})));
@@ -847,8 +881,8 @@ const HexGridWithToolbar = () => {
   // centered in the current view. Carbons stay implicit (no vertexAtoms entry);
   // heteroatoms and charged atoms get an atom label. Defined here (not with the
   // other SMILES state near the top) so its geometry/history dependencies exist.
-  const handleImportSmiles = useCallback(async () => {
-    const { atoms, bonds, warnings } = await smilesToGraph(smilesInput, { bondLength: hexRadius });
+  const handleImportSmiles = useCallback(async (imported = null) => {
+    const { atoms, bonds, arrows: importedArrows = [], warnings } = imported?.atoms ? imported : await smilesToGraph(smilesInput, { bondLength: hexRadius });
     if (atoms.length === 0) {
       setSmilesImportMessage({ text: warnings[0] || 'Could not import that SMILES.', isError: true });
       return;
@@ -857,8 +891,8 @@ const HexGridWithToolbar = () => {
     // Place the fragment at the center of the visible canvas (world coords).
     const canvas = canvasRef.current;
     const rect = canvas ? canvas.getBoundingClientRect() : { width: 800, height: 600 };
-    const worldCenterX = rect.width / 2 - offset.x;
-    const worldCenterY = rect.height / 2 - offset.y;
+    const worldCenterX = (window.innerWidth - rect.left) / (2 * scale) - offset.x;
+    const worldCenterY = (window.innerHeight - rect.top) / (2 * scale) - offset.y;
 
     const newVertices = atoms.map((a) => ({
       x: +(worldCenterX + a.x).toFixed(2),
@@ -868,9 +902,9 @@ const HexGridWithToolbar = () => {
 
     const newVertexAtoms = {};
     atoms.forEach((a, i) => {
-      if (a.element !== 'C' || a.charge !== 0) {
+      if (a.element !== 'C' || a.charge !== 0 || a.isotope || a.radical) {
         const key = `${newVertices[i].x.toFixed(2)},${newVertices[i].y.toFixed(2)}`;
-        newVertexAtoms[key] = { symbol: a.element, charge: a.charge || 0, implicitH: 0, lonePairs: 0 };
+        newVertexAtoms[key] = { symbol: a.element, charge: a.charge || 0, isotope: a.isotope || 0, radical: a.radical || 0, lonePairs: 0 };
       }
     });
 
@@ -880,7 +914,7 @@ const HexGridWithToolbar = () => {
       return {
         x1: A.x, y1: A.y, x2: B.x, y2: B.y,
         bondOrder: b.order,
-        bondType: null,
+        bondType: b.bondType || null,
         bondDirection: 1,
         direction: calculateBondDirection(A.x, A.y, B.x, B.y),
         flipSmallerLine: false,
@@ -889,6 +923,7 @@ const HexGridWithToolbar = () => {
 
     saveToHistory();
     setVertices((prev) => [...prev, ...newVertices]);
+    if (importedArrows.length) setArrows(prev => [...prev, ...importedArrows.map(a => ({ ...a, x: a.x + worldCenterX, y: a.y + worldCenterY }))]);
     setSegments((prev) => [...prev, ...newSegments]);
     setVertexAtoms((prev) => ({ ...prev, ...newVertexAtoms }));
     setTimeout(() => updateRingDetection(), 0);
@@ -898,7 +933,7 @@ const HexGridWithToolbar = () => {
       text: `Added ${atoms.length} atom${atoms.length === 1 ? '' : 's'} to the canvas.`,
       isError: false,
     });
-  }, [smilesInput, hexRadius, offset, saveToHistory, updateRingDetection]);
+  }, [smilesInput, hexRadius, offset, scale, saveToHistory, updateRingDetection]);
 
   // Double-bond rendering (findBondRing / renderDoubleBondByCase) now lives in
   // ./rendering/DoubleBondRenderer.js.
@@ -1359,6 +1394,17 @@ const HexGridWithToolbar = () => {
 
   // Canvas click handler for all modes
   const handleCanvasClick = useCallback((event) => {
+    if (mode.startsWith('atom:') || mode === 'reaction-plus') {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const x = (event.clientX - rect.left) / scale, y = (event.clientY - rect.top) / scale;
+      const point = mode === 'reaction-plus' ? null : findNearestVertex(x, y);
+      const vertex = point || { x: +(x - offset.x).toFixed(2), y: +(y - offset.y).toFixed(2) };
+      const symbol = mode === 'reaction-plus' ? '+' : mode.slice(5);
+      saveToHistory();
+      if (!point) setVertices(prev => [...prev, vertex]);
+      setVertexAtoms(prev => ({ ...prev, [`${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`]: { ...(prev[`${vertex.x.toFixed(2)},${vertex.y.toFixed(2)}`] || {}), symbol } }));
+      return;
+    }
     // Handle text mode clicks
     if (mode === 'text') {
       const canvas = canvasRef.current;
@@ -1686,7 +1732,7 @@ const HexGridWithToolbar = () => {
     }
 
     // Handle arrow mode clicks
-    if (mode === 'arrow') {
+    if (mode === 'arrow' || mode === 'resonance') {
       const canvas = canvasRef.current;
       if (!canvas) return;
       
@@ -1703,7 +1749,7 @@ const HexGridWithToolbar = () => {
       const newArrow = {
         x: worldX,
         y: worldY,
-        type: 'forward', // Straight forward arrow pointing right
+        type: 'forward', doubleHead: mode === 'resonance', // Straight or resonance arrow
         length: arrowLength,
         angle: 0 // Points to the right (0 degrees)
       };
@@ -3311,11 +3357,19 @@ const HexGridWithToolbar = () => {
   }, [vertexAtoms, isCreatingBond, vertices, revealNewmanRotateControlForVertex]);
 
   // Canvas drawing function
-  const drawCanvas = useCallback(() => {
+  const drawCanvas = useCallback((exportContext = null) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
+    const rawContext = exportContext || canvas.getContext('2d');
+    const ctx = rawContext && new Proxy(rawContext, {
+      get(target, name) { const value = target[name]; return typeof value === 'function' ? value.bind(target) : value; },
+      set(target, name, value) {
+        if (name === 'lineWidth') value *= drawingStyle.lineScale;
+        if (name === 'font') value = value.replace(/([\d.]+)px/g, (_, size) => `${Number(size) * drawingStyle.fontScale}px`);
+        target[name] = value; return true;
+      },
+    });
     if (!ctx) return;
 
     // Set canvas size
@@ -3608,6 +3662,20 @@ const HexGridWithToolbar = () => {
     // Draw atom text labels
     renderAllAtomText(ctx, vertices, displayVertexAtoms, offset, colors, isDarkMode, newmanInstances);
     
+    // Isotope masses and radicals imported from chemical formats stay visible.
+    Object.entries(vertexAtoms).forEach(([key, atom]) => {
+      if (!atom.isotope && !atom.radical) return;
+      const [x, y] = key.split(',').map(Number);
+      ctx.save(); ctx.fillStyle = colors.atoms; ctx.font = '11px Arial'; ctx.textAlign = 'right'; ctx.textBaseline = 'bottom';
+      if (atom.isotope) ctx.fillText(String(atom.isotope), x + offset.x - 7, y + offset.y - 7);
+      if (atom.radical) {
+        const dots = atom.radical === 32 ? 1 : 2;
+        for (let dot = 0; dot < dots; dot++) {
+          ctx.beginPath(); ctx.arc(x + offset.x + 12 + dot * 5, y + offset.y - 10, 1.5, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.restore();
+    });
     // Draw lone pairs and charges
     renderAllLonePairsAndCharges(ctx, vertices, segments, vertexAtoms, offset, colors);
     
@@ -4448,7 +4516,7 @@ const HexGridWithToolbar = () => {
     }
 
     ctx.restore(); // undo the zoom transform
-  }, [colors, segments, vertices, vertexAtoms, offset, scale, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint, getAvailableBondAngles, shouldDisableAngleSnapping, hexRadius, vertexBondStates, selectedMolecules, selectedArrows, hoveredMolecule, hoveredArrow, isSelecting, selectionStart, selectionEnd, isDraggingSelection, selectedVertices, isPastePreviewMode, clipboard, pastePreviewPosition, draggingArrow, draggingArrowEnd, newmanInstances]);
+  }, [drawingStyle, colors, segments, vertices, vertexAtoms, offset, scale, isCreatingBond, bondStartPoint, bondPreviewEnd, hoveredVertex, hoveredBondIndex, bondSuggestions, hoveredSuggestionIndex, isDarkMode, arrows, mode, currentMousePosition, curvedArrowStartPoint, getAvailableBondAngles, shouldDisableAngleSnapping, hexRadius, vertexBondStates, selectedMolecules, selectedArrows, hoveredMolecule, hoveredArrow, isSelecting, selectionStart, selectionEnd, isDraggingSelection, selectedVertices, isPastePreviewMode, clipboard, pastePreviewPosition, draggingArrow, draggingArrowEnd, newmanInstances]);
 
   /** PNG of the live canvas, cropped to drawn content. Redraws without any interactive overlays. */
   const renderCleanCanvas = useCallback(
@@ -4505,8 +4573,9 @@ const HexGridWithToolbar = () => {
       vertexBondStates,
       offset,
       scale,
+      drawingStyle,
     }),
-    [vertices, segments, vertexAtoms, arrows, newmanInstances, vertexBondStates, offset, scale]
+    [vertices, segments, vertexAtoms, arrows, newmanInstances, vertexBondStates, offset, scale, drawingStyle]
   );
 
   /**
@@ -4633,7 +4702,8 @@ const HexGridWithToolbar = () => {
         setDrawings((prev) => prev.map((d) => (d.id === id ? { ...d, title: nextTitle } : d)));
         return;
       }
-      await updateDrawing(id, { title: nextTitle });
+      const { error } = await updateDrawing(id, { title: nextTitle });
+      if (error) { setDrawingsError(error); return; }
       refreshDrawings();
     },
     [docSync, refreshDrawings]
@@ -4644,8 +4714,9 @@ const HexGridWithToolbar = () => {
       if (!auth.user) return;
       // Flush first: duplicating re-reads the row from the server, so unsaved
       // edits to the open drawing would otherwise be missing from the copy.
-      if (id === docSync.docId) docSync.saveNow();
-      await duplicateDrawing({ id, userId: auth.user.id });
+      if (id === docSync.docId) await docSync.saveNow();
+      const { error } = await duplicateDrawing({ id, userId: auth.user.id });
+      if (error) { setDrawingsError(error); return; }
       refreshDrawings();
     },
     [auth.user, docSync, refreshDrawings]
@@ -4653,7 +4724,13 @@ const HexGridWithToolbar = () => {
 
   const handleDeleteDrawing = useCallback(
     async (id) => {
-      await deleteDrawing(id);
+      if (id === docSync.docId) await docSync.saveNow();
+      const { data: existing, error: fetchError } = await fetchDrawing(id);
+      if (fetchError || !existing) { setDrawingsError(fetchError || 'Could not load the drawing before deletion.'); return; }
+      try { archiveDeletedDocument(id, { title: existing.title, doc: existing.data, thumbnail: existing.thumbnail }); }
+      catch { setDrawingsError('Could not create a recovery copy. Free browser storage before deleting this drawing.'); return; }
+      const { error } = await deleteDrawing(id);
+      if (error) { setDrawingsError(error); return; }
       setDrawings((prev) => prev.filter((d) => d.id !== id));
       // Deleting what's on screen leaves a fresh untitled canvas rather than
       // silently re-creating the row on the next keystroke.
@@ -4744,6 +4821,120 @@ const HexGridWithToolbar = () => {
     (latest, instance) => (!latest || instance.lastTouchedAt > latest.lastTouchedAt ? instance : latest),
     null
   );
+  const [fragmentName, setFragmentName] = useState('');
+  const [recoveryVersions, setRecoveryVersions] = useState([]);
+  const [localDocuments, setLocalDocuments] = useState([]);
+  const [deletedDocuments, setDeletedDocuments] = useState([]);
+  const [abbreviationChoice, setAbbreviationChoice] = useState('Ph');
+  const [fragments, setFragments] = useState(() => { try { const saved = JSON.parse(localStorage.getItem('openreactions.fragments') || '[]'); return Array.isArray(saved) ? saved.filter(f => typeof f.name === 'string' && typeof f.smiles === 'string') : []; } catch { return []; } });
+  const selectionGraph = () => {
+    if (!selectedVertices.size) throw new Error('Select a structure first.');
+    const key = (x, y) => `${x.toFixed(2)},${y.toFixed(2)}`;
+    return buildMoleculeGraph({ vertices: vertices.filter(v => selectedVertices.has(key(v.x, v.y))), segments: segments.filter(b => selectedVertices.has(key(b.x1, b.y1)) && selectedVertices.has(key(b.x2, b.y2))), vertexAtoms });
+  };
+  const saveFragment = async () => {
+    try {
+      if (!fragmentName.trim()) throw new Error('Enter a fragment name.');
+      const { smiles, warnings } = await graphToSmiles(selectionGraph());
+      if (warnings.length) throw new Error(warnings.join(' '));
+      const next = [...fragments.filter(f => f.name !== fragmentName.trim()), { name: fragmentName.trim(), smiles }];
+      localStorage.setItem('openreactions.fragments', JSON.stringify(next)); setFragments(next); setFragmentName('');
+      setArrangeMessage('Fragment saved in this browser.');
+    } catch (error) { setArrangeMessage(error.message); }
+  };
+  const expandSelection = async () => {
+    const before = snapshotDocument();
+    try {
+      const graph = selectionGraph();
+      const { smiles, warnings } = await graphToSmiles(graph);
+      if (warnings.length) throw new Error(warnings.join(' '));
+      const expanded = await smilesToGraph(smiles);
+      if (contentFingerprint(stateRef.current) !== contentFingerprint(before)) throw new Error('Drawing changed. Select the structure and try again.');
+      const center = graph.atoms.reduce((c, a) => ({ x: c.x + a.x / graph.atoms.length, y: c.y + a.y / graph.atoms.length }), { x: 0, y: 0 });
+      const added = graphToDrawing(expanded, center);
+      const key = (x, y) => `${x.toFixed(2)},${y.toFixed(2)}`;
+      const crossing = before.segments.some(b => selectedVertices.has(key(b.x1, b.y1)) !== selectedVertices.has(key(b.x2, b.y2)));
+      if (crossing) throw new Error('Select the whole molecule to expand its abbreviations.');
+      saveToHistory();
+      applyDocument({ ...before, vertices: [...before.vertices.filter(v => !selectedVertices.has(key(v.x, v.y))), ...added.vertices], segments: [...before.segments.filter(b => !selectedVertices.has(key(b.x1, b.y1))), ...added.segments], vertexAtoms: { ...Object.fromEntries(Object.entries(before.vertexAtoms).filter(([k]) => !selectedVertices.has(k))), ...added.vertexAtoms }, vertexBondStates: {}, detectedRings: [] });
+      setSelectedVertices(new Set()); setSelectedMolecules([]); setArrangeMessage('Abbreviations expanded.');
+    } catch (error) { setArrangeMessage(error.message); }
+  };
+  const duplicateAsProduct = () => {
+    try {
+      const graph = selectionGraph();
+      const key = (x, y) => `${x.toFixed(2)},${y.toFixed(2)}`;
+      const min = Math.min(...graph.atoms.map(a => a.x)), max = Math.max(...graph.atoms.map(a => a.x));
+      const centerY = graph.atoms.reduce((n, a) => n + a.y / graph.atoms.length, 0);
+      const shift = max - min + 220;
+      const copied = graphToDrawing({ ...graph, atoms: graph.atoms.map(a => ({ ...a, x: a.x + shift })) });
+      saveToHistory();
+      setVertices(prev => [...prev, ...copied.vertices]); setSegments(prev => [...prev, ...copied.segments]);
+      setVertexAtoms(prev => ({ ...prev, ...copied.vertexAtoms }));
+      setArrows(prev => [...prev, { type: 'forward', x: max + 110, y: centerY, length: 100, angle: 0 }]);
+      setSelectedVertices(new Set(copied.vertices.map(v => key(v.x, v.y)))); setSelectedMolecules([{ vertices: copied.vertices, bonds: copied.segments }]);
+      setArrangeMessage('Product copy added. Edit it to complete the reaction.');
+    } catch (error) { setArrangeMessage(error.message); }
+  };
+  const [arrangeBusy, setArrangeBusy] = useState(false);
+  const [arrangeMessage, setArrangeMessage] = useState('');
+  const downloadText = (text, extension, mime) => {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a'); link.href = url;
+    link.download = `${docSync.title.replace(/[\\/:*?"<>|]/g, '_')}.${extension}`;
+    link.click(); setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+  const handleSvgExport = (format = 'svg') => {
+    const canvas = canvasRef.current;
+    const bounds = computeCanvasContentBounds(vertices, segments, arrows, offset, canvas.width / scale, canvas.height / scale, 40);
+    if (!bounds) return;
+    try {
+      const context = new SvgContext(canvas.getContext('2d'));
+      isExportingRef.current = true;
+      drawCanvas(context);
+      const svg = context.toSvg({ x: bounds.x * scale, y: bounds.y * scale, width: bounds.width * scale, height: bounds.height * scale });
+      if (format === 'pdf') {
+        const frame = document.createElement('iframe');
+        frame.style.cssText = 'position:fixed;width:0;height:0;border:0';
+        document.body.appendChild(frame);
+        frame.contentDocument.open();
+        frame.contentDocument.write('<!doctype html><title>Reaction figure</title><style>@page{margin:15mm}body{margin:0}svg{max-width:100%;height:auto}</style>' + svg);
+        frame.contentDocument.close();
+        setTimeout(() => { frame.contentWindow.focus(); frame.contentWindow.print(); setTimeout(() => frame.remove(), 60000); }, 100);
+      } else downloadText(svg, 'svg', 'image/svg+xml');
+    } catch (error) { setArrangeMessage('Could not export SVG: ' + error.message); }
+    finally { isExportingRef.current = false; drawCanvas(); }
+  };
+  const handleArrange = (action) => {
+    try {
+      const next = action === 'align' || action === 'space'
+        ? alignReaction(snapshotDocument(), action)
+        : transformSelection(snapshotDocument(), selectedVertices, action);
+      const selectedIndices = vertices.map((v, i) => selectedVertices.has(`${v.x.toFixed(2)},${v.y.toFixed(2)}`) ? i : -1).filter(i => i >= 0);
+      saveToHistory(); applyDocument(next);
+      const selectedKeys = new Set(selectedIndices.map(i => `${next.vertices[i].x.toFixed(2)},${next.vertices[i].y.toFixed(2)}`));
+      setSelectedVertices(selectedKeys);
+      setSelectedMolecules(selectedKeys.size ? [{ vertices: selectedIndices.map(i => next.vertices[i]), bonds: next.segments.filter(b => selectedKeys.has(`${b.x1.toFixed(2)},${b.y1.toFixed(2)}`) && selectedKeys.has(`${b.x2.toFixed(2)},${b.y2.toFixed(2)}`)) }] : []);
+      setArrangeMessage('Layout updated. Undo restores the previous layout.');
+    } catch (error) { setArrangeMessage(error.message); }
+  };
+  const handleTidy = async () => {
+    const before = snapshotDocument();
+    setArrangeBusy(true);
+    try {
+      const next = await tidyStructure(before, selectedVertices, hexRadius);
+      if (contentFingerprint(stateRef.current) !== contentFingerprint(before)) {
+        setArrangeMessage('The drawing changed while tidying. Try again.');
+        return;
+      }
+      saveToHistory();
+      applyDocument(next);
+      setSelectedVertices(new Set()); setSelectedMolecules([]);
+      setArrangeMessage('Structure tidied. Undo restores the previous layout.');
+    } catch (error) { setArrangeMessage('Could not tidy this structure: ' + error.message); }
+    finally { setArrangeBusy(false); }
+  };
   const canvasRect = canvasRef.current?.getBoundingClientRect();
   const canvasScreenLeft = canvasRect?.left || 0;
   const canvasScreenTop = canvasRect?.top || 0;
@@ -4765,14 +4956,14 @@ const HexGridWithToolbar = () => {
         left: 0,
         right: 0,
         height: '50px',
-        background: '#c4c4c4',
-        borderBottom: '1px solid rgb(191, 191, 191)',
+        background: colors.surface,
+        borderBottom: `1px solid ${colors.border}`,
         display: 'flex',
         alignItems: 'center',
         paddingLeft: '20px',
         paddingRight: '20px',
         zIndex: 10,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
+        boxShadow: '0 1px 4px rgba(36,52,75,0.04)',
         justifyContent: 'space-between'
       }}>
         {/* Left side buttons */}
@@ -4782,13 +4973,15 @@ const HexGridWithToolbar = () => {
           marginTop: '3px'
         }}>
           <a
-            href="https://openreactions.com/"
+            href="/"
             style={{
               backgroundColor: 'transparent',
-              color: '#333',
+              color: colors.text,
               textDecoration: 'none',
               border: 'none',
-              padding: '10px 12px',
+              height: '40px',
+              boxSizing: 'border-box',
+              padding: '0 12px',
               marginRight: '2px',
               marginLeft: '-16px',
               borderRadius: '6px',
@@ -4802,7 +4995,7 @@ const HexGridWithToolbar = () => {
               transition: 'all 0.15s ease-out'
             }}
             onMouseEnter={(e) => {
-              e.target.style.backgroundColor = 'rgba(54, 98, 227, 0.2)';
+              e.target.style.backgroundColor = 'rgba(118, 80, 197, 0.2)';
               e.target.style.transform = 'scale(1.02)';
             }}
             onMouseLeave={(e) => {
@@ -4828,7 +5021,7 @@ const HexGridWithToolbar = () => {
           </a>
           <div
             style={{
-              backgroundColor: 'rgba(54, 98, 227, 0.7)',
+              backgroundColor: 'rgba(118, 80, 197, 0.7)',
               color: '#fff',
               border: 'none',
               padding: '10px 12px',
@@ -4860,6 +5053,8 @@ const HexGridWithToolbar = () => {
             onCommit={docSync.saveNow}
             status={docSync.status}
             errorText={docSync.error}
+            colors={colors}
+            isDarkMode={isDarkMode}
           />
         </div>
 
@@ -4870,13 +5065,68 @@ const HexGridWithToolbar = () => {
           gap: '8px',
           marginTop: '3px'
         }}>
+          <EditorPopover label="Tools" colors={colors}>
+        <details style={{ fontSize: '15px', color: colors.text }} onToggle={e => { if (e.currentTarget.open) { setRecoveryVersions(docSync.getVersions()); setLocalDocuments(listLocalDocuments()); setDeletedDocuments(listLocalDocuments(true)); } }}><summary style={{ cursor: 'pointer', padding: '6px 0' }}>Browser recovery & drawings</summary>
+          <p>Recent checkpoints on this device</p>
+          {recoveryVersions.length === 0 && <p>No checkpoints yet.</p>}
+          {recoveryVersions.map((version, i) => <button key={version.updatedAt + i} style={{ display: 'block', fontSize: '14px', margin: '4px 0' }} onClick={() => { saveToHistory(); applyDocument(version.doc); docSync.setTitle(version.title); setArrangeMessage('Checkpoint restored. Undo returns to your previous drawing.'); }}>{new Date(version.updatedAt).toLocaleString()} · {version.title}</button>)}
+          <p>Browser trash · restores as a local copy</p>
+          {deletedDocuments.map(entry => <button key={entry.id} onClick={() => { try { restoreDeletedDocument(entry.id); setDeletedDocuments(listLocalDocuments(true)); setLocalDocuments(listLocalDocuments()); setArrangeMessage('Drawing restored to this browser.'); } catch (error) { setArrangeMessage(error.message); } }}>Restore {entry.title}</button>)}
+          <p>Drawings stored in this browser</p>
+          {localDocuments.map(entry => <a key={entry.id} href={'?local=' + encodeURIComponent(entry.id)} onClick={() => docSync.saveNow()} style={{ display: 'block', color: colors.buttonActive, margin: '4px 0' }}>{entry.title}</a>)}
+        </details>
+        <details style={{ fontSize: '15px', color: colors.text }}><summary style={{ cursor: 'pointer', padding: '6px 0' }}>Fragments & abbreviations</summary>
+          <input aria-label="Fragment name" placeholder="Name selected fragment" value={fragmentName} onChange={e => setFragmentName(e.target.value)} style={{ width: '100%', boxSizing: 'border-box' }} />
+          <button onClick={saveFragment}>Save fragment</button><button onClick={expandSelection}>Expand abbreviations</button>
+          <div style={{ marginTop: '6px' }}><select aria-label="Abbreviation" value={abbreviationChoice} onChange={e => setAbbreviationChoice(e.target.value)}>{abbreviationNames().map(name => <option key={name}>{name}</option>)}</select><button onClick={async () => {
+            const before = snapshotDocument();
+            try { const next = await contractAbbreviation(before, selectedVertices, abbreviationChoice); if (contentFingerprint(stateRef.current) !== contentFingerprint(before)) throw new Error('Drawing changed. Try again.'); saveToHistory(); applyDocument(next); setSelectedVertices(new Set()); setSelectedMolecules([]); setArrangeMessage('Fragment contracted.'); }
+            catch (error) { setArrangeMessage(error.message); }
+          }}>Contract selection</button></div>
+          {fragments.map(fragment => <div key={fragment.name} style={{ display: 'flex', gap: '4px', marginTop: '6px' }}><button onClick={async () => { try { await handleImportSmiles(await smilesToGraph(fragment.smiles)); } catch (error) { setArrangeMessage(error.message); } }}>{fragment.name}</button><button aria-label={'Remove fragment ' + fragment.name} onClick={() => { try { const next = fragments.filter(f => f.name !== fragment.name); localStorage.setItem('openreactions.fragments', JSON.stringify(next)); setFragments(next); } catch (error) { setArrangeMessage(error.message); } }}>×</button></div>)}
+        </details>
+        <button className="toolbar-button" disabled={arrangeBusy || vertices.length === 0} onClick={handleTidy} style={{ padding: '8px', border: `1px solid ${colors.border}`, borderRadius: '7px', background: colors.button, color: colors.text, cursor: 'pointer' }}>{arrangeBusy ? 'Tidying…' : 'Tidy structure'}</button>
+        <details style={{ fontSize: '15px', color: colors.text }}>
+          <summary style={{ cursor: 'pointer', padding: '6px 0' }}>Import / export chemistry</summary>
+          <label style={{ display: 'block', padding: '8px 0' }}>Open MOL, SDF, RXN or SMILES
+            <input type="file" accept=".mol,.sdf,.rxn,.smi,.smiles,.txt" style={{ width: '100%', fontSize: '14px' }} onChange={async e => {
+              const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
+              try { await handleImportSmiles(await importChemicalFile(await file.text(), file.name)); setArrangeMessage('Imported ' + file.name); }
+              catch (error) { setArrangeMessage('Could not import: ' + error.message); }
+            }} />
+          </label>
+          <textarea aria-label="Import SMILES" placeholder="Paste SMILES" value={smilesInput} onChange={e => setSmilesInput(e.target.value)} style={{ width: '100%', boxSizing: 'border-box', fontSize: '15px' }} />
+          <button onClick={() => handleImportSmiles()} disabled={!smilesInput.trim()}>Add structure</button>
+          {smilesImportMessage && <p role="status">{smilesImportMessage.text}</p>}
+          <div style={{ display: 'flex', gap: '4px', margin: '8px 0' }}>{['mol', 'sdf', 'rxn'].map(format => <button key={format} onClick={async () => {
+            try { downloadText(await exportChemicalFile(snapshotDocument(), format), format, 'chemical/x-mdl-' + format); }
+            catch (error) { setArrangeMessage(error.message); }
+          }}>{format.toUpperCase()}</button>)}</div>
+        </details>
+        <button onClick={() => { setCheckChemistry(v => !v); setChemistryIssues(null); }} aria-pressed={checkChemistry} style={{ padding: '7px', border: `1px solid ${colors.border}`, borderRadius: '6px', color: colors.text, background: colors.button }}>{checkChemistry ? 'Hide chemistry check' : 'Check chemistry'}</button>
+        {checkChemistry && <div role="status" style={{ fontSize: '14px', color: colors.textSecondary }}>{chemistryIssues === null ? 'Checking…' : chemistryIssues.length ? chemistryIssues.map((issue, i) => <p key={i}>{issue.message}</p>) : 'No issues found by the basic structure check.'}</div>}
+        <details style={{ fontSize: '15px', color: colors.text }}><summary style={{ cursor: 'pointer', padding: '6px 0' }}>Drawing style</summary>
+          <label>Bond weight <select value={drawingStyle.lineScale} onChange={e => { saveToHistory(); setDrawingStyle(v => ({ ...v, lineScale: Number(e.target.value) })); }}><option value="0.8">Fine</option><option value="1">Standard</option><option value="1.3">Bold</option></select></label>
+          <label style={{ display: 'block', marginTop: '6px' }}>Label size <select value={drawingStyle.fontScale} onChange={e => { saveToHistory(); setDrawingStyle(v => ({ ...v, fontScale: Number(e.target.value) })); }}><option value="0.85">Small</option><option value="1">Standard</option><option value="1.2">Large</option></select></label>
+        </details>
+        <button onClick={() => handleSvgExport('pdf')} disabled={!vertices.length && !arrows.length} style={{ padding: '7px', border: `1px solid ${colors.border}`, borderRadius: '6px', color: colors.text, background: colors.button }}>Print / save PDF</button>
+        <button onClick={handleSvgExport} disabled={!vertices.length && !arrows.length} style={{ padding: '7px', border: `1px solid ${colors.border}`, borderRadius: '6px', color: colors.text, background: colors.button }}>Export SVG</button>
+        <details style={{ fontSize: '15px', color: colors.text }}>
+          <summary style={{ cursor: 'pointer', padding: '6px 0' }}>Arrange</summary>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px', padding: '6px 0' }}>
+            {[['rotate-left', 'Rotate −15°'], ['rotate-right', 'Rotate +15°'], ['flip-horizontal', 'Flip horizontally'], ['flip-vertical', 'Flip vertically'], ['align', 'Align reaction'], ['space', 'Space reaction']].map(([action, label]) => <button key={action} onClick={() => handleArrange(action)} style={{ fontSize: '14px', padding: '6px', border: `1px solid ${colors.border}`, borderRadius: '5px', background: colors.button, color: colors.text, cursor: 'pointer' }}>{label}</button>)}
+          </div>
+        </details>
+
+{arrangeMessage && <p role="status">{arrangeMessage}</p>}
+          </EditorPopover>
           <div style={{ position: 'relative', display: 'inline-block' }} data-drawings-dropdown>
             <button
               onClick={() => setShowDrawingsPanel((v) => !v)}
               title="Your saved drawings"
               style={{
-                backgroundColor: showDrawingsPanel ? 'rgba(54, 98, 227, 0.2)' : 'transparent',
-                color: '#333',
+                backgroundColor: showDrawingsPanel ? 'rgba(118, 80, 197, 0.2)' : 'transparent',
+                color: colors.text,
                 border: 'none',
                 padding: '10px 12px',
                 borderRadius: '6px',
@@ -4888,10 +5138,10 @@ const HexGridWithToolbar = () => {
                 transition: 'all 0.15s ease-out',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(54, 98, 227, 0.2)';
+                e.currentTarget.style.backgroundColor = 'rgba(118, 80, 197, 0.2)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = showDrawingsPanel ? 'rgba(54, 98, 227, 0.2)' : 'transparent';
+                e.currentTarget.style.backgroundColor = showDrawingsPanel ? 'rgba(118, 80, 197, 0.2)' : 'transparent';
               }}
             >
               My drawings
@@ -4917,8 +5167,8 @@ const HexGridWithToolbar = () => {
               onClick={() => setShowInfoPanel((v) => !v)}
               title="Molecular weight & formula for the current structure"
               style={{
-                backgroundColor: showInfoPanel ? 'rgba(54, 98, 227, 0.2)' : 'transparent',
-                color: '#333',
+                backgroundColor: showInfoPanel ? 'rgba(118, 80, 197, 0.2)' : 'transparent',
+                color: colors.text,
                 textDecoration: 'none',
                 border: 'none',
                 padding: '10px 12px',
@@ -4930,10 +5180,10 @@ const HexGridWithToolbar = () => {
                 transition: 'all 0.15s ease-out',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.backgroundColor = 'rgba(54, 98, 227, 0.2)';
+                e.currentTarget.style.backgroundColor = 'rgba(118, 80, 197, 0.2)';
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.backgroundColor = showInfoPanel ? 'rgba(54, 98, 227, 0.2)' : 'transparent';
+                e.currentTarget.style.backgroundColor = showInfoPanel ? 'rgba(118, 80, 197, 0.2)' : 'transparent';
               }}
             >
               Info
@@ -4944,7 +5194,7 @@ const HexGridWithToolbar = () => {
             onClick={() => setShowAboutPopup(true)}
             style={{
               backgroundColor: 'transparent',
-              color: '#333',
+              color: colors.text,
               textDecoration: 'none',
               border: 'none',
               padding: '10px 12px',
@@ -4957,7 +5207,7 @@ const HexGridWithToolbar = () => {
               transition: 'all 0.15s ease-out',
             }}
             onMouseEnter={(e) => {
-              e.target.style.backgroundColor = 'rgba(54, 98, 227, 0.2)';
+              e.target.style.backgroundColor = 'rgba(118, 80, 197, 0.2)';
               e.target.style.transform = 'scale(1.02)';
             }}
             onMouseLeave={(e) => {
@@ -4972,7 +5222,7 @@ const HexGridWithToolbar = () => {
               onClick={() => setShowSettingsDropdown(!showSettingsDropdown)}
               style={{
                 backgroundColor: 'transparent',
-                color: '#333',
+                color: colors.text,
                 textDecoration: 'none',
                 border: 'none',
                 padding: '0px 0px',
@@ -4994,7 +5244,9 @@ const HexGridWithToolbar = () => {
                   width: '50px',
                   height: '50px',
                   pointerEvents: 'none',
-                  filter: 'brightness(0) saturate(100%) invert(27%) sepia(0%) saturate(1567%) hue-rotate(184deg) brightness(95%) contrast(87%)'
+                  filter: isDarkMode
+                    ? 'brightness(0) saturate(100%) invert(90%)'
+                    : 'brightness(0) saturate(100%) invert(27%) sepia(0%) saturate(1567%) hue-rotate(184deg) brightness(95%) contrast(87%)'
                 }}
               />
             </button>
@@ -5069,7 +5321,7 @@ const HexGridWithToolbar = () => {
         borderRadius: 0, // Remove border radius for full-height sidebar
         boxShadow: 'none', // Remove shadow
         border: `1px solid ${colors.border}`, // Remove border
-        borderRight: '1px solidrgb(192, 192, 192)', // Add subtle right border
+        borderRight: `1px solid ${colors.border}`, // Add subtle right border
         zIndex: 2,
         justifyContent: 'flex-start', // Change from space-between to flex-start
         alignItems: 'stretch',
@@ -5077,9 +5329,18 @@ const HexGridWithToolbar = () => {
         overflowY: 'auto',
         overflowX: 'hidden',
         scrollbarWidth: 'thin',
-        scrollbarColor: 'rgba(0,0,0,0.2) transparent'
+        scrollbarColor: isDarkMode ? 'rgba(255,255,255,0.25) transparent' : 'rgba(0,0,0,0.2) transparent'
       }}>
         <ToolPalette mode={mode} setModeAndClearSelection={setModeAndClearSelection} colors={colors} isDarkMode={isDarkMode} />
+        <div className="chemistry-tools" style={{ '--chem-bg': colors.button, '--chem-text': colors.text, '--chem-border': colors.border, '--chem-accent': colors.buttonActive }}>
+        <EditorPopover label="Elements" side="right" colors={colors}>{close => <>
+          <p className="element-help">Choose an element, then click an atom or an empty spot on the canvas.</p>
+          <div className="element-grid">{['C','N','O','H','S','P','F','Cl','Br','I'].map(element => <button key={element} aria-pressed={mode === 'atom:' + element} onClick={() => { setModeAndClearSelection('atom:' + element); close(); }} style={mode === 'atom:' + element ? { background: colors.buttonActive, color: '#fff' } : {}}>{element}</button>)}</div>
+          <p className="element-help"><strong>Keyboard shortcuts</strong><br />Hover an atom and press <kbd>C</kbd>, <kbd>N</kbd>, <kbd>O</kbd>, <kbd>H</kbd>, <kbd>S</kbd>, <kbd>P</kbd>, <kbd>F</kbd> or <kbd>I</kbd> to change its element.<br />For Cl, Br or another label, hover an atom, press <kbd>Enter</kbd>, and type the symbol.</p>
+        </>}</EditorPopover>
+        <div style={{ display: 'flex', gap: '4px' }}><button onClick={() => setModeAndClearSelection('reaction-plus')} title="Reaction separator">＋</button><button onClick={() => setModeAndClearSelection('resonance')} title="Resonance arrow">↔</button><button onClick={duplicateAsProduct} title="Duplicate selection as product">Copy → product</button></div>
+        {arrangeMessage && <div role="status" style={{ color: colors.textSecondary, fontSize: '11px', paddingTop: '6px' }}>{arrangeMessage}</div>}
+        </div>
         
         <div style={{ flex: 1, minHeight: '20px' }} />
         
@@ -5092,8 +5353,8 @@ const HexGridWithToolbar = () => {
             style={{
               width: '100%',
               padding: 'calc(min(280px, 25vw) * 0.019) 0',
-              backgroundColor: '#e9ecef',
-              color: '#333',
+              backgroundColor: colors.button,
+              color: colors.text,
               border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.025)',
               cursor: 'pointer',
@@ -5113,8 +5374,8 @@ const HexGridWithToolbar = () => {
               e.target.style.boxShadow = '0 6px 16px rgba(220,53,69,0.4), 0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.2)';
             }}
             onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#e9ecef';
-              e.target.style.color = '#333';
+              e.target.style.backgroundColor = colors.button;
+              e.target.style.color = colors.text;
               e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
             }}
           >
@@ -5138,8 +5399,8 @@ const HexGridWithToolbar = () => {
             style={{
               flex: 1,
               padding: 'calc(min(280px, 25vw) * 0.019) 0',
-              backgroundColor: !canUndo ? '#f8f9fa' : '#e9ecef',
-              color: !canUndo ? '#999' : '#333',
+              backgroundColor: !canUndo ? colors.surface : colors.button,
+              color: !canUndo ? colors.textTertiary : colors.text,
               border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.025)',
               cursor: !canUndo ? 'not-allowed' : 'pointer',
@@ -5165,8 +5426,8 @@ const HexGridWithToolbar = () => {
             }}
             onMouseLeave={(e) => {
               if (canUndo) {
-                e.currentTarget.style.backgroundColor = '#e9ecef';
-                e.currentTarget.style.color = '#333';
+                e.currentTarget.style.backgroundColor = colors.button;
+                e.currentTarget.style.color = colors.text;
                 e.currentTarget.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
@@ -5188,8 +5449,8 @@ const HexGridWithToolbar = () => {
             style={{
               flex: 1,
               padding: 'calc(min(280px, 25vw) * 0.019) 0',
-              backgroundColor: !canRedo ? '#f8f9fa' : '#e9ecef',
-              color: !canRedo ? '#999' : '#333',
+              backgroundColor: !canRedo ? colors.surface : colors.button,
+              color: !canRedo ? colors.textTertiary : colors.text,
               border: `1px solid ${colors.border}`,
               borderRadius: 'calc(min(280px, 25vw) * 0.025)',
               cursor: !canRedo ? 'not-allowed' : 'pointer',
@@ -5215,8 +5476,8 @@ const HexGridWithToolbar = () => {
             }}
             onMouseLeave={(e) => {
               if (canRedo) {
-                e.currentTarget.style.backgroundColor = '#e9ecef';
-                e.currentTarget.style.color = '#333';
+                e.currentTarget.style.backgroundColor = colors.button;
+                e.currentTarget.style.color = colors.text;
                 e.currentTarget.style.boxShadow = `0 2px 4px ${colors.shadow}`;
               }
             }}
@@ -5286,7 +5547,18 @@ const HexGridWithToolbar = () => {
         zIndex: 1,
         pointerEvents: 'none', // let toolbar be clickable
       }}>
+        {docSync.ready && vertices.length === 0 && segments.length === 0 && arrows.length === 0 && newmanInstances.length === 0 && !showAtomInput && (
+          <div style={{ position: 'absolute', top: '28%', left: '50%', transform: 'translateX(-50%)', width: 'min(360px, 85%)', textAlign: 'center', zIndex: 2, pointerEvents: 'none', color: colors.textSecondary, fontFamily: 'inherit' }}>
+            <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden="true" style={{ color: colors.buttonActive, opacity: 0.6 }}>
+              <path d="M28 5 48 17v23L28 52 8 40V17Z M42 21v15 M14 36V21" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+            <h1 style={{ fontSize: '22px', fontWeight: 500, color: colors.text, margin: '16px 0 10px', letterSpacing: '-0.5px' }}>Give your next idea a structure.</h1>
+            <p style={{ fontSize: '13px', lineHeight: 1.8, margin: 0 }}>Click the canvas to begin, or choose a ring from the toolbar. Hover over an atom and type to label it.</p>
+            <p style={{ fontSize: '11px', color: colors.textTertiary, marginTop: '20px' }}>D · Draw　 M · Select　 R · Benzene</p>
+          </div>
+        )}
         <canvas
+          aria-label="Chemical drawing canvas"
           ref={canvasRef}
           onClick={handleCanvasClick}
           onDoubleClick={handleCanvasDoubleClick}
@@ -5344,11 +5616,11 @@ const HexGridWithToolbar = () => {
               fontSize: '22px', // Slightly larger font
               fontWeight: '600',
               textAlign: 'center',
-              border: '2px solid #3662e3',
+              border: '2px solid #7650c5',
               borderRadius: '8px',
               boxShadow: '0 2px 12px rgba(0,0,0,0.18)',
-              backgroundColor: 'white',
-              color: 'black',
+              backgroundColor: colors.surface,
+              color: colors.text,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -5459,11 +5731,11 @@ const HexGridWithToolbar = () => {
               padding: '3px 8px',
               font: arrowLabelFont(15),
               textAlign: 'center',
-              border: '2px solid #3662e3',
+              border: '2px solid #7650c5',
               borderRadius: '6px',
               boxShadow: '0 2px 12px rgba(0,0,0,0.18)',
-              backgroundColor: 'white',
-              color: 'black',
+              backgroundColor: colors.surface,
+              color: colors.text,
               outline: 'none',
               pointerEvents: 'auto',
             }}
@@ -5534,7 +5806,7 @@ const HexGridWithToolbar = () => {
             top: '70px',
             right: '20px',
             zIndex: 10,
-            backgroundColor: showSnapPreview ? '#4CAF50' : '#FF9800',
+            backgroundColor: showSnapPreview ? '#7650c5' : '#FF9800',
             color: 'white',
             padding: '8px 16px',
             borderRadius: '8px',
@@ -5698,7 +5970,7 @@ const HexGridWithToolbar = () => {
             transform: 'translate(-50%, -50%)',
             zIndex: 14,
             backgroundColor: 'transparent',
-            color: '#16a34a',
+            color: '#7650c5',
             border: 'none',
             borderRadius: 0,
             width: '46px',
@@ -5716,13 +5988,13 @@ const HexGridWithToolbar = () => {
           <svg width="38" height="38" viewBox="0 0 24 24" fill="none" style={{ pointerEvents: 'none' }}>
             <path
               d="M9.9 5.5a9.2 9.2 0 0 1 6.4 14.2"
-              stroke={isRotateArrowHovered ? '#22c55e' : '#16a34a'}
+              stroke={isRotateArrowHovered ? '#9366d7' : '#7650c5'}
               strokeWidth="3.4"
               strokeLinecap="round"
             />
             <path
               d="M16.2 22 12 22 14 17.7"
-              stroke={isRotateArrowHovered ? '#22c55e' : '#16a34a'}
+              stroke={isRotateArrowHovered ? '#9366d7' : '#7650c5'}
               strokeWidth="3.4"
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -5772,7 +6044,7 @@ const HexGridWithToolbar = () => {
           alignItems: 'center',
           alignSelf: 'flex-end',
           gap: '2px',
-          backgroundColor: '#e9ecef',
+          backgroundColor: colors.button,
           border: `1px solid ${colors.border}`,
           borderRadius: '6px',
           boxShadow: '0 2px 4px rgba(0,0,0,0.05)',
@@ -5799,13 +6071,13 @@ const HexGridWithToolbar = () => {
                 outline: 'none',
                 fontSize: `${b.fs}px`,
                 fontWeight: 600,
-                color: '#333',
+                color: colors.text,
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 lineHeight: 1,
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = '#dde1e5')}
+              onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = colors.buttonHover)}
               onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
             >
               {b.label}
@@ -5852,7 +6124,7 @@ const HexGridWithToolbar = () => {
           style={{
             width: '80px',
             height: '36px',
-            backgroundColor: isExporting ? '#f8f9fa' : '#e9ecef',
+            backgroundColor: isExporting ? colors.surface : colors.button,
             border: `1px solid ${colors.border}`,
             borderRadius: '6px',
             cursor: isExporting ? 'wait' : 'pointer',
@@ -5864,7 +6136,7 @@ const HexGridWithToolbar = () => {
             justifyContent: 'center',
             fontSize: '14px',
             fontWeight: '600',
-            color: isExporting ? '#999' : '#333',
+            color: isExporting ? colors.textTertiary : colors.text,
             fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
             opacity: isExporting ? 0.7 : 1,
             transition: 'all 0.2s ease',
@@ -5873,13 +6145,13 @@ const HexGridWithToolbar = () => {
           disabled={isExporting}
           onMouseEnter={(e) => {
             if (!isExporting) {
-              e.target.style.backgroundColor = '#dee2e6';
+              e.target.style.backgroundColor = colors.buttonHover;
               e.target.style.boxShadow = '0 3px 6px rgba(0,0,0,0.1)';
             }
           }}
           onMouseLeave={(e) => {
             if (!isExporting) {
-              e.target.style.backgroundColor = '#e9ecef';
+              e.target.style.backgroundColor = colors.button;
               e.target.style.boxShadow = '0 2px 4px rgba(0,0,0,0.05)';
             }
           }}

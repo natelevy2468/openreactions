@@ -7,7 +7,9 @@
     "dev": "vite",
     "build": "vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test:chemistry": "node --test tests/chemistry.test.js",
+    "test:browser": "node --experimental-websocket tests/run-browser-tests.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",

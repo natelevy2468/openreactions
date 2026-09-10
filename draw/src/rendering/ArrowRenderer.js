@@ -43,7 +43,7 @@ export const renderForwardArrow = (ctx, arrow, offset, colors, isPreview = false
   
   // Draw main arrow line
   ctx.beginPath();
-  ctx.moveTo(screenX, screenY);
+  ctx.moveTo(arrow.doubleHead ? screenX + Math.cos(angle) * headLength : screenX, arrow.doubleHead ? screenY + Math.sin(angle) * headLength : screenY);
   ctx.lineTo(endX - Math.cos(angle) * headLength, endY - Math.sin(angle) * headLength);
   ctx.stroke();
   
@@ -63,6 +63,12 @@ export const renderForwardArrow = (ctx, arrow, offset, colors, isPreview = false
   ctx.lineTo(point2X, point2Y);
   ctx.closePath();
   ctx.fill();
+  if (arrow.doubleHead) {
+    ctx.beginPath(); ctx.moveTo(screenX, screenY);
+    ctx.lineTo(screenX + Math.cos(angle) * headLength + Math.cos(perpAngle) * headWidth / 2, screenY + Math.sin(angle) * headLength + Math.sin(perpAngle) * headWidth / 2);
+    ctx.lineTo(screenX + Math.cos(angle) * headLength - Math.cos(perpAngle) * headWidth / 2, screenY + Math.sin(angle) * headLength - Math.sin(perpAngle) * headWidth / 2);
+    ctx.closePath(); ctx.fill();
+  }
 };
 
 /**

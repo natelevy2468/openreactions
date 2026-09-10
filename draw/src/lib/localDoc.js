@@ -57,7 +57,7 @@ export function readDraft(docKey) {
 
 export function writeDraft(docKey, { title, doc, thumbnail = null, updatedAt = null }) {
   const s = store();
-  if (!s) return;
+  if (!s) return false;
   const payload = JSON.stringify({
     title: title || DEFAULT_TITLE,
     doc,
@@ -66,14 +66,16 @@ export function writeDraft(docKey, { title, doc, thumbnail = null, updatedAt = n
   });
   try {
     s.setItem(keyFor(docKey), payload);
+    return true;
   } catch {
     // Out of quota: drop the thumbnails (much the largest part) and retry once,
     // because keeping the geometry matters far more than keeping the preview.
     pruneDrafts(1);
     try {
       s.setItem(keyFor(docKey), JSON.stringify({ title, doc, thumbnail: null, updatedAt: new Date().toISOString() }));
+      return true;
     } catch {
-      /* give up silently — the cloud save is still the primary path */
+      return false;
     }
   }
 }

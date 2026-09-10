@@ -4,7 +4,7 @@ import React, { useEffect, useRef, useState } from 'react';
  * Sign in / create account dialog.
  *
  * Styled to match AboutPopup (white card, 12px radius, Inter) and the nav's
- * rgb(54,98,227) accent, so it reads as part of the app rather than a bolted-on
+ * #7650c5 accent, so it reads as part of the app rather than a bolted-on
  * auth screen.
  *
  * @param {boolean}  show
@@ -17,21 +17,7 @@ import React, { useEffect, useRef, useState } from 'react';
  * @param {boolean}  googleEnabled     Show the Google button
  * @param {string}   [reason]          Why the dialog opened, shown above the form
  */
-const ACCENT = 'rgb(54,98,227)';
-
-const inputStyle = {
-  width: '100%',
-  boxSizing: 'border-box',
-  padding: '10px 12px',
-  fontSize: '14px',
-  fontFamily: 'inherit',
-  color: '#1a1a1a',
-  background: '#fff',
-  border: '1px solid #d9dee4',
-  borderRadius: '8px',
-  outline: 'none',
-  transition: 'border-color 0.15s ease-out, box-shadow 0.15s ease-out',
-};
+const ACCENT = '#7650c5';
 
 /** Google's mark, inlined so the button needs no network request. */
 const GoogleMark = () => (
@@ -42,15 +28,6 @@ const GoogleMark = () => (
     <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.59C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.94l3.01 2.34C4.68 5.16 6.66 3.58 9 3.58z" />
   </svg>
 );
-
-const labelStyle = {
-  display: 'block',
-  fontSize: '12px',
-  fontWeight: 600,
-  color: '#555',
-  marginBottom: '6px',
-  letterSpacing: '0.02em',
-};
 
 export default function AuthModal({
   show,
@@ -91,6 +68,29 @@ export default function AuthModal({
   }, [show, onClose]);
 
   if (!show) return null;
+
+  const inputStyle = {
+    width: '100%',
+    boxSizing: 'border-box',
+    padding: '10px 12px',
+    fontSize: '14px',
+    fontFamily: 'inherit',
+    color: colors.text,
+    background: colors.surface,
+    border: `1px solid ${colors.border}`,
+    borderRadius: '8px',
+    outline: 'none',
+    transition: 'border-color 0.15s ease-out, box-shadow 0.15s ease-out',
+  };
+
+  const labelStyle = {
+    display: 'block',
+    fontSize: '12px',
+    fontWeight: 600,
+    color: colors.textSecondary,
+    marginBottom: '6px',
+    letterSpacing: '0.02em',
+  };
 
   const submit = async (e) => {
     e?.preventDefault();
@@ -143,8 +143,8 @@ export default function AuthModal({
         cursor: 'pointer',
         border: 'none',
         borderRadius: '7px',
-        background: tab === key ? '#fff' : 'transparent',
-        color: tab === key ? ACCENT : '#777',
+        background: tab === key ? ACCENT : 'transparent',
+        color: tab === key ? '#ffffff' : colors.textSecondary,
         boxShadow: tab === key ? '0 1px 3px rgba(0,0,0,0.12)' : 'none',
         transition: 'all 0.15s ease-out',
       }}
@@ -168,18 +168,18 @@ export default function AuthModal({
           zIndex: 31,
           width: '380px',
           maxWidth: '90vw',
-          backgroundColor: 'white',
+          backgroundColor: colors.surface,
           borderRadius: '12px',
           boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
-          border: '2px solid #e0e0e0',
+          border: `2px solid ${colors.border}`,
           padding: '28px',
           fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
         }}
       >
-        <div style={{ fontSize: '19px', fontWeight: 600, color: '#1a1a1a', textAlign: 'center' }}>
+        <div style={{ fontSize: '19px', fontWeight: 600, color: colors.text, textAlign: 'center' }}>
           {tab === 'signin' ? 'Sign in to OpenReactions' : 'Create an account'}
         </div>
-        <div style={{ fontSize: '13px', color: '#888', textAlign: 'center', marginTop: '7px', lineHeight: 1.5 }}>
+        <div style={{ fontSize: '13px', color: colors.textSecondary, textAlign: 'center', marginTop: '7px', lineHeight: 1.5 }}>
           {reason || 'Keep your drawings across devices and pick up where you left off.'}
         </div>
 
@@ -187,7 +187,7 @@ export default function AuthModal({
           style={{
             display: 'flex',
             gap: '4px',
-            background: '#f1f3f5',
+            background: colors.button,
             padding: '4px',
             borderRadius: '9px',
             margin: '20px 0 18px',
@@ -211,10 +211,10 @@ export default function AuthModal({
               style={inputStyle}
               onFocus={(e) => {
                 e.target.style.borderColor = ACCENT;
-                e.target.style.boxShadow = '0 0 0 3px rgba(54,98,227,0.15)';
+                e.target.style.boxShadow = '0 0 0 3px rgba(118,80,197,0.15)';
               }}
               onBlur={(e) => {
-                e.target.style.borderColor = '#d9dee4';
+                e.target.style.borderColor = colors.border;
                 e.target.style.boxShadow = 'none';
               }}
             />
@@ -232,10 +232,10 @@ export default function AuthModal({
               style={inputStyle}
               onFocus={(e) => {
                 e.target.style.borderColor = ACCENT;
-                e.target.style.boxShadow = '0 0 0 3px rgba(54,98,227,0.15)';
+                e.target.style.boxShadow = '0 0 0 3px rgba(118,80,197,0.15)';
               }}
               onBlur={(e) => {
-                e.target.style.borderColor = '#d9dee4';
+                e.target.style.borderColor = colors.border;
                 e.target.style.boxShadow = 'none';
               }}
             />
@@ -250,7 +250,7 @@ export default function AuthModal({
                 border: 'none',
                 padding: 0,
                 fontSize: '12px',
-                color: '#888',
+                color: colors.textSecondary,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
                 textDecoration: 'underline',
@@ -305,7 +305,7 @@ export default function AuthModal({
               fontWeight: 600,
               fontFamily: 'inherit',
               color: '#fff',
-              background: busy ? 'rgba(54,98,227,0.6)' : ACCENT,
+              background: busy ? 'rgba(118,80,197,0.6)' : ACCENT,
               border: 'none',
               borderRadius: '8px',
               cursor: busy ? 'default' : 'pointer',
@@ -319,9 +319,9 @@ export default function AuthModal({
         {googleEnabled && (
           <>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', margin: '16px 0' }}>
-              <div style={{ flex: 1, height: '1px', background: '#eee' }} />
-              <span style={{ fontSize: '11px', color: '#aaa', letterSpacing: '0.05em' }}>OR</span>
-              <div style={{ flex: 1, height: '1px', background: '#eee' }} />
+              <div style={{ flex: 1, height: '1px', background: colors.border }} />
+              <span style={{ fontSize: '11px', color: colors.textTertiary, letterSpacing: '0.05em' }}>OR</span>
+              <div style={{ flex: 1, height: '1px', background: colors.border }} />
             </div>
             <button
               type="button"
@@ -365,8 +365,8 @@ export default function AuthModal({
             fontSize: '13px',
             fontWeight: 500,
             fontFamily: 'inherit',
-            color: '#666',
-            background: '#e9ecef',
+            color: colors.textSecondary,
+            background: colors.button,
             border: `1px solid ${colors.border}`,
             borderRadius: '8px',
             cursor: 'pointer',
@@ -375,7 +375,7 @@ export default function AuthModal({
           Not now
         </button>
 
-        <div style={{ fontSize: '11.5px', color: '#aaa', textAlign: 'center', marginTop: '14px', lineHeight: 1.5 }}>
+        <div style={{ fontSize: '11.5px', color: colors.textTertiary, textAlign: 'center', marginTop: '14px', lineHeight: 1.5 }}>
           Without an account your work still stays in this browser — signing in just
           adds sync and history.
         </div>

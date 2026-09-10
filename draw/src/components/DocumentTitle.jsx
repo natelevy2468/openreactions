@@ -21,12 +21,12 @@ const STATUS_TEXT = {
   saved: 'All changes saved',
   clean: 'All changes saved',
   local: 'Saved on this device',
-  // Reassuring and true: the local mirror always has the work, even when the
-  // server write fails. The raw reason goes in the tooltip rather than the nav.
-  error: 'Couldn’t reach the server — saved on this device',
+  // This covers both opening and saving failures; the tooltip explains which.
+  error: 'Cloud unavailable — check save details',
+  'storage-error': 'Browser storage unavailable — export a backup',
 };
 
-export default function DocumentTitle({ title, onRename, onCommit, status, errorText }) {
+export default function DocumentTitle({ title, onRename, onCommit, status, errorText, colors, isDarkMode = false }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
   const inputRef = useRef(null);
@@ -53,10 +53,13 @@ export default function DocumentTitle({ title, onRename, onCommit, status, error
   };
 
   const statusText = STATUS_TEXT[status] || '';
-  const statusColor = status === 'error' ? '#a32020' : '#6b6b6b';
+  const textColor = colors?.text || '#222';
+  const statusColor = (status === 'error' || status === 'storage-error')
+    ? (isDarkMode ? '#ff7b7b' : '#a32020')
+    : (colors?.textSecondary || '#6b6b6b');
 
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '0px', minWidth: 0 }}>
       {editing ? (
         <input
           ref={inputRef}
@@ -73,15 +76,15 @@ export default function DocumentTitle({ title, onRename, onCommit, status, error
           }}
           maxLength={120}
           style={{
-            fontSize: '17px',
+            fontSize: '15px',
             fontWeight: 400,
             fontFamily: 'Roboto, sans-serif',
-            color: '#222',
+            color: textColor,
             padding: '4px 8px',
             width: '260px',
             maxWidth: '34vw',
-            background: '#fff',
-            border: '1px solid rgb(54,98,227)',
+            background: colors?.surface || '#fff',
+            border: '1px solid #7650c5',
             borderRadius: '5px',
             outline: 'none',
           }}
@@ -91,10 +94,10 @@ export default function DocumentTitle({ title, onRename, onCommit, status, error
           onClick={() => setEditing(true)}
           title="Rename this drawing"
           style={{
-            fontSize: '17px',
+            fontSize: '15px',
             fontWeight: 400,
             fontFamily: 'Roboto, sans-serif',
-            color: '#222',
+            color: textColor,
             background: 'transparent',
             border: '1px solid transparent',
             borderRadius: '5px',
@@ -107,8 +110,8 @@ export default function DocumentTitle({ title, onRename, onCommit, status, error
             transition: 'all 0.12s ease-out',
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = 'rgba(0,0,0,0.18)';
-            e.currentTarget.style.backgroundColor = 'rgba(255,255,255,0.45)';
+            e.currentTarget.style.borderColor = isDarkMode ? 'rgba(255,255,255,0.25)' : 'rgba(0,0,0,0.18)';
+            e.currentTarget.style.backgroundColor = isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.45)';
           }}
           onMouseLeave={(e) => {
             e.currentTarget.style.borderColor = 'transparent';
@@ -121,8 +124,11 @@ export default function DocumentTitle({ title, onRename, onCommit, status, error
 
       {statusText && (
         <span
+          role="status"
+          aria-live="polite"
           style={{
-            fontSize: '12px',
+            fontSize: '10px',
+            paddingLeft: '8px',
             fontFamily: 'Roboto, sans-serif',
             color: statusColor,
             whiteSpace: 'nowrap',
@@ -130,7 +136,7 @@ export default function DocumentTitle({ title, onRename, onCommit, status, error
             overflow: 'hidden',
             textOverflow: 'ellipsis',
           }}
-          title={status === 'error' ? errorText || '' : undefined}
+          title={(status === 'error' || status === 'storage-error') ? errorText || '' : undefined}
         >
           {statusText}
         </span>

@@ -13,13 +13,18 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const serveRootConfig = () => ({
   name: 'openreactions-serve-root-config',
   configureServer(server) {
-    server.middlewares.use('/supabase-config.js', (_req, res, next) => {
+    const serve = (_req, res, next) => {
       const file = path.resolve(here, '../supabase-config.js')
       if (!fs.existsSync(file)) return next()
       res.setHeader('Content-Type', 'application/javascript')
       res.setHeader('Cache-Control', 'no-store')
       res.end(fs.readFileSync(file))
-    })
+    }
+    // The dev server rewrites the <script src="/supabase-config.js"> tag to the
+    // /draw/ base, so answer at both paths; production serves the real file at
+    // the domain root and never rewrites it.
+    server.middlewares.use('/supabase-config.js', serve)
+    server.middlewares.use('/draw/supabase-config.js', serve)
   },
 })
 

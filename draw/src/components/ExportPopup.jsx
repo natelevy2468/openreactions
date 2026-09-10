@@ -40,10 +40,10 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
           pointerEvents: 'auto',
           width: '500px',
           maxWidth: '90vw',
-          backgroundColor: 'white',
+          backgroundColor: colors.surface,
           borderRadius: '12px',
           boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
-          border: '2px solid #e0e0e0',
+          border: `2px solid ${colors.border}`,
           padding: '30px',
           textAlign: 'center',
           fontFamily: '"Inter", "Segoe UI", "Arial", sans-serif',
@@ -52,7 +52,7 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
         <div style={{
           fontSize: '24px',
           fontWeight: '600',
-          color: '#1a1a1a',
+          color: colors.text,
           marginBottom: '20px',
         }}>
           Export Molecular Structure
@@ -61,10 +61,10 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
         {/* Image Preview */}
         <div style={{
           marginBottom: '24px',
-          border: '2px solid #e0e0e0',
+          border: `2px solid ${colors.border}`,
           borderRadius: '8px',
           padding: '16px',
-          backgroundColor: '#f8f9fa',
+          backgroundColor: colors.surfaceHover,
         }}>
           <img
             src={imageUrl}
@@ -73,9 +73,8 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
               maxWidth: '100%',
               maxHeight: '300px',
               objectFit: 'contain',
-              border: '1px solid #ddd',
+              border: `1px solid ${colors.border}`,
               borderRadius: '4px',
-              backgroundColor: 'white',
             }}
           />
         </div>
@@ -102,7 +101,7 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
               document.body.removeChild(link);
             }}
             style={{
-              backgroundColor: '#4CAF50',
+              backgroundColor: '#7650c5',
               color: 'white',
               border: 'none',
               borderRadius: '8px',
@@ -117,11 +116,11 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
               transition: 'all 0.2s ease',
             }}
             onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#45a049';
+              e.target.style.backgroundColor = '#6441ad';
               e.target.style.transform = 'translateY(-1px)';
             }}
             onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#4CAF50';
+              e.target.style.backgroundColor = '#7650c5';
               e.target.style.transform = 'translateY(0)';
             }}
           >
@@ -149,14 +148,14 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
                 btn.style.backgroundColor = '#28a745';
                 setTimeout(() => {
                   btn.innerHTML = originalText;
-                  btn.style.backgroundColor = '#2196F3';
+                  btn.style.backgroundColor = '#8861ca';
                 }, 1500);
               } catch (error) {
                 alert('Clipboard copy failed. Please use "Save as PNG" instead.');
               }
             }}
             style={{
-              backgroundColor: '#2196F3',
+              backgroundColor: '#8861ca',
               color: 'white',
               border: 'none',
               borderRadius: '8px',
@@ -171,11 +170,11 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
               transition: 'all 0.2s ease',
             }}
             onMouseEnter={(e) => {
-              e.target.style.backgroundColor = '#1976D2';
+              e.target.style.backgroundColor = '#6843ac';
               e.target.style.transform = 'translateY(-1px)';
             }}
             onMouseLeave={(e) => {
-              e.target.style.backgroundColor = '#2196F3';
+              e.target.style.backgroundColor = '#8861ca';
               e.target.style.transform = 'translateY(0)';
             }}
           >
@@ -189,7 +188,7 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
 
         <div style={{
           fontSize: '13px',
-          color: '#666',
+          color: colors.textSecondary,
           marginBottom: '20px',
           lineHeight: '1.4',
         }}>
@@ -205,8 +204,8 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
         <button
           onClick={onClose}
           style={{
-            backgroundColor: '#e9ecef',
-            color: '#333',
+            backgroundColor: colors.button,
+            color: colors.text,
             border: `1px solid ${colors.border}`,
             borderRadius: '8px',
             padding: '10px 20px',
@@ -216,8 +215,8 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
             boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
             transition: 'background 0.2s',
           }}
-          onMouseEnter={(e) => e.target.style.backgroundColor = '#dee2e6'}
-          onMouseLeave={(e) => e.target.style.backgroundColor = '#e9ecef'}
+          onMouseEnter={(e) => e.target.style.backgroundColor = colors.buttonHover}
+          onMouseLeave={(e) => e.target.style.backgroundColor = colors.button}
         >
           Close
         </button>

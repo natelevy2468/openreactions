@@ -14,7 +14,7 @@ import React from 'react';
  * @param {Function} onSignOut
  * @param {Object}   colors
  */
-const ACCENT = 'rgb(54,98,227)';
+const ACCENT = '#7650c5';
 
 export default function AccountButton({
   isConfigured,
@@ -82,7 +82,7 @@ export default function AccountButton({
           alignItems: 'center',
           justifyContent: 'center',
           padding: 0,
-          boxShadow: menuOpen ? '0 0 0 3px rgba(54,98,227,0.25)' : 'none',
+          boxShadow: menuOpen ? '0 0 0 3px rgba(118,80,197,0.25)' : 'none',
           transition: 'box-shadow 0.15s ease-out',
         }}
       >

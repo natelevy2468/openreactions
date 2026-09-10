@@ -12,6 +12,7 @@ export const DEFAULT_TITLE = 'Untitled drawing';
 
 export const emptyDoc = () => ({
   version: DOC_VERSION,
+  drawingStyle: { lineScale: 1, fontScale: 1 },
   vertices: [],
   segments: [],
   vertexAtoms: {},
@@ -28,6 +29,7 @@ export const normalizeDoc = (raw) => {
   if (!raw || typeof raw !== 'object') return base;
   return {
     version: Number(raw.version) || DOC_VERSION,
+    drawingStyle: { lineScale: [0.8, 1, 1.3].includes(raw.drawingStyle?.lineScale) ? raw.drawingStyle.lineScale : 1, fontScale: [0.85, 1, 1.2].includes(raw.drawingStyle?.fontScale) ? raw.drawingStyle.fontScale : 1 },
     vertices: Array.isArray(raw.vertices) ? raw.vertices : base.vertices,
     segments: Array.isArray(raw.segments) ? raw.segments : base.segments,
     vertexAtoms: raw.vertexAtoms && typeof raw.vertexAtoms === 'object' ? raw.vertexAtoms : base.vertexAtoms,
@@ -66,4 +68,5 @@ export const contentFingerprint = (doc) =>
     doc?.arrows || [],
     doc?.newmanInstances || [],
     doc?.vertexBondStates || {},
+    doc?.drawingStyle || { lineScale: 1, fontScale: 1 },
   ]);
