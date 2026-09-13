@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 /**
  * Settings dropdown (opened from the gear icon) — dark-mode toggle, Copy-as-SMILES,
@@ -19,6 +19,8 @@ import React from 'react';
  */
 export default function SettingsDropdown({
   show,
+  historyContent,
+  appearanceContent,
   colors,
   isDarkMode,
   setIsDarkMode,
@@ -29,6 +31,7 @@ export default function SettingsDropdown({
   onImportSmiles,
   smilesImportMessage,
 }) {
+  const [tab, setTab] = useState('general');
   if (!show) return null;
 
   return (
@@ -37,7 +40,7 @@ export default function SettingsDropdown({
       right: 0,
       top: '100%',
       backgroundColor: colors.surface,
-      minWidth: '280px',
+      width: '320px', maxWidth: '90vw', maxHeight: 'calc(100vh - 100px)', overflowY: 'auto',
       boxShadow: `0 8px 16px ${colors.shadow}`,
       borderRadius: '8px',
       border: `1px solid ${colors.border}`,
@@ -68,6 +71,9 @@ export default function SettingsDropdown({
         Settings
       </div>
 
+      <div role="tablist" aria-label="Settings sections" style={{display:'flex',gap:8,marginBottom:12}}>{['general','history'].map(name => <button key={name} role="tab" aria-selected={tab===name} onClick={() => setTab(name)} style={{flex:1,padding:9,border:0,borderRadius:6,background:tab===name?colors.buttonActive:colors.button,color:tab===name?'#fff':colors.text}}>{name==='general'?'General':'History'}</button>)}</div>
+      {tab === 'history' ? historyContent : <>
+      {appearanceContent}
       {/* Dark Mode Toggle */}
       <div style={{
         display: 'flex',
@@ -262,6 +268,7 @@ export default function SettingsDropdown({
           </div>
         )}
       </div>
+      </>}
     </div>
   );
 }

@@ -8,7 +8,7 @@
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:chemistry": "node --test tests/chemistry.test.js",
+    "test:chemistry": "node --test tests/chemistry.test.js tests/editor-behavior.test.js",
     "test:browser": "node --experimental-websocket tests/run-browser-tests.mjs"
   },
   "dependencies": {

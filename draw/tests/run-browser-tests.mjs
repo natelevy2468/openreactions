@@ -1,3 +1,4 @@
+import { checkEditorInteractions } from './editor-interactions.browser.mjs';
 import { build } from 'esbuild';
 import { createServer } from 'node:http';
 import { readFile, mkdtemp, writeFile } from 'node:fs/promises';
@@ -104,7 +105,7 @@ try {
   const restored = await evaluate(`JSON.parse(localStorage.getItem('openreactions.draft.${oldId}')).doc`);
   assert.equal(restored.segments.length, 1);
   assert.equal(restored.vertexAtoms['360.00,300.00'].charge, -1);
-  await evaluate(`document.querySelector('.editor-menu-trigger').click()`);
+  await evaluate(`Array.from(document.querySelectorAll('.editor-menu-trigger')).find(b => b.textContent.startsWith('Tools')).click()`);
   await until(`!!document.querySelector('[aria-label="Tools"][role="dialog"]')`);
   assert.equal(await evaluate(`document.body.innerText.includes('Tidy structure')`), true);
   console.log('PASS: Month-old drawing opens in the current Tools UI with its identity, bonds, and atom labels preserved');
@@ -119,24 +120,28 @@ try {
   await call('Input.dispatchMouseEvent', { type: 'mousePressed', x: 700, y: 400, button: 'left', clickCount: 1 });
   await call('Input.dispatchMouseEvent', { type: 'mouseReleased', x: 700, y: 400, button: 'left', clickCount: 1 });
   await until(`JSON.parse(localStorage.getItem('openreactions.draft.local') || '{}').doc?.segments?.length === 6`);
-  await evaluate(`document.querySelector('.editor-menu-trigger').click()`);
+  await evaluate(`Array.from(document.querySelectorAll('.editor-menu-trigger')).find(b => b.textContent.startsWith('Tools')).click()`);
   await until(`!!document.querySelector('[aria-label="Tools"][role="dialog"]')`);
   await evaluate(`Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Tidy structure').click()`);
   try { await until(`document.body.textContent.includes('Structure tidied.')`); } catch (error) { console.log(await evaluate(`document.body.innerText`)); throw error; }
+  await writeFile(path.join(temp, 'tools-menu.png'), Buffer.from((await call('Page.captureScreenshot')).data, 'base64'));
+  await evaluate(`document.querySelector('[aria-label="Close Tools"]').click(); Array.from(document.querySelectorAll('button')).find(b => b.innerText === 'Export').click()`);
+  await until(`document.querySelector('img[alt="Molecular structure preview"]')?.naturalWidth > 0`);
   await evaluate(`window.__svgBlob = null; const createUrl = URL.createObjectURL.bind(URL); URL.createObjectURL = blob => { if (blob.type === 'image/svg+xml') window.__svgBlob = blob; return createUrl(blob); }; Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Export SVG').click()`);
   await until(`window.__svgBlob !== null`);
   const svg = await evaluate(`window.__svgBlob.text()`);
   assert(svg.includes('<path') && !svg.includes('<image'), 'SVG must contain vector geometry');
   assert.equal(await evaluate(`(async () => (new DOMParser()).parseFromString(await window.__svgBlob.text(), 'image/svg+xml').querySelector('parsererror') === null)()`), true);
   console.log('PASS: Tidy structure and valid vector SVG export');
-  await writeFile(path.join(temp, 'tools-menu.png'), Buffer.from((await call('Page.captureScreenshot')).data, 'base64'));
+  await evaluate(`Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === 'Close').click()`);
+
   await call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape' });
   assert.equal(await evaluate(`document.querySelector('[aria-label="Tools"][role="dialog"]') === null`), true);
   await evaluate(`Array.from(document.querySelectorAll('.editor-menu-trigger')).find(b => b.textContent.includes('Elements')).click()`);
   await until(`!!document.querySelector('[aria-label="Elements"][role="dialog"]')`);
-  assert.equal(await evaluate(`document.querySelector('.element-help').textContent.includes('Choose an element')`), true);
+  assert.equal(await evaluate(`document.querySelectorAll('.element-grid button').length === 118`), true);
   await writeFile(path.join(temp, 'elements-menu.png'), Buffer.from((await call('Page.captureScreenshot')).data, 'base64'));
-  await evaluate(`Array.from(document.querySelectorAll('.element-grid button')).find(b => b.textContent === 'N').click()`);
+  await evaluate(`document.querySelector('[aria-label="Element N"]').click()`);
   await until(`document.querySelector('[aria-label="Elements"][role="dialog"]') === null`);
   console.log('PASS: Selected auth tab contrast, Tools dismissal, and element pop-out selection');
   await evaluate(`document.querySelector('[title="Rename this drawing"]').click()`);
@@ -152,6 +157,7 @@ try {
   assert(exported.width > 100 && exported.height > 100, 'Export image is unexpectedly small');
   await writeFile(path.join(temp, 'export.png'), Buffer.from((await call('Page.captureScreenshot')).data, 'base64'));
   console.log('PASS: Draw benzene, rename, reload recovery, and PNG export');
+  await checkEditorInteractions({call,evaluate,until,base,capture: async name => writeFile(path.join(temp,name),Buffer.from((await call('Page.captureScreenshot')).data,'base64'))});
   assert.deepEqual(exceptions, [], 'Browser runtime exceptions');
   console.log(`PASS: Production editor renders without runtime errors\nScreenshots: ${temp}`);
 } finally { ws?.close(); chrome.kill('SIGKILL'); server.close(); server.closeAllConnections(); }

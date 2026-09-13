@@ -1,8 +1,9 @@
+import { splitComponents } from './moleculeGraph.js';
 import { loadOCL } from './ocl.js';
 import { graphToOCLMolecule } from './exportStructure.js';
 import { lookupAbbreviation } from './abbreviations.js';
 
-export async function validateStructure(graph) {
+async function validateComponent(graph) {
   const OCL = await loadOCL();
   const issues = [];
   const valences = graph.atoms.map(() => 0);
@@ -25,4 +26,17 @@ export async function validateStructure(graph) {
     warnings.forEach(message => issues.push({ message }));
   } catch (error) { if (!issues.length && !/unbalanced atom charge/i.test(error.message || '')) issues.push({ message: error.message || 'The structure has inconsistent chemical properties.' }); }
   return issues;
+}
+
+// Library-level failures identify a molecule; valence/label issues identify an atom.
+export async function validateStructure(graph) {
+  const results = await Promise.all(splitComponents(graph).map(async component => {
+    const issues = await validateComponent(component);
+    return issues.map(issue => ({...issue,
+      targets: component.atoms.filter(a => !issue.key || a.key === issue.key)
+        .map(a => ({x:a.x,y:a.y,key:a.key})),
+      scope: issue.key ? 'atom' : 'molecule',
+    }));
+  }));
+  return results.flat();
 }

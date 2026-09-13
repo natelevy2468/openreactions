@@ -11,7 +11,7 @@ import React from 'react';
  * @param {Function} onClose     Called to dismiss and clear the export state
  * @param {Object}   colors      Theme colors (uses colors.border)
  */
-export default function ExportPopup({ show, imageUrl, metadata, onClose, colors }) {
+export default function ExportPopup({ show, imageUrl, metadata, onClose, colors, extraActions }) {
   if (!show || !imageUrl) return null;
 
   return (
@@ -39,7 +39,7 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
           zIndex: 16,
           pointerEvents: 'auto',
           width: '500px',
-          maxWidth: '90vw',
+          maxWidth: '90vw', maxHeight: '90vh', overflowY: 'auto', boxSizing: 'border-box',
           backgroundColor: colors.surface,
           borderRadius: '12px',
           boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
@@ -58,6 +58,7 @@ export default function ExportPopup({ show, imageUrl, metadata, onClose, colors 
           Export Molecular Structure
         </div>
 
+        <div className="chemistry-tools export-actions" style={{'--chem-bg':colors.button,'--chem-text':colors.text,'--chem-border':colors.border,'--chem-accent':colors.buttonActive,marginBottom:16}}>{extraActions}</div>
         {/* Image Preview */}
         <div style={{
           marginBottom: '24px',

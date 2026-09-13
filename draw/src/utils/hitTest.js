@@ -1,3 +1,4 @@
+import { straightArrowEndpoints } from './arrowGeometry.js';
 /**
  * Hit-testing helpers (pure)
  *
@@ -9,8 +10,8 @@
 
 import { getCurvedArrowMidHandleWorld } from '../rendering/ArrowRenderer.js';
 
-const ARROW_ENDPOINT_THRESHOLD = 25; // clicking an arrow endpoint / curve handle
-const ARROW_CLICK_THRESHOLD = 30; // clicking anywhere along an arrow
+const ARROW_ENDPOINT_THRESHOLD = 12; // clicking an arrow endpoint / curve handle
+const ARROW_CLICK_THRESHOLD = 14; // clicking anywhere along an arrow
 
 /**
  * Nearest vertex to a world point within a threshold, or null.
@@ -91,11 +92,9 @@ export const detectArrowPart = (arrows, arrowIndex, worldX, worldY) => {
     return 'body';
   }
 
-  // Straight arrow.
-  const endX = arrow.x + arrow.length * Math.cos(arrow.angle);
-  const endY = arrow.y + arrow.length * Math.sin(arrow.angle);
-  if (Math.hypot(worldX - arrow.x, worldY - arrow.y) <= t) return 'start';
-  if (Math.hypot(worldX - endX, worldY - endY) <= t) return 'end';
+  const { start, end } = straightArrowEndpoints(arrow);
+  if (Math.hypot(worldX - start.x, worldY - start.y) <= t) return 'start';
+  if (Math.hypot(worldX - end.x, worldY - end.y) <= t) return 'end';
   return 'middle';
 };
 
@@ -125,17 +124,12 @@ export const findHoveredArrowIndex = (arrows, worldX, worldY) => {
       if (Math.hypot(worldX - midX, worldY - midY) <= t * 1.5) return i;
     } else {
       // Straight arrow: distance from point to the arrow line segment.
-      const endX = arrow.x + arrow.length * Math.cos(arrow.angle);
-      const endY = arrow.y + arrow.length * Math.sin(arrow.angle);
-      const C = endX - arrow.x;
-      const D = endY - arrow.y;
+      const { start, end } = straightArrowEndpoints(arrow);
+      const C = end.x - start.x, D = end.y - start.y;
       const lenSq = C * C + D * D;
-      if (lenSq === 0) continue;
-      let param = ((worldX - arrow.x) * C + (worldY - arrow.y) * D) / lenSq;
-      if (param < 0) param = 0;
-      else if (param > 1) param = 1;
-      const xx = arrow.x + param * C;
-      const yy = arrow.y + param * D;
+      if (!lenSq) continue;
+      const param = Math.max(0, Math.min(1, ((worldX - start.x) * C + (worldY - start.y) * D) / lenSq));
+      const xx = start.x + param * C, yy = start.y + param * D;
       if (Math.hypot(worldX - xx, worldY - yy) <= t) return i;
     }
   }

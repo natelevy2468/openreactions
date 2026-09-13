@@ -12,7 +12,7 @@ const SUB_BASELINE_DROP = 6;
 const LABEL_PAD = 3;
 const IMPLICIT_H_GAP = 2;
 // Consistent vertical metrics (as a fraction of font size) so every label gets
-// the SAME halo height regardless of which glyphs it contains. Using measured
+// the same label clearance height regardless of which glyphs it contains. Using measured
 // per-glyph bounding boxes made "N" / "O" / "OH" halos differ, which read as
 // inconsistent padding. Width is still measured per-glyph (must be accurate).
 const CAP_RATIO = 0.72; // ascent above baseline
@@ -21,7 +21,7 @@ const DESC_RATIO = 0.12; // descent below baseline
 /**
  * Lay out an atom label into horizontal runs plus its overall extent, using
  * consistent vertical metrics. Shared by rendering and by clearance
- * measurement so bonds and halos always agree.
+ * measurement so bond endpoints and text always agree.
  * @returns {{formatted:Object, runs:Array, totalWidth:number, minTop:number, maxBot:number}|null}
  */
 function layoutAtomLabel(ctx, atomData) {
@@ -74,7 +74,7 @@ function layoutAtomLabel(ctx, atomData) {
 }
 
 /**
- * Half-width and half-height (px) of the label's halo box, centered on the
+ * Half-width and half-height (px) of the label's clearance box, centered on the
  * vertex. Used to shorten bonds so they stop cleanly at the label edge.
  * @returns {{halfW:number, halfH:number}|null}
  */
@@ -115,8 +115,6 @@ export const renderAtomText = (
   if (!layout) return;
   const { formatted, runs, totalWidth, minTop, maxBot } = layout;
 
-  // Opaque fill matching the canvas so bonds behind the label do not show through (avoids gray “box” artifacts)
-  const labelBg = colors.canvasBackground ?? (isDarkMode ? '#1a1a1a' : '#ffffff');
   const labelFg = isDarkMode ? (colors.atoms || colors.text || '#f0f0f0') : '#111111';
 
   ctx.textAlign = 'left';
@@ -152,17 +150,6 @@ export const renderAtomText = (
       }
     }
   }
-  const boxTop = mainBaselineY + minTop - LABEL_PAD;
-  const boxH = maxBot - minTop + LABEL_PAD * 2;
-  const boxW = totalWidth + LABEL_PAD * 2;
-  const boxLeft = leftX - LABEL_PAD;
-
-  const cornerRadius = 4;
-  ctx.fillStyle = labelBg;
-  ctx.beginPath();
-  ctx.roundRect(boxLeft, boxTop, boxW, boxH, cornerRadius);
-  ctx.fill();
-
   ctx.fillStyle = labelFg;
   let cursorX = leftX;
   runs.forEach((r) => {
@@ -176,19 +163,8 @@ export const renderAtomText = (
   // Legacy superscript path (charges usually drawn elsewhere; keep for edge cases)
   if (formatted.hasSuperscript && formatted.superscript) {
     ctx.font = `${SUB_FONT_PX}px Arial, sans-serif`;
-    const supWidth = ctx.measureText(formatted.superscript).width;
-    const supAscent = SUB_FONT_PX * CAP_RATIO;
-    const supDescent = SUB_FONT_PX * DESC_RATIO;
     const supX = leftX + totalWidth + 4;
     const supBaseline = mainBaselineY - 10;
-    const supLeft = supX - LABEL_PAD;
-    const supTop = supBaseline - supAscent - LABEL_PAD;
-    const supW = supWidth + LABEL_PAD * 2;
-    const supH = supAscent + supDescent + LABEL_PAD * 2;
-    ctx.fillStyle = labelBg;
-    ctx.beginPath();
-    ctx.roundRect(supLeft, supTop, supW, supH, 3);
-    ctx.fill();
     ctx.fillStyle = labelFg;
     ctx.font = `${SUB_FONT_PX}px Arial, sans-serif`;
     ctx.fillText(formatted.superscript, supX, supBaseline);

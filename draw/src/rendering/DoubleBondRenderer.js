@@ -24,7 +24,12 @@ const SHORTER_LINE_FRACTION = 0.77;
  */
 export const findBondRing = (bond, detectedRings) => {
   const tolerance = 0.01;
-  for (const ring of detectedRings) {
+  // Prefer a conjugated six-membered ring over a newly fused smaller ring.
+  const ranked = [...detectedRings].sort((a, b) => {
+    const priority = r => r.bonds?.length === 6 && r.bonds.filter(bond => bond.bondOrder === 2).length >= 3 ? 0 : 1;
+    return priority(a) - priority(b) || (a.bonds?.length || 0) - (b.bonds?.length || 0);
+  });
+  for (const ring of ranked) {
     if (!ring.bonds) continue;
     const bondExists = ring.bonds.some((rb) => (
       (Math.abs(rb.x1 - bond.x1) < tolerance && Math.abs(rb.y1 - bond.y1) < tolerance &&
@@ -69,6 +74,27 @@ const shorterLineEndpoints = (bond) => {
   };
 };
 
+// Join each offset rail to the branch on its side at an unlabeled junction.
+export function joinDoubleRail(point, endpoint, other, segments) {
+  const dx=other.x-endpoint.x,dy=other.y-endpoint.y,length=Math.hypot(dx,dy);
+  const ux=dx/length,uy=dy/length;
+  let best=null;
+  for(const b of segments){
+    if(b.bondOrder!==1)continue;
+    let far;
+    if(Math.hypot(b.x1-endpoint.x,b.y1-endpoint.y)<.01)far={x:b.x2,y:b.y2};
+    else if(Math.hypot(b.x2-endpoint.x,b.y2-endpoint.y)<.01)far={x:b.x1,y:b.y1};
+    else continue;
+    const vx=far.x-endpoint.x,vy=far.y-endpoint.y,den=ux*vy-uy*vx;
+    if(Math.abs(den)<1e-6)continue;
+    const rx=endpoint.x-point.x,ry=endpoint.y-point.y;
+    const t=(rx*vy-ry*vx)/den,u=(rx*uy-ry*ux)/den;
+    if(u<0 || u>1 || Math.abs(t)>Math.min(15,length*.3))continue;
+    if(!best || Math.abs(t)<best.distance)best={x:point.x+t*ux,y:point.y+t*uy,distance:Math.abs(t)};
+  }
+  return best || point;
+}
+
 /**
  * Render a double bond.
  * @param {CanvasRenderingContext2D} ctx
@@ -87,10 +113,10 @@ const shorterLineEndpoints = (bond) => {
  *   a ring double bond next to a heteroatom (e.g. the O in a pyran) wrongly falls
  *   back to the symmetric two-equal-lines style.
  */
-export const renderDoubleBondByCase = (ctx, bond, offset, colors, { detectedRings, countVertexBonds, geomBond }) => {
+export const renderDoubleBondByCase = (ctx, bond, offset, colors, { detectedRings, countVertexBonds, geomBond, segments = [] }) => {
   ctx.strokeStyle = colors.bonds;
   ctx.lineWidth = 3;
-  ctx.lineCap = 'round';
+  ctx.lineCap = bond.clipped ? 'butt' : 'round';
 
   const topo = geomBond || bond;
   const ring = findBondRing(topo, detectedRings);
@@ -119,8 +145,15 @@ export const renderDoubleBondByCase = (ctx, bond, offset, colors, { detectedRing
     // Symmetric double bond: two equal parallel lines straddling the axis.
     const offX = Math.cos(perpAngle) * PARALLEL_OFFSET_DISTANCE;
     const offY = Math.sin(perpAngle) * PARALLEL_OFFSET_DISTANCE;
-    strokeLine(ctx, bond.x1 + offX, bond.y1 + offY, bond.x2 + offX, bond.y2 + offY, offset);
-    strokeLine(ctx, bond.x1 - offX, bond.y1 - offY, bond.x2 - offX, bond.y2 - offY, offset);
+    for (const side of [-1,1]) {
+      let start={x:bond.x1+side*offX,y:bond.y1+side*offY};
+      let end={x:bond.x2+side*offX,y:bond.y2+side*offY};
+      if(Math.hypot(bond.x1-topo.x1,bond.y1-topo.y1)<.01)
+        start=joinDoubleRail(start,{x:topo.x1,y:topo.y1},{x:topo.x2,y:topo.y2},segments);
+      if(Math.hypot(bond.x2-topo.x2,bond.y2-topo.y2)<.01)
+        end=joinDoubleRail(end,{x:topo.x2,y:topo.y2},{x:topo.x1,y:topo.y1},segments);
+      strokeLine(ctx,start.x,start.y,end.x,end.y,offset);
+    }
     return;
   }
 

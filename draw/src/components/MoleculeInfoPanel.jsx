@@ -3,7 +3,7 @@ import React from 'react';
 /**
  * Molecule info dropdown (opened from the "Info" button in the top bar).
  * Shows molecular formula, average molecular weight, monoisotopic mass, and
- * atom / ring counts for whatever is currently drawn. Purely presentational —
+ * atom / ring counts for the active connected molecule. Purely presentational —
  * the parent computes `info` (via graphToFormula) and passes it in. Renders
  * nothing unless `show` is true.
  *
@@ -69,6 +69,7 @@ export default function MoleculeInfoPanel({ show, colors, info }) {
         Molecule Info
       </div>
 
+      <p style={{ color: colors.textSecondary, fontSize: '13px' }}>The highlighted molecule only. Click another atom or bond to inspect it.</p>
       {!hasMolecule ? (
         <div style={{ color: colors.textSecondary, fontSize: '13px', padding: '4px 0 2px' }}>
           Draw a structure to see its formula and weight.

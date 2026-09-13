@@ -1,3 +1,4 @@
+import { getAtomLabelHalfExtents } from './TextRenderer.js';
 /**
  * Lone Pair and Charge Rendering System
  * 
@@ -163,7 +164,8 @@ export const renderAllLonePairsAndCharges = (ctx, vertices, segments, vertexAtom
              (Math.abs(seg.x2 - vertex.x) < 0.01 && Math.abs(seg.y2 - vertex.y) < 0.01);
     });
     const bondKeys = connectedBonds.map(b => `${b.x1.toFixed(2)},${b.y1.toFixed(2)}-${b.x2.toFixed(2)},${b.y2.toFixed(2)}`).sort().join('|');
-    const cacheKey = getPositioningCacheKey(vertexKey, lonePairCount, charge, bondKeys);
+    const extents = getAtomLabelHalfExtents(ctx, atomData);
+    const cacheKey = getPositioningCacheKey(vertexKey, lonePairCount, charge, bondKeys) + JSON.stringify(extents);
     
     // Check cache first
     let positioning = positioningCache.get(cacheKey);
@@ -178,6 +180,17 @@ export const renderAllLonePairsAndCharges = (ctx, vertices, segments, vertexAtom
         charge
       );
       
+      // Keep each dot and charge outside the actual displayed label, including H₂.
+      const clearLabel = (position, padding) => {
+        if (!position || !extents) return;
+        const ux = Math.cos(position.angle), uy = Math.sin(position.angle);
+        const edge = Math.min(Math.abs(ux) > 1e-6 ? (extents.halfW + padding) / Math.abs(ux) : Infinity,
+          Math.abs(uy) > 1e-6 ? (extents.halfH + padding) / Math.abs(uy) : Infinity);
+        const radius = Math.max(edge, Math.hypot(position.x - vertex.x, position.y - vertex.y));
+        position.x = vertex.x + ux * radius; position.y = vertex.y + uy * radius;
+      };
+      positioning.lonePairPositions.forEach(p => clearLabel(p, 11));
+      clearLabel(positioning.chargePosition, 12);
       // Store in cache
       positioningCache.set(cacheKey, positioning);
       

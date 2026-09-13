@@ -241,9 +241,10 @@ export quality → reaction mapping → query features → biomolecules → 3D).
 
 The editor now includes structure cleanup, selection rotation and reflection,
 reaction alignment and spacing, common-element shortcuts, plus signs, resonance
-arrows, and duplication of a selected structure as a product. Open **Tools** in the top bar for SMILES/MOL/SDF/RXN import and export, basic chemistry checks,
-saved fragments, abbreviation expansion/contraction, drawing styles, vector SVG,
-and browser print/save as PDF. Geometry changes participate in undo/redo.
+arrows, and duplication of a selected structure as a product. Use **File** for chemical exchange and fragments, **Tools** for cleanup and
+arrangement, **Settings → History** for browser recovery, and **Export** for
+PNG/SVG/PDF. Settings also holds drawing styles. See
+[the September change checklist](docs/SEPTEMBER_EDITOR_CHANGES.md) for details. Geometry changes participate in undo/redo.
 
 Chemical exchange preserves tested tetrahedral and double-bond stereochemistry,
 isotopes, and radicals. Abbreviation contraction verifies chemical identity before

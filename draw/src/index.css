@@ -53,3 +53,21 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .element-help kbd { background: var(--chem-bg); border: 1px solid var(--chem-border); border-radius: 4px; padding: 1px 4px; font: inherit; font-size: 13px; }
 .editor-popover:focus { outline: 2px solid var(--chem-accent); outline-offset: 2px; }
 .chemistry-tools .editor-menu-trigger { font-size: 16px; padding: 10px 12px; }
+/* Compact, consistently spaced editor controls. */
+.tools-popover { gap: 9px; padding: 16px; }
+.tools-popover details { padding: 4px 0; }
+.export-actions { grid-template-columns: 1fr 1fr; }
+.element-popover .element-grid { grid-template-columns: repeat(6, 1fr); max-height: 180px; overflow-y: auto; }
+.element-popover .element-grid button { padding: 6px 0; }
+.element-popover .element-help { font-size: 13px; }
+.export-actions button { font-size: 14px; min-height: 38px; }
+.curved-arrow-shortcuts { display: grid; position: relative; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; align-items: center; }
+.curved-arrow-shortcuts > button, .curved-arrow-options > button { display: flex; align-items: center; justify-content: center; border: 1px solid; border-radius: 6px; padding: 0; height: 40px; cursor: pointer; min-width: 0; }
+.curved-arrow-shortcuts svg { width: 100%; height: 34px; }
+.curved-arrow-shortcuts > .compact-menu-trigger { position: absolute; right: -17px; top: 0; width: 17px; border: 0; padding: 0; font-size: 20px; z-index: 2; }
+.curved-arrow-options { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.curved-arrow-options > button { height: 48px; }
+.curved-arrow-options svg { width: 42px; height: 42px; }
+.arrow-picker-label { margin: 2px 0; font-size: 14px; font-weight: 600; }
+
+.curved-arrow-shortcuts > .compact-menu-trigger span { font-size: 22px; line-height: 1; }

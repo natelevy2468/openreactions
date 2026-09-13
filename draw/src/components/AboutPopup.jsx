@@ -73,7 +73,7 @@ export default function AboutPopup({ show, onClose, colors }) {
           marginBottom: '20px',
           lineHeight: '1.4',
         }}>
-          text 925-808-9441 with questions!
+          <a href="mailto:sick96096@gmail.com" style={{ color: colors.buttonActive }}>email sick96096@gmail.com</a>
         </div>
 
         <div style={{

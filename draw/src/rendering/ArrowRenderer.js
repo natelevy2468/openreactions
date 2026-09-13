@@ -306,8 +306,10 @@ export const renderCurvedArrow = (ctx, arrow, offset, colors, isPreview = false)
   
   ctx.beginPath();
   ctx.moveTo(x2, y2); // Tip at actual end point
-  ctx.lineTo(headBaseX + Math.cos(perpAngle) * headWidth / 2, headBaseY + Math.sin(perpAngle) * headWidth / 2);
-  ctx.lineTo(headBaseX - Math.cos(perpAngle) * headWidth / 2, headBaseY - Math.sin(perpAngle) * headWidth / 2);
+  const side = arrow.electrons === 1 && arrow.direction === 'cw' ? -1 : 1;
+  ctx.lineTo(headBaseX + side*Math.cos(perpAngle)*headWidth/2, headBaseY + side*Math.sin(perpAngle)*headWidth/2);
+  if (arrow.electrons === 1) ctx.lineTo(headBaseX, headBaseY);
+  else ctx.lineTo(headBaseX - Math.cos(perpAngle)*headWidth/2, headBaseY - Math.sin(perpAngle)*headWidth/2);
   ctx.closePath();
   ctx.fill();
 };

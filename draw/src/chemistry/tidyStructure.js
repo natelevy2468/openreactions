@@ -38,11 +38,26 @@ export async function tidyStructure(doc, selected = new Set(), bondLength = 60) 
     for (let b = 0; b < mol.getAllBonds(); b++) { const a = mol.getBondAtom(0, b), z = mol.getBondAtom(1, b); total += Math.hypot(mol.getAtomX(a) - mol.getAtomX(z), mol.getAtomY(a) - mol.getAtomY(z)); }
     const scale = bondLength / (total / mol.getAllBonds() || 1);
     const originalKey = a => key(part.atoms[mol.getAtomMapNo(a) - 1]);
-    for (let a = 0; a < mol.getAllAtoms(); a++) positions.set(originalKey(a), { x: +(center.x + (mol.getAtomX(a) - cx) * scale).toFixed(2), y: +(center.y - (mol.getAtomY(a) - cy) * scale).toFixed(2) });
+    // Coordinate invention may reverse the orientation of a symmetric ring.
+    // Choose the closest rigid alignment, correcting stereo wedges if reflected.
+    const points = Array.from({ length: mol.getAllAtoms() }, (_, a) => ({
+      a, x: (mol.getAtomX(a) - cx) * scale, y: -(mol.getAtomY(a) - cy) * scale,
+      original: part.atoms[mol.getAtomMapNo(a) - 1],
+    }));
+    const fit = reflected => {
+      let dot = 0, cross = 0;
+      points.forEach(p => {const px = reflected ? -p.x : p.x, x=p.original.x-center.x,y=p.original.y-center.y;dot+=px*x+p.y*y;cross+=px*y-p.y*x;});
+      const rotation=Math.atan2(cross,dot),cos=Math.cos(rotation),sin=Math.sin(rotation);
+      const fitted=points.map(p=>{const x=reflected?-p.x:p.x;return {a:p.a,x:center.x+x*cos-p.y*sin,y:center.y+x*sin+p.y*cos};});
+      const error=fitted.reduce((sum,p,i)=>sum+(p.x-points[i].original.x)**2+(p.y-points[i].original.y)**2,0);
+      return {reflected,fitted,error};
+    };
+    const normal=fit(false), mirror=fit(true), best=mirror.error+1e-6<normal.error?mirror:normal;
+    best.fitted.forEach(p=>positions.set(originalKey(p.a),{x:+p.x.toFixed(2),y:+p.y.toFixed(2)}));
     for (let b = 0; b < mol.getAllBonds(); b++) {
       const from = originalKey(mol.getBondAtom(0, b)), to = originalKey(mol.getBondAtom(1, b));
       const type = mol.getBondType(b);
-      stereo.set([from, to].sort().join('|'), { from, to, bondType: type === OCL.Molecule.cBondTypeUp ? 'wedge' : type === OCL.Molecule.cBondTypeDown ? 'dash' : type === OCL.Molecule.cBondTypeCross ? 'ambiguous' : null });
+      stereo.set([from, to].sort().join('|'), { from, to, bondType: type === OCL.Molecule.cBondTypeUp ? (best.reflected ? 'dash' : 'wedge') : type === OCL.Molecule.cBondTypeDown ? (best.reflected ? 'wedge' : 'dash') : type === OCL.Molecule.cBondTypeCross ? 'ambiguous' : null });
     }
   }
   return {
