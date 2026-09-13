@@ -25,6 +25,7 @@ export const emptyDoc = () => ({
 
 /** Fills in anything missing so an old or partial payload can't crash a load. */
 export const normalizeDoc = (raw) => {
+  if (raw?.kind === 'animation') return {version:1,kind:'animation',initial:raw.initial || {atoms:[],bonds:[]},steps:Array.isArray(raw.steps)?raw.steps:[],draftFlows:Array.isArray(raw.draftFlows)?raw.draftFlows:[],reactingIds:Array.isArray(raw.reactingIds)?raw.reactingIds:[]};
   const base = emptyDoc();
   if (!raw || typeof raw !== 'object') return base;
   return {
@@ -48,12 +49,12 @@ export const normalizeDoc = (raw) => {
  * database — a new drawing only becomes real once there's something in it.
  */
 export const isDocEmpty = (doc) =>
-  !doc ||
+  !doc || (doc.kind === 'animation' ? !doc.initial?.atoms?.length :
   ((doc.vertices?.length || 0) === 0 &&
     (doc.segments?.length || 0) === 0 &&
     (doc.arrows?.length || 0) === 0 &&
     (doc.newmanInstances?.length || 0) === 0 &&
-    Object.keys(doc.vertexAtoms || {}).length === 0);
+    Object.keys(doc.vertexAtoms || {}).length === 0));
 
 /**
  * Fingerprint of the drawn content only, ignoring pan/zoom. Autosave compares
@@ -61,7 +62,7 @@ export const isDocEmpty = (doc) =>
  * does.
  */
 export const contentFingerprint = (doc) =>
-  JSON.stringify([
+  doc?.kind === 'animation' ? JSON.stringify(doc) : JSON.stringify([
     doc?.vertices || [],
     doc?.segments || [],
     doc?.vertexAtoms || {},

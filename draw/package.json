@@ -5,14 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && node scripts/build-animation-entry.mjs",
     "lint": "eslint .",
     "preview": "vite preview",
-    "test:chemistry": "node --test tests/chemistry.test.js tests/editor-behavior.test.js",
+    "test:chemistry": "node --test tests/chemistry.test.js tests/editor-behavior.test.js tests/animation.test.js",
     "test:browser": "node --experimental-websocket tests/run-browser-tests.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.109.0",
+    "gifenc": "1.0.3",
     "openchemlib": "^9.24.0",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

@@ -261,3 +261,5 @@ save. Real-account OAuth and cross-device sync still need manual verification.
 
 Remaining advanced gaps include atom mapping, multistep reaction semantics,
 collaborative editing, cloud version history, folders, and access-controlled sharing.
+
+Reaction animations are a separate document type. See [the animation workflow and validation notes](docs/ANIMATIONS.md).

@@ -4458,6 +4458,7 @@ const HexGridWithToolbar = () => {
   }, [drawCanvas, vertices, segments, arrows, offset, isDarkMode]);
 
   const docSync = useDocumentSync({
+    documentKind: 'drawing',
     doc: docPayload,
     applyDoc: applyLoadedDoc,
     userId: auth.user?.id || null,
@@ -4842,6 +4843,8 @@ const HexGridWithToolbar = () => {
             Draw
           </div>
           <EditorPopover label="File" colors={colors}>
+            <button onClick={async()=>{try{await docSync.saveNow();if(!docSync.isDurable())throw new Error('Save or export this drawing before creating an animation.');const {createAnimationFromDrawing}=await import('./animation/createFromDrawing.js');location.href=await createAnimationFromDrawing(snapshotDocument(),docSync.title+' · animation');}catch(error){setArrangeMessage(error.message);}}}>Create animation from drawing</button>
+
         <details style={{ fontSize: '15px', color: colors.text }}>
           <summary style={{ cursor: 'pointer', padding: '6px 0' }}>Import / export chemistry</summary>
           <label style={{ display: 'block', padding: '8px 0' }}>Open MOL, SDF, RXN or SMILES

@@ -112,9 +112,21 @@ await test('Storage failure is visible and prevents discarding unsaved edits', a
     Storage.prototype.setItem = () => { throw new DOMException('Full', 'QuotaExceededError'); };
     api.setDoc(drawing(123)); await tick(); await api.saveNow(); await tick();
     assert(api.status === 'storage-error', 'Failed local save reported success');
+    assert(!api.isDurable(), 'Navigation must be blocked after failed local storage');
     const result = await api.newDocument(); await tick();
     assert(result?.error && api.doc.vertices[0].x === 123, 'Unsaved drawing was discarded');
   } finally { Storage.prototype.setItem = original; }
+});
+await test('Animation documents preserve steps and atom IDs through cloud updates and local recovery',async()=>{
+  const animation={version:1,kind:'animation',initial:{atoms:[{id:'O1',element:'O',x:100,y:100,charge:-1,hydrogens:1}],bonds:[]},steps:[],draftFlows:[],reactingIds:[]};
+  await mount(A,()=>{backend.fetch=async()=>({data:row(A,'Animation',animation),error:null});});
+  assert(api.doc.kind==='animation'&&api.doc.initial.atoms[0].id==='O1','Animation was stripped on load');
+  let sent;
+  backend.update=async(id,patch)=>{sent=patch.data;return {data:row(id,'Animation',patch.data),error:null};};
+  api.setDoc({...api.doc,draftFlows:[{source:{kind:'pair',id:'O1'},target:{kind:'atom',id:'C1'}}]});
+  await tick();await api.saveNow();
+  assert(sent?.draftFlows.length===1,'Cloud update omitted animation edits');
+  assert(readDraft(A).doc.draftFlows.length===1,'Recovery draft lost animation edits');
 });
 root?.unmount();
 window.__testResults = results;

@@ -1,3 +1,4 @@
+import { checkAnimations } from './animation.browser.mjs';
 import { checkEditorInteractions } from './editor-interactions.browser.mjs';
 import { build } from 'esbuild';
 import { createServer } from 'node:http';
@@ -32,7 +33,7 @@ const server = createServer(async (req, res) => {
       return;
     }
     if (url.pathname === '/__tests') { res.setHeader('Content-Type', 'text/html'); res.end('<div id="root"></div><script type="module" src="/__tests.js"></script>'); return; }
-    const name = url.pathname === '/__tests.js' ? path.join(temp, 'tests.js') : path.join(repo, url.pathname.startsWith('/draw/') ? `draw/dist/${url.pathname.slice(6) || 'index.html'}` : url.pathname === '/' ? 'index.html' : url.pathname);
+    const name = url.pathname === '/__tests.js' ? path.join(temp, 'tests.js') : path.join(repo, url.pathname.startsWith('/draw/') ? `draw/dist/${url.pathname.slice(6) || 'index.html'}` : url.pathname === '/' ? 'index.html' : url.pathname === '/animate/' ? 'animate/index.html' : url.pathname);
     if (!name.startsWith(repo + path.sep) && name !== path.join(temp, 'tests.js')) { res.writeHead(403).end(); return; }
     res.setHeader('Content-Type', ({ '.js': 'application/javascript', '.css': 'text/css', '.html': 'text/html', '.png': 'image/png' })[path.extname(name)] || 'application/octet-stream');
     res.end(await readFile(name));
@@ -158,6 +159,7 @@ try {
   await writeFile(path.join(temp, 'export.png'), Buffer.from((await call('Page.captureScreenshot')).data, 'base64'));
   console.log('PASS: Draw benzene, rename, reload recovery, and PNG export');
   await checkEditorInteractions({call,evaluate,until,base,capture: async name => writeFile(path.join(temp,name),Buffer.from((await call('Page.captureScreenshot')).data,'base64'))});
+  await checkAnimations({call,evaluate,until,base,capture: async name => writeFile(path.join(temp,name),Buffer.from((await call('Page.captureScreenshot')).data,'base64'))});
   assert.deepEqual(exceptions, [], 'Browser runtime exceptions');
   console.log(`PASS: Production editor renders without runtime errors\nScreenshots: ${temp}`);
 } finally { ws?.close(); chrome.kill('SIGKILL'); server.close(); server.closeAllConnections(); }

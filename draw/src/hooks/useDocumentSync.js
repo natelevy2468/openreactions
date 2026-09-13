@@ -110,9 +110,9 @@ const draftIsAhead = (draft, row) => {
  * @param {boolean} params.authLoading   True until the session is known.
  * @param {() => string|null} params.captureThumbnail  Small PNG of the drawing.
  */
-export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThumbnail }) {
+export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThumbnail, emptyDocument = emptyDoc, defaultTitle = DEFAULT_TITLE, documentKind = null }) {
   const [docId, setDocId] = useState(null);
-  const [title, setTitle] = useState(DEFAULT_TITLE);
+  const [title, setTitle] = useState(defaultTitle);
   // 'loading' | 'clean' | 'dirty' | 'saving' | 'saved' | 'local' | 'error'
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
@@ -306,6 +306,15 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
 
     const finish = ({ id, docTitle, nextDoc, statusValue, fingerprintSaved, updatedAt = null }) => {
       if (cancelled) return;
+      if (documentKind && nextDoc && (nextDoc.kind || 'drawing') !== documentKind) {
+        const url = new URL(window.location.href);
+        url.searchParams.set('kind', nextDoc.kind || 'drawing');
+        if (id) { url.searchParams.set('doc', id); url.searchParams.delete('local'); }
+        else if (localLibraryIdRef.current) url.searchParams.set('local', localLibraryIdRef.current);
+        url.searchParams.set('_open', Date.now().toString(36));
+        window.location.replace(url.href);
+        return;
+      }
       docIdRef.current = id;
       setDocId(id);
       setTitle(docTitle);
@@ -333,8 +342,8 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       const hasContent = draft && !isDocEmpty(draft.doc);
       finish({
         id: keepId,
-        docTitle: draft?.title || DEFAULT_TITLE,
-        nextDoc: hasContent ? draft.doc : emptyDoc(),
+        docTitle: draft?.title || defaultTitle,
+        nextDoc: hasContent ? draft.doc : emptyDocument(),
         // Unsaved local content should get pushed as soon as we're signed in, so
         // leave the saved fingerprint empty to mark it dirty.
         fingerprintSaved: !(userId && hasContent),
@@ -365,8 +374,8 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       deleteDraft(LOCAL_DOC_KEY);
       finish({
         id: null,
-        docTitle: DEFAULT_TITLE,
-        nextDoc: emptyDoc(),
+        docTitle: defaultTitle,
+        nextDoc: emptyDocument(),
         fingerprintSaved: true,
         statusValue: isSupabaseConfigured && userId ? 'clean' : 'local',
       });
@@ -436,7 +445,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       const draft = readDraft(target);
       const localIsNewer = draftIsAhead(draft, data);
       const nextDoc = localIsNewer ? draft.doc : normalizeDoc(data.data);
-      const docTitle = (localIsNewer ? draft.title : data.title) || DEFAULT_TITLE;
+      const docTitle = (localIsNewer ? draft.title : data.title) || defaultTitle;
 
       finish({
         id: data.id,
@@ -528,7 +537,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
 
       docIdRef.current = data.id;
       setDocId(data.id);
-      setTitle((localIsNewer ? draft.title : data.title) || DEFAULT_TITLE);
+      setTitle((localIsNewer ? draft.title : data.title) || defaultTitle);
       applyDocRef.current?.(nextDoc);
       savedFingerprintRef.current = localIsNewer ? null : contentFingerprint(nextDoc);
       savedTitleRef.current = localIsNewer ? null : data.title;
@@ -550,14 +559,14 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
     readyRef.current = true;
     setReady(true);
     try { localLibraryIdRef.current = startLocalDocument(); } catch { /* storage state handled on save */ }
-    const fresh = emptyDoc();
+    const fresh = emptyDocument();
     docIdRef.current = null;
     setDocId(null);
-    setTitle(DEFAULT_TITLE);
+    setTitle(defaultTitle);
     applyDocRef.current?.(fresh);
     // A blank document is "already saved" — nothing exists to write yet.
     savedFingerprintRef.current = contentFingerprint(fresh);
-    savedTitleRef.current = DEFAULT_TITLE;
+    savedTitleRef.current = defaultTitle;
     setLastSavedAt(null);
     setStatus(isSupabaseConfigured && userId ? 'clean' : 'local');
     deleteDraft(LOCAL_DOC_KEY);
@@ -580,7 +589,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
   );
 
   const renameDocument = useCallback((next) => {
-    setTitle(next && next.trim() ? next : DEFAULT_TITLE);
+    setTitle(next && next.trim() ? next : defaultTitle);
   }, []);
 
   return useMemo(
@@ -593,6 +602,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
       lastSavedAt,
       ready,
       saveNow,
+      isDurable: () => durableRef.current,
       openDocument,
       newDocument,
       forgetDocument,

@@ -11,7 +11,7 @@ import { DEFAULT_TITLE, normalizeDoc } from './docModel.js';
 const TABLE = 'drawings';
 
 /** Columns for list views — deliberately excludes `data`, which is large. */
-const LIST_COLUMNS = 'id, title, thumbnail, created_at, updated_at';
+const LIST_COLUMNS = 'id, title, thumbnail, created_at, updated_at, kind:data->>kind';
 
 const describe = (error) => {
   if (!error) return null;
@@ -36,7 +36,7 @@ export async function listDrawings(limit = 24) {
     .select(LIST_COLUMNS)
     .order('updated_at', { ascending: false })
     .limit(limit);
-  return { data: data || [], error: describe(error) };
+  return { data: (data || []).filter(row => row.kind !== 'animation'), error: describe(error) };
 }
 
 /** One drawing including its document payload. */
