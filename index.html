@@ -510,6 +510,15 @@
     .main-container { background: #fff; border: 1px solid #e9e3f2; border-radius: 20px; padding: 32px 36px; min-width: 0; }
     .page-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 26px; }
     h1 { font-size: 26px; font-weight: 500; letter-spacing: -.6px; margin: 0; }
+    .creation-menu { position: relative; }
+    .creation-menu button { border: 0; cursor: pointer; font-family: inherit; }
+    #new-menu { position: absolute; right: 0; top: calc(100% + 8px); width: 290px; background: white; border: 1px solid #e4dbef; border-radius: 12px; padding: 6px; box-shadow: 0 10px 30px #39235324; z-index: 20; }
+    #new-menu[hidden] { display: none; }
+    #new-menu a { display: block; padding: 13px; border-radius: 8px; color: #493063; text-decoration: none; font-weight: 500; }
+    #new-menu a:hover, #new-menu a:focus { background: #eee5fa; }
+    #new-menu span { display: block; color: #89799b; font-size: 12px; font-weight: 400; margin-top: 4px; }
+    .page-header { gap: 16px; }
+    .page-header h1 { margin-right: auto; }
     .new-drawing { display: inline-flex; align-items: center; gap: 12px; text-decoration: none; background: #e5d6f7; color: #603b92; padding: 12px 20px; border-radius: 12px; font-size: 14px; font-weight: 500; }
     .new-drawing:hover { background: #d9c2f0; box-shadow: 0 2px 6px #603b9212; }
     .new-drawing span { font-size: 23px; line-height: 1; }
@@ -611,13 +620,13 @@
   </header>
   <div class="app-layout">
     <nav class="sidebar" aria-label="Main navigation">
-      <button id="nav-drawings" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 3h11l5 5v13H4z M14 3v6h6 M8 13h8 M8 17h6"/></svg>Drawings</button>
+      <button id="nav-drawings" aria-current="page"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M4 3h11l5 5v13H4z M14 3v6h6 M8 13h8 M8 17h6"/></svg>Drawings</button><button id="nav-animations" type="button"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m10 8 6 4-6 4z"/></svg>Animations</button>
       <button id="nav-about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6 M12 7v1"/></svg>About & help</button>
       <p class="sidebar-note" id="storage-note">Browser storage<br>Sign in for cloud drawings</p>
     </nav>
     <main class="main-container">
       <div id="library-page">
-        <div class="page-header"><h1>Drawings</h1><a class="new-drawing" href="/draw/?new=1"><span aria-hidden="true">+</span>New drawing</a></div>
+        <div class="page-header"><h1 id="library-heading">Drawings</h1><div class="creation-menu"><button id="new-menu-button" class="new-drawing" aria-expanded="false" aria-controls="new-menu">+ New ▾</button><div id="new-menu" hidden><a id="new-drawing-link" href="/draw/?new=1">Drawing<span>Draw structures and reactions</span></a><a id="new-animation-link" href="/animate/?kind=animation&new=1">Animation<span>Connect electron flow and animate steps</span></a></div></div></div>
         <div class="library-tools">
           <label class="search-field"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5 5"/></svg><input id="drawing-search" type="search" placeholder="Search drawings" aria-label="Search drawings" /></label>
           <select id="drawing-sort" aria-label="Sort drawings"><option value="recent">Last edited</option><option value="name">Name (A–Z)</option><option value="oldest">Oldest first</option></select>
@@ -774,10 +783,10 @@
       }
     }
 
-    function thumbHtml(thumbnail) {
+    function thumbHtml(thumbnail, kind) {
       return thumbnail
         ? '<img src="' + escapeHtml(thumbnail) + '" alt="" />'
-        : '<span class="thumb-placeholder">⬡</span>';
+        : '<span class="thumb-placeholder">' + (kind === 'animation' ? '▷' : '⬡') + '</span>';
     }
 
     // Pages caches HTML by URL. An old ?doc= URL must not reopen a cached
@@ -787,24 +796,31 @@
       target.searchParams.set('_open', Date.now().toString(36));
       return target.pathname + target.search + target.hash;
     }
-    document.querySelector('.new-drawing').href = freshEditorUrl('/draw/?new=1');
+    document.getElementById('new-drawing-link').href = freshEditorUrl('/draw/?new=1');
+    var newButton = document.getElementById('new-menu-button');
+    var newMenu = document.getElementById('new-menu');
+    function closeNewMenu() { newMenu.hidden = true; newButton.setAttribute('aria-expanded', 'false'); }
+    newButton.addEventListener('click', function () { newMenu.hidden = !newMenu.hidden; newButton.setAttribute('aria-expanded', String(!newMenu.hidden)); });
+    document.addEventListener('click', function (event) { if (!event.target.closest('.creation-menu')) closeNewMenu(); });
+    document.addEventListener('keydown', function (event) { if (event.key === 'Escape' && !newMenu.hidden) { closeNewMenu(); newButton.focus(); } });
     document.addEventListener('click', function (event) {
       var link = event.target.closest('a');
-      if (link && link.origin === window.location.origin && link.pathname === '/draw/') {
+      if (link && link.origin === window.location.origin && (link.pathname === '/draw/' || link.pathname === '/animate/')) {
         link.href = freshEditorUrl(link.href);
       }
     }, true);
 
-    function cardHtml(href, title, subtitle, thumbnail) {
+    function cardHtml(href, title, subtitle, thumbnail, kind) {
       return (
         '<a class="drawing-card" href="' + escapeHtml(freshEditorUrl(href)) + '">' +
-        '<div class="drawing-thumb">' + thumbHtml(thumbnail) + '</div>' +
+        '<div class="drawing-thumb">' + thumbHtml(thumbnail, kind) + '</div>' +
         '<div class="drawing-name">' + escapeHtml(title) + '</div>' +
         '<div class="drawing-time">' + escapeHtml(subtitle) + '</div>' +
         '</a>'
       );
     }
 
+    var libraryKind = 'drawing';
     var libraryRows = [];
     var libraryCloud = false;
     var libraryError = null;
@@ -816,15 +832,17 @@
     function renderLibrary() {
       section.hidden = false;
       var query = el('drawing-search').value.trim().toLowerCase();
-      var rows = libraryRows.filter(function (r) { return r.title.toLowerCase().includes(query); });
+      var rows = libraryRows.filter(function (r) { return (r.kind || 'drawing') === libraryKind && r.title.toLowerCase().includes(query); });
       var sort = el('drawing-sort').value;
       rows.sort(function (a, b) {
         if (sort === 'name') return a.title.localeCompare(b.title);
         var order = (Date.parse(b.updatedAt) || 0) - (Date.parse(a.updatedAt) || 0);
         return sort === 'oldest' ? -order : order;
       });
-      el('drawings-title').textContent = libraryCloud ? 'All drawings' : 'On this device';
-      el('drawing-count').textContent = libraryLoading ? 'Loading…' : rows.length + (rows.length === 1 ? ' drawing' : ' drawings');
+      el('library-heading').textContent = libraryKind === 'animation' ? 'Animations' : 'Drawings';
+      el('drawing-search').placeholder = libraryKind === 'animation' ? 'Search animations' : 'Search drawings';
+      el('drawings-title').textContent = libraryCloud ? (libraryKind === 'animation' ? 'All animations' : 'All drawings') : 'On this device';
+      el('drawing-count').textContent = libraryLoading ? 'Loading…' : rows.length + (libraryKind === 'animation' ? (rows.length === 1 ? ' animation' : ' animations') : (rows.length === 1 ? ' drawing' : ' drawings'));
       el('view-grid').setAttribute('aria-pressed', String(libraryView === 'grid'));
       el('view-list').setAttribute('aria-pressed', String(libraryView === 'list'));
       var content;
@@ -834,10 +852,10 @@
         content = '<div class="empty-library"><h2>Drawings couldn’t be loaded</h2><p>Please check your connection and try again.</p><button class="auth-btn" id="retry-drawings">Retry</button></div>';
       } else if (rows.length) {
         content = '<div class="drawings-grid' + (libraryView === 'list' ? ' list-view' : '') + '">' + rows.map(function (r) {
-          return cardHtml(r.href, r.title, 'Edited ' + relativeTime(r.updatedAt), r.thumbnail);
+          return cardHtml(r.href, r.title, 'Edited ' + relativeTime(r.updatedAt), r.thumbnail, r.kind);
         }).join('') + '</div>';
       } else {
-        content = '<div class="empty-library"><div class="empty-icon" aria-hidden="true">▤</div><h2>' + (query ? 'No matching drawings' : 'No drawings yet') + '</h2><p>' + (query ? 'Try a different name.' : 'Use New drawing to start a document.') + '</p></div>';
+        content = '<div class="empty-library"><div class="empty-icon" aria-hidden="true">▤</div><h2>' + (query ? 'No matching drawings' : 'No drawings yet') + '</h2><p>' + (query ? 'Try a different name.' : 'Choose New → Drawing or Animation to start a document.') + '</p></div>';
       }
       if (!libraryCloud) content += '<div class="drawings-message"><p>Drawings on this device are stored in this browser.' + (configured ? ' Sign in to view your cloud drawings.' : '') + '</p>' + (configured ? '<button class="auth-btn" data-open-auth>Sign in</button>' : '') + '</div>';
       body.innerHTML = content;
@@ -854,7 +872,7 @@
       try {
         libraryRows = Object.keys(localStorage).filter(function (key) { return key.startsWith('openreactions.localDocument.'); }).map(function (key) {
           var entry = JSON.parse(localStorage.getItem(key));
-          return entry && !entry.deletedAt ? { href: '/draw/?local=' + encodeURIComponent(key.slice('openreactions.localDocument.'.length)), title: entry.title || 'Untitled drawing', updatedAt: entry.updatedAt, thumbnail: entry.thumbnail } : null;
+          return entry && !entry.deletedAt ? { href: (entry.doc?.kind === 'animation' ? '/animate/' : '/draw/') + '?kind=' + (entry.doc?.kind || 'drawing') + '&local=' + encodeURIComponent(key.slice('openreactions.localDocument.'.length)), title: entry.title || 'Untitled drawing', updatedAt: entry.updatedAt, thumbnail: entry.thumbnail, kind: entry.doc?.kind || 'drawing' } : null;
         }).filter(Boolean);
       } catch (e) { libraryRows = []; }
       if (!libraryRows.length && draft) libraryRows = [{ href: '/draw/', title: draft.title, updatedAt: draft.updatedAt, thumbnail: draft.thumbnail }];
@@ -872,13 +890,13 @@
       try {
         var rows = [], page;
         do {
-          var result = await client.from('drawings').select('id, title, thumbnail, updated_at').order('updated_at', { ascending: false }).order('id', { ascending: true }).range(rows.length, rows.length + 99);
+          var result = await client.from('drawings').select('id, title, thumbnail, updated_at, kind:data->>kind').order('updated_at', { ascending: false }).order('id', { ascending: true }).range(rows.length, rows.length + 99);
           if (version !== loadVersion) return;
           if (result.error) throw result.error;
           page = result.data || [];
           rows = rows.concat(page);
         } while (page.length === 100);
-        libraryRows = rows.map(function (r) { return { href: '/draw/?doc=' + encodeURIComponent(r.id), title: r.title || 'Untitled drawing', updatedAt: r.updated_at, thumbnail: r.thumbnail }; });
+        libraryRows = rows.map(function (r) { return { href: (r.kind === 'animation' ? '/animate/' : '/draw/') + '?kind=' + (r.kind || 'drawing') + '&doc=' + encodeURIComponent(r.id), title: r.title || 'Untitled drawing', updatedAt: r.updated_at, thumbnail: r.thumbnail, kind: r.kind || 'drawing' }; });
       } catch (e) {
         if (version !== loadVersion) return;
         libraryError = true;
@@ -900,11 +918,13 @@
       el('library-page').hidden = about;
       el('about-page').hidden = !about;
       el('nav-about').setAttribute('aria-current', about ? 'page' : 'false');
-      el('nav-drawings').setAttribute('aria-current', about ? 'false' : 'page');
+      el('nav-drawings').setAttribute('aria-current', !about && libraryKind === 'drawing' ? 'page' : 'false');
+      el('nav-animations').setAttribute('aria-current', !about && libraryKind === 'animation' ? 'page' : 'false');
       document.title = (about ? 'About & help' : 'Drawings') + ' — OpenReactions';
     }
     el('nav-about').addEventListener('click', function () { showPage(true); });
-    el('nav-drawings').addEventListener('click', function () { showPage(false); });
+    el('nav-drawings').addEventListener('click', function () { libraryKind='drawing'; showPage(false); renderLibrary(); });
+    el('nav-animations').addEventListener('click', function () { libraryKind='animation'; showPage(false); renderLibrary(); });
 
     // ---- navbar account control ------------------------------------------
 
