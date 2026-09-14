@@ -3,7 +3,7 @@ export function downloadBlob(blob,name){const url=URL.createObjectURL(blob),a=do
 export function frameAt(doc,seconds,speed=1){
   const duration=6/speed,hold=1/speed,section=duration+hold;
   const index=Math.min(doc.steps.length-1,Math.floor(seconds/section));
-  const step=doc.steps[index];return {before:index?doc.steps[index-1].after:doc.initial,after:step.after,flows:step.flows,progress:Math.min(1,(seconds-index*section)/duration),title:step.title||`Step ${index+1}`};
+  const step=doc.steps[index];return {before:step.startScene||(index?doc.steps[index-1].after:doc.initial),after:step.after,flows:step.flows,progress:Math.min(1,(seconds-index*section)/duration),title:step.title||`Step ${index+1}`};
 }
 export async function exportAnimation(doc,format,{speed=1,onProgress=()=>{},signal}={}){
   if(!doc.steps.length)throw new Error('Complete at least one step before exporting.');

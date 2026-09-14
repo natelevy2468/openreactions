@@ -8,7 +8,8 @@ import ElementPicker from './components/ElementPicker.jsx';
 import HistoryPanel from './components/HistoryPanel.jsx';
 import { renderMoleculePreview } from './rendering/MoleculePreview.js';
 import { straightArrowEndpoints, resizeStraightArrow } from './utils/arrowGeometry.js';
-import React, { useRef, useState, useCallback, useEffect, useMemo } from 'react';
+import {createPortal} from 'react-dom';
+import React, { useRef, useState, useCallback, useEffect, useMemo, useLayoutEffect, useImperativeHandle } from 'react';
 import logoFinal4 from '/logoFinal4.png';
 import gearIcon from '/gear.png';
 import { formatAtomText } from './utils/TextUtils.jsx';
@@ -86,7 +87,11 @@ import { smilesToGraph } from './chemistry/importStructure.js';
 
 const RING_PRESET_MODES = ['benzene', 'cyclohexane', 'cyclopentane', 'cyclobutane', 'cyclopropane', 'chair', 'newman'];
 
-const HexGridWithToolbar = () => {
+const ToolbarHost = ({target,children}) => target ? createPortal(children,target) : children;
+const HexGridWithToolbar = ({embeddedDocument,onEmbeddedChange,toolbarTarget,embeddedApiRef} = {}) => {
+  const embedded = !!onEmbeddedChange;
+  const [embeddedReady,setEmbeddedReady] = useState(false);
+  const embeddedChangeRef=useRef(onEmbeddedChange);embeddedChangeRef.current=onEmbeddedChange;
     const canvasRef = useRef(null);
     const isExportingRef = useRef(false);
     const curveControlDragRef = useRef(null);
@@ -3424,12 +3429,12 @@ const HexGridWithToolbar = () => {
     if (!ctx) return;
 
     // Set canvas size
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+    canvas.width = embedded ? canvas.getBoundingClientRect().width : window.innerWidth;
+    canvas.height = embedded ? canvas.getBoundingClientRect().height : window.innerHeight;
 
     // Clear canvas (in device space, before the zoom transform)
     ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = colors.canvasBackground;
+    ctx.fillStyle = embedded ? '#f4f4f5' : colors.canvasBackground;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     // Apply the view zoom. Everything below draws in (world + offset) space and is
@@ -4457,28 +4462,32 @@ const HexGridWithToolbar = () => {
     }
   }, [drawCanvas, vertices, segments, arrows, offset, isDarkMode]);
 
-  const animationSourceMode = new URLSearchParams(location.search).has('animation-source');
+  useEffect(() => {
+    if (!embedded) return;
+    const drawing = embeddedDocument;
+    const rect=canvasRef.current.getBoundingClientRect();
+    const vs=drawing.vertices||[];
+    const xs=vs.map(v=>v.x),ys=vs.map(v=>v.y);
+    const zoom=vs.length?Math.min(1,rect.width/(Math.max(...xs)-Math.min(...xs)+140),rect.height/(Math.max(...ys)-Math.min(...ys)+120)):1;
+    const view=vs.length?{x:rect.width/(2*zoom)-(Math.min(...xs)+Math.max(...xs))/2,y:rect.height/(2*zoom)-(Math.min(...ys)+Math.max(...ys))/2}:{x:0,y:0};
+    applyLoadedDoc({...drawing,offset:view,scale:zoom});
+    setEmbeddedReady(true);
+  }, []);
+  const embeddedPayloadRef=useRef(docPayload);embeddedPayloadRef.current=docPayload;
+  useImperativeHandle(embeddedApiRef,()=>({getDocument:()=>JSON.parse(JSON.stringify(embeddedPayloadRef.current))}),[]);
+  useLayoutEffect(() => {
+    if (embeddedReady) embeddedChangeRef.current?.(docPayload);
+  }, [embeddedReady,docPayload]);
+
   const docSync = useDocumentSync({
+    enabled: !embedded,
     documentKind: 'drawing',
     doc: docPayload,
     applyDoc: applyLoadedDoc,
-    userId: animationSourceMode ? null : auth.user?.id || null,
+    userId: auth.user?.id || null,
     authLoading: auth.loading,
     captureThumbnail,
   });
-
-  useEffect(() => {
-    if (!animationSourceMode) return;
-    const receive = async event => {
-      if (event.origin !== location.origin || event.source !== window.parent || event.data?.type !== 'animation-drawing-request') return;
-      const id = new URLSearchParams(location.search).get('local');
-      if (event.data.id !== id) return;
-      window.parent.postMessage({type:'animation-drawing-result', id,
-        ...(docSync.ready ? {drawing:snapshotDocument()} : {error:'The drawing is still loading. Try again.'})}, location.origin);
-    };
-    window.addEventListener('message', receive);
-    return () => window.removeEventListener('message', receive);
-  }, [animationSourceMode, docSync.ready]);
 
   const refreshDrawings = useCallback(async () => {
     if (!auth.user) {
@@ -4762,8 +4771,9 @@ const HexGridWithToolbar = () => {
   const canvasScreenTop = canvasRect?.top || 0;
 
   return (
-    <div style={{
-      position: 'fixed',
+    <div className={embedded?'embedded-drawing':undefined} style={{
+      position: embedded ? 'relative' : 'fixed',
+      height: embedded ? '100%' : undefined,
       inset: 0,
       background: colors.background,
       margin: 0,
@@ -4772,7 +4782,7 @@ const HexGridWithToolbar = () => {
       zIndex: 0
     }}>
             {/* Navigation Bar at the top */}
-      <div style={{
+      <div className={embedded?'embedded-hide':undefined} style={{
         position: 'fixed',
         top: 0,
         left: 0,
@@ -5131,7 +5141,7 @@ const HexGridWithToolbar = () => {
         }
       `}</style>
       {/* Toolbar */}
-      <div style={{
+      <ToolbarHost target={embedded?toolbarTarget:null}><div className={embedded?'embedded-drawing-toolbar':undefined} style={{
         width: 'min(240px, 22vw)',
         minWidth: '200px',
         maxWidth: '100vw',
@@ -5361,11 +5371,12 @@ const HexGridWithToolbar = () => {
         )}
       </div>
 
+      </ToolbarHost>
       {/* Canvas wrapper fills all except toolbar area */}
       <div style={{
         position: 'absolute',
-        top: '50px', // Account for tab bar
-        left: 'min(240px, 22vw)', // Start after the sidebar
+        top: embedded ? 0 : '50px', // Account for tab bar
+        left: embedded ? 0 : 'min(240px, 22vw)', // Start after the sidebar
         right: 0,
         bottom: 0,
         zIndex: 1,
@@ -5394,8 +5405,8 @@ const HexGridWithToolbar = () => {
             position: 'absolute',
             top: 0,
             left: 0,
-            width: '100vw',
-            height: '100vh',
+            width: embedded ? '100%' : '100vw',
+            height: embedded ? '100%' : '100vh',
             pointerEvents: 'auto',
             cursor: (isPasteMode || isPastePreviewMode) ? 'copy' : 
                    (draggingArrow !== null ? 'move' :
@@ -5850,7 +5861,7 @@ const HexGridWithToolbar = () => {
       />
 
       {/* Bottom Right Toolbar - Export */}
-      <div style={{
+      <div className={embedded?'embedded-hide':undefined} style={{
         position: 'fixed',
         bottom: '20px',
         right: '20px',

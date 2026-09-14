@@ -11,7 +11,7 @@ export function sceneToDrawing(scene,{electrons=true}={}){
     // Drawing payloads store electron dots; the mechanism model counts pairs.
     const lonePairs=electrons?2*lonePairCount(scene,a.id):0;
     if(a.element!=='C'||a.charge||lonePairs||!scene.bonds.some(b=>b.from===a.id||b.to===a.id))
-      vertexAtoms[`${a.x.toFixed(2)},${a.y.toFixed(2)}`]={symbol:a.element,implicitH:a.hydrogens||0,charge:a.charge||0,lonePairs,_fixedHydrogens:true};
+      vertexAtoms[`${a.x.toFixed(2)},${a.y.toFixed(2)}`]={symbol:a.element,implicitH:a.hydrogens||0,charge:a.charge||0,lonePairs,_fixedHydrogens:!electrons};
   });
   return {version:1,vertices,segments,vertexAtoms,arrows:[],newmanInstances:[],offset:{x:0,y:0},scale:1};
 }

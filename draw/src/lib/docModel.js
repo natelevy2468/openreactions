@@ -49,7 +49,7 @@ export const normalizeDoc = (raw) => {
  * database — a new drawing only becomes real once there's something in it.
  */
 export const isDocEmpty = (doc) =>
-  !doc || (doc.kind === 'animation' ? !doc.initial?.atoms?.length :
+  !doc || (doc.kind === 'animation' ? !doc.initial?.atoms?.length && !doc.steps?.some(s => s.drawing?.vertices?.length || s.drawing?.arrows?.length) :
   ((doc.vertices?.length || 0) === 0 &&
     (doc.segments?.length || 0) === 0 &&
     (doc.arrows?.length || 0) === 0 &&

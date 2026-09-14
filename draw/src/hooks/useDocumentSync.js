@@ -110,14 +110,14 @@ const draftIsAhead = (draft, row) => {
  * @param {boolean} params.authLoading   True until the session is known.
  * @param {() => string|null} params.captureThumbnail  Small PNG of the drawing.
  */
-export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThumbnail, emptyDocument = emptyDoc, defaultTitle = DEFAULT_TITLE, documentKind = null }) {
+export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThumbnail, emptyDocument = emptyDoc, defaultTitle = DEFAULT_TITLE, documentKind = null, enabled = true }) {
   const [docId, setDocId] = useState(null);
   const [title, setTitle] = useState(defaultTitle);
   // 'loading' | 'clean' | 'dirty' | 'saving' | 'saved' | 'local' | 'error'
-  const [status, setStatus] = useState('loading');
+  const [status, setStatus] = useState(enabled ? 'loading' : 'local');
   const [error, setError] = useState(null);
   const [lastSavedAt, setLastSavedAt] = useState(null);
-  const [ready, setReady] = useState(false);
+  const [ready, setReady] = useState(!enabled);
 
   // Refs mirror the state the async save path needs, so the debounced timer
   // always sends the freshest values without being recreated on every keystroke.
@@ -148,6 +148,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
 
   /** Writes the local mirror. Cheap enough to call on any change. */
   const mirrorLocally = useCallback((key) => {
+    if (!enabled) return true;
     const payload = { title: titleRef.current, doc: docRef.current };
     let durable = writeDraft(key ?? (docIdRef.current || LOCAL_DOC_KEY), payload);
     try {
@@ -173,6 +174,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
 
   /** The actual write. Serialized: a save in flight queues one re-run. */
   const performSave = useCallback(async () => {
+    if (!enabled) return;
     if (inFlightRef.current) {
       await new Promise((resolve) => saveWaitersRef.current.push(resolve));
       return performSave();
@@ -294,7 +296,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
   const bootstrappedForRef = useRef(undefined);
 
   useEffect(() => {
-    if (authLoading) return;
+    if (!enabled || authLoading) return;
     // Re-bootstrap when the signed-in identity changes (sign in, sign out, or a
     // different account), but not on unrelated re-renders.
     const identity = userId || 'anonymous';
@@ -469,7 +471,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
   // Autosave: mirror locally now, write to the server on a debounce.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    if (!ready) return undefined;
+    if (!enabled || !ready) return undefined;
     const fingerprint = contentFingerprint(doc);
     const unchanged = fingerprint === savedFingerprintRef.current && title === savedTitleRef.current;
     // Undo can restore the server-saved state while the local draft still holds
@@ -496,6 +498,7 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
   // Leaving the tab is the last chance to persist. The local mirror always makes
   // it (synchronous); the network write usually does.
   useEffect(() => {
+    if (!enabled) return;
     const flush = () => {
       if (!readyRef.current) return;
       mirrorLocally();

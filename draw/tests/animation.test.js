@@ -83,3 +83,19 @@ test('shared drawing renderer receives two dots for every chemical lone pair',as
     }
   }
 });
+
+test('editable later steps must retain the previous product chemistry',async()=>{
+  const {continuationError}=await import('../src/animation/stepDrawing.js');
+  const before=proposeStep(carbonylExample(),exampleFlows(0),['O3']).scene;
+  const moved=structuredClone(before);moved.atoms.forEach(a=>{a.x+=120;a.y-=80;});
+  assert.equal(continuationError(before,moved),null,'Repositioning must remain editable');
+  const wrongCharge=structuredClone(before);wrongCharge.atoms.find(a=>a.id==='O1').charge=0;
+  assert.match(continuationError(before,wrongCharge),/charges must match/);
+  const wrongBond=structuredClone(before);wrongBond.bonds.find(b=>b.id==='B1').order=2;
+  assert.match(continuationError(before,wrongBond),/bonds must match/);
+});
+test('drawn animation drafts are saved before their electron arrows are complete',()=>{
+  const doc={...emptyAnimation(),steps:[{id:'draft',drawing:{vertices:[{x:100,y:100}],segments:[],arrows:[]}}]};
+  assert.equal(isDocEmpty(doc),false);
+  assert.deepEqual(normalizeDoc(doc).steps,doc.steps);
+});
