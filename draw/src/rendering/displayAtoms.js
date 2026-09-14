@@ -9,7 +9,7 @@ export function displayAtoms(segments, vertexAtoms) {
     directions.set(a,(directions.get(a)||0)+b.x2-b.x1); directions.set(z,(directions.get(z)||0)+b.x1-b.x2);
   });
   return Object.fromEntries(Object.entries(vertexAtoms).map(([key,atom]) => {
-    if (!atom?.symbol || atom.implicitH) return [key,atom];
+    if (!atom?.symbol || atom.implicitH || atom._fixedHydrogens) return [key,atom];
     const implicitH = computeImplicitH(atom.symbol,atom.charge||0,orders.get(key)||0);
     return [key,implicitH>0?{...atom,implicitH,_flipHydrogens:(directions.get(key)||0)>.01}:atom];
   }));

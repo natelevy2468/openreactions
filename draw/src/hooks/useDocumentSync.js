@@ -472,9 +472,10 @@ export function useDocumentSync({ doc, applyDoc, userId, authLoading, captureThu
     if (!ready) return undefined;
     const fingerprint = contentFingerprint(doc);
     const unchanged = fingerprint === savedFingerprintRef.current && title === savedTitleRef.current;
-    if (unchanged) return undefined;
-
+    // Undo can restore the server-saved state while the local draft still holds
+    // an intervening edit. Always refresh recovery before skipping cloud work.
     mirrorLocally(draftKey);
+    if (unchanged) return undefined;
     if (isSupabaseConfigured && userId) setStatus((s) => (s === 'saving' ? s : 'dirty'));
     else setStatus(durableRef.current ? 'local' : 'storage-error');
 

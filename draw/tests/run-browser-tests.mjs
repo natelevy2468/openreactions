@@ -58,7 +58,7 @@ try {
   ws.addEventListener('message', e => { const m = JSON.parse(e.data); if (m.id) { const p = pending.get(m.id); pending.delete(m.id); m.error ? p.reject(m.error) : p.resolve(m.result); } if (m.method === 'Runtime.exceptionThrown') exceptions.push(m.params.exceptionDetails); });
   const call = (method, params = {}) => new Promise((resolve, reject) => { pending.set(++id, { resolve, reject }); ws.send(JSON.stringify({ id, method, params })); });
   const evaluate = async expression => { const result = await call('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true }); if (result.exceptionDetails) throw new Error(JSON.stringify(result.exceptionDetails)); return result.result.value; };
-  const until = async expression => { for (let i = 0; i < 100; i++) { const value = await evaluate(expression); if (value) return value; await new Promise(r => setTimeout(r, 50)); } throw new Error(`Timed out: ${expression}`); };
+  const until = async expression => { for (let i = 0; i < 100; i++) { const value = await evaluate(expression); if (value) return value; await new Promise(r => setTimeout(r, 50)); } throw new Error(`Timed out: ${expression}\n${await evaluate('document.body?.innerText')}\n${JSON.stringify(exceptions)}`); };
   await call('Runtime.enable'); await call('Page.enable');
   await call('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false });
   await call('Page.navigate', { url: base });

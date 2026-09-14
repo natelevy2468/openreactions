@@ -117,6 +117,26 @@ export const renderCharge = (ctx, chargePosition, offset, colors) => {
   }
 };
 
+/** Shared positions keep animation arrow hit targets aligned with drawn electron pairs. */
+export function getAtomElectronPositions(ctx, vertex, segments, vertexAtoms, atomData) {
+  const extents = getAtomLabelHalfExtents(ctx, atomData);
+  const positioning = calculateSmartPositioning(
+    vertex, segments, vertexAtoms, atomData.lonePairs || 0, atomData.charge || 0
+  );
+  // Keep each dot and charge outside the displayed label, including H₂.
+  const clearLabel = (position, padding) => {
+    if (!position || !extents) return;
+    const ux = Math.cos(position.angle), uy = Math.sin(position.angle);
+    const edge = Math.min(Math.abs(ux) > 1e-6 ? (extents.halfW + padding) / Math.abs(ux) : Infinity,
+      Math.abs(uy) > 1e-6 ? (extents.halfH + padding) / Math.abs(uy) : Infinity);
+    const radius = Math.max(edge, Math.hypot(position.x - vertex.x, position.y - vertex.y));
+    position.x = vertex.x + ux * radius; position.y = vertex.y + uy * radius;
+  };
+  positioning.lonePairPositions.forEach(p => clearLabel(p, 11));
+  clearLabel(positioning.chargePosition, 12);
+  return positioning;
+}
+
 // Cache for lone pair and charge positions to avoid recalculating every frame
 const positioningCache = new Map();
 
@@ -171,26 +191,7 @@ export const renderAllLonePairsAndCharges = (ctx, vertices, segments, vertexAtom
     let positioning = positioningCache.get(cacheKey);
     
     if (!positioning) {
-      // Calculate smart positioning only if not cached
-      positioning = calculateSmartPositioning(
-        vertex, 
-        segments, 
-        vertexAtoms, 
-        lonePairCount, 
-        charge
-      );
-      
-      // Keep each dot and charge outside the actual displayed label, including H₂.
-      const clearLabel = (position, padding) => {
-        if (!position || !extents) return;
-        const ux = Math.cos(position.angle), uy = Math.sin(position.angle);
-        const edge = Math.min(Math.abs(ux) > 1e-6 ? (extents.halfW + padding) / Math.abs(ux) : Infinity,
-          Math.abs(uy) > 1e-6 ? (extents.halfH + padding) / Math.abs(uy) : Infinity);
-        const radius = Math.max(edge, Math.hypot(position.x - vertex.x, position.y - vertex.y));
-        position.x = vertex.x + ux * radius; position.y = vertex.y + uy * radius;
-      };
-      positioning.lonePairPositions.forEach(p => clearLabel(p, 11));
-      clearLabel(positioning.chargePosition, 12);
+      positioning = getAtomElectronPositions(ctx, vertex, segments, vertexAtoms, atomData);
       // Store in cache
       positioningCache.set(cacheKey, positioning);
       

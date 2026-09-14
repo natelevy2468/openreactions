@@ -44,3 +44,42 @@ test('drawing import preserves proton counts and formal charges for animation',a
   assert.equal(oxygen.hydrogens,1);assert.equal(lonePairCount(scene,oxygen.id),3);
   assert.equal(components(scene).length,2);
 });
+
+test('step compilation derives every starting structure and rejects stale downstream products',async()=>{
+  const {compileSequence,prepareAnimation,newStep,completedAnimation}=await import('../src/animation/sequence.js');
+  const doc=prepareAnimation({...emptyAnimation(),initial:carbonylExample()});
+  doc.steps[0].flows=exampleFlows(0);doc.steps[0].reactingIds=['O3'];
+  doc.steps.push({...newStep(1),flows:exampleFlows(1)});
+  const compiled=compileSequence(doc.initial,doc.steps);
+  assert.deepEqual(compiled[1].before,compiled[0].after);
+  assert.equal(compiled[1].before.atoms.find(a=>a.id==='O1').charge,-1);
+  assert.equal(compiled[1].before.bonds.filter(b=>b.from==='C1'||b.to==='C1').length,4);
+  const saved=completedAnimation(doc);
+  saved.steps[0].flows.pop();
+  const invalid=compileSequence(saved.initial,saved.steps);
+  assert.equal(invalid[1].before,null);assert.equal(invalid[1].after,null);
+  assert.throws(()=>completedAnimation(saved),/Step 1/);
+});
+test('starting-structure editor roundtrip preserves atom and bond identities',async()=>{
+  const {sceneToDrawing}=await import('../src/animation/sceneDrawing.js');
+  const scene=carbonylExample();
+  const result=await drawingToScene(sceneToDrawing(scene),scene);
+  assert.deepEqual(new Set(result.atoms.map(a=>a.id)),new Set(scene.atoms.map(a=>a.id)));
+  assert.deepEqual(new Set(result.bonds.map(a=>a.id)),new Set(scene.bonds.map(a=>a.id)));
+  assert.equal(result.atoms.find(a=>a.id==='O3').hydrogens,1);
+});
+test('shared drawing renderer receives two dots for every chemical lone pair',async()=>{
+  const {sceneToDrawing}=await import('../src/animation/sceneDrawing.js');
+  const {calculateSmartPositioning}=await import('../src/utils/LonePairPositioning.js');
+  const initial=carbonylExample(),intermediate=proposeStep(initial,exampleFlows(0),['O3']).scene;
+  for(const scene of [initial,intermediate,proposeStep(intermediate,exampleFlows(1)).scene]){
+    const drawing=sceneToDrawing(scene);
+    for(const atom of scene.atoms){
+      const data=drawing.vertexAtoms[`${atom.x.toFixed(2)},${atom.y.toFixed(2)}`];
+      const electrons=2*lonePairCount(scene,atom.id);
+      assert.equal(data?.lonePairs||0,electrons);
+      if(data){const layout=calculateSmartPositioning(atom,drawing.segments,drawing.vertexAtoms,data.lonePairs,data.charge);
+        assert.equal(layout.lonePairPositions.reduce((sum,p)=>sum+p.dotCount,0),electrons);}
+    }
+  }
+});

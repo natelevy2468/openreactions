@@ -4457,14 +4457,28 @@ const HexGridWithToolbar = () => {
     }
   }, [drawCanvas, vertices, segments, arrows, offset, isDarkMode]);
 
+  const animationSourceMode = new URLSearchParams(location.search).has('animation-source');
   const docSync = useDocumentSync({
     documentKind: 'drawing',
     doc: docPayload,
     applyDoc: applyLoadedDoc,
-    userId: auth.user?.id || null,
+    userId: animationSourceMode ? null : auth.user?.id || null,
     authLoading: auth.loading,
     captureThumbnail,
   });
+
+  useEffect(() => {
+    if (!animationSourceMode) return;
+    const receive = async event => {
+      if (event.origin !== location.origin || event.source !== window.parent || event.data?.type !== 'animation-drawing-request') return;
+      const id = new URLSearchParams(location.search).get('local');
+      if (event.data.id !== id) return;
+      window.parent.postMessage({type:'animation-drawing-result', id,
+        ...(docSync.ready ? {drawing:snapshotDocument()} : {error:'The drawing is still loading. Try again.'})}, location.origin);
+    };
+    window.addEventListener('message', receive);
+    return () => window.removeEventListener('message', receive);
+  }, [animationSourceMode, docSync.ready]);
 
   const refreshDrawings = useCallback(async () => {
     if (!auth.user) {

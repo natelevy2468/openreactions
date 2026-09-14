@@ -6,7 +6,7 @@ export function frameAt(doc,seconds,speed=1){
   const step=doc.steps[index];return {before:index?doc.steps[index-1].after:doc.initial,after:step.after,flows:step.flows,progress:Math.min(1,(seconds-index*section)/duration),title:step.title||`Step ${index+1}`};
 }
 export async function exportAnimation(doc,format,{speed=1,onProgress=()=>{},signal}={}){
-  if(!doc.steps.length)throw new Error('Accept at least one step before exporting.');
+  if(!doc.steps.length)throw new Error('Complete at least one step before exporting.');
   const canvas=document.createElement('canvas');canvas.width=800;canvas.height=480;
   const ctx=canvas.getContext('2d');const seconds=doc.steps.length*7/speed;
   const paint=time=>{ctx.setTransform(.8,0,0,.8,0,0);const f=frameAt(doc,time,speed);renderMechanism(ctx,f.before,f.after,f.flows,f.progress,{tags:false,title:f.title});};
